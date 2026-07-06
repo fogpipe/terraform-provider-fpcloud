@@ -41,12 +41,16 @@ See [`examples/`](./examples) for per-resource usage.
 
 ## Development
 
+A Nix flake provides the toolchain (Go, just, goreleaser, tfplugindocs, opentofu, gnupg):
+
 ```bash
-make build      # compile
-make test       # unit tests
-make testacc    # acceptance tests (needs FPCLOUD_API_KEY against a live API)
-make docs       # regenerate docs/ from schema + examples
-make snapshot   # local GoReleaser dry-run (no publish)
+nix develop        # or: direnv allow
+
+just build         # compile
+just test          # unit tests
+just testacc       # acceptance tests (needs FPCLOUD_API_KEY against a live API)
+just docs          # regenerate docs/ from schema + examples
+just snapshot      # local GoReleaser dry-run (no publish)
 ```
 
 To run a local build against a config, use a `dev_overrides` block in
@@ -64,7 +68,7 @@ Register the **public** half of the key with the OpenTofu Registry (and the
 Terraform Registry, if publishing there). Then:
 
 ```bash
-make docs && git commit -am "docs" # if schema changed
+just docs && git commit -am "docs" # if schema changed
 git tag v0.1.0
 git push origin v0.1.0
 ```

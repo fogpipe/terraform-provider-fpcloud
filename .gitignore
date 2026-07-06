@@ -8,3 +8,5 @@ terraform-provider-fpcloud
 *.dylib
 *.so
 .env
+.direnv/
+result

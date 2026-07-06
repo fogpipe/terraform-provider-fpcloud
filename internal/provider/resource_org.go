@@ -1,0 +1,163 @@
+package provider
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/fogpipe/terraform-provider-fpcloud/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+)
+
+var (
+	_ resource.Resource                = &OrgResource{}
+	_ resource.ResourceWithImportState = &OrgResource{}
+)
+
+// OrgResource defines the resource implementation.
+type OrgResource struct {
+	client *client.Client
+}
+
+// OrgResourceModel describes the resource data model.
+type OrgResourceModel struct {
+	ID          types.String `tfsdk:"id"`
+	Name        types.String `tfsdk:"name"`
+	DisplayName types.String `tfsdk:"display_name"`
+	CreatedAt   types.String `tfsdk:"created_at"`
+}
+
+// NewOrgResource returns a new organization resource.
+func NewOrgResource() resource.Resource {
+	return &OrgResource{}
+}
+
+func (r *OrgResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_org"
+}
+
+func (r *OrgResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: "Manages a Fogpipe organization. The API supports create and read only: " +
+			"changing any field forces a new organization, and the org is not deleted on destroy " +
+			"(it is only removed from state).",
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Description: "Organization ID.",
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"name": schema.StringAttribute{
+				Description: "Organization name (slug). Changing it forces a new organization.",
+				Required:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"display_name": schema.StringAttribute{
+				Description: "Human-readable display name. Defaults to the name. Changing it forces a new organization.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"created_at": schema.StringAttribute{
+				Description: "Timestamp when the organization was created.",
+				Computed:    true,
+			},
+		},
+	}
+}
+
+func (r *OrgResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+	c, ok := req.ProviderData.(*client.Client)
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Unexpected Resource Configure Type",
+			fmt.Sprintf("Expected *client.Client, got: %T.", req.ProviderData),
+		)
+		return
+	}
+	r.client = c
+}
+
+func (r *OrgResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var plan OrgResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	org, err := r.client.CreateOrg(ctx, plan.Name.ValueString(), plan.DisplayName.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Error creating organization", err.Error())
+		return
+	}
+
+	r.apply(&plan, org)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+func (r *OrgResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state OrgResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	org, err := r.client.GetOrg(ctx, state.ID.ValueString())
+	if err != nil {
+		if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
+			resp.State.RemoveResource(ctx)
+			return
+		}
+		resp.Diagnostics.AddError("Error reading organization", err.Error())
+		return
+	}
+
+	r.apply(&state, org)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+func (r *OrgResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
+	// All configurable fields are RequiresReplace, so Terraform replaces rather
+	// than updates. This guard only fires if that invariant is ever broken.
+	resp.Diagnostics.AddError(
+		"Update not supported",
+		"The Fogpipe API does not support updating organizations. Delete and recreate instead.",
+	)
+}
+
+func (r *OrgResource) Delete(_ context.Context, _ resource.DeleteRequest, resp *resource.DeleteResponse) {
+	// The API exposes no org deletion endpoint. Removing the resource from state
+	// (the framework does this once Delete returns without error) leaves the
+	// organization in place — surface that explicitly so it is never silent.
+	resp.Diagnostics.AddWarning(
+		"Organization not deleted",
+		"The Fogpipe API does not support deleting organizations. The organization "+
+			"was removed from Terraform state but still exists on the platform. "+
+			"Remove it out-of-band if required.",
+	)
+}
+
+func (r *OrgResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+func (r *OrgResource) apply(m *OrgResourceModel, org *client.Organization) {
+	m.ID = types.StringValue(org.ID)
+	m.Name = types.StringValue(org.Name)
+	m.DisplayName = types.StringValue(org.DisplayName)
+	m.CreatedAt = types.StringValue(org.CreatedAt.String())
+}

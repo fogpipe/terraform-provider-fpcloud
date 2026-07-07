@@ -28,9 +28,27 @@ resource "fpcloud_org" "acme" {
 
 ### Optional
 
+- `adopt_existing` (Boolean) When true, if an organization with this name already exists, adopt it into Terraform state on create instead of failing with a 409 conflict. Defaults to false, so create never silently takes ownership of an organization it did not create.
 - `display_name` (String) Human-readable display name. Defaults to the name. Changing it forces a new organization.
 
 ### Read-Only
 
 - `created_at` (String) Timestamp when the organization was created.
 - `id` (String) Organization ID.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# Import by organization name (or by organization id / UUID).
+terraform import fpcloud_org.acme acme
+
+# Or declaratively (Terraform 1.5+ / OpenTofu):
+#   import {
+#     to = fpcloud_org.acme
+#     id = "acme"
+#   }
+```

@@ -48,6 +48,7 @@ resource "fpcloud_app" "web" {
 
 ### Optional
 
+- `adopt_existing` (Boolean) When true, if an app with this name already exists in the project, adopt it into Terraform state on create instead of failing with a 409 conflict. Defaults to false, so create never silently takes ownership of an app it did not create. Note: adoption records the existing app in state but does not push the configured image/env/secret — run a subsequent apply to reconcile them.
 - `cpu_limit` (String) CPU limit (e.g. 500m). Defaults to 500m.
 - `env` (Map of String) Environment variables (plaintext)
 - `health_check_interval` (Number) Health check interval in seconds. Defaults to 10.
@@ -85,3 +86,20 @@ Required:
 Read-Only:
 
 - `url` (String) URL for this traffic target (computed by Knative).
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# Import by "project/name" (project may be a name or id), or by app id / UUID.
+terraform import fpcloud_app.api web/api
+
+# Or declaratively (Terraform 1.5+ / OpenTofu):
+#   import {
+#     to = fpcloud_app.api
+#     id = "web/api"
+#   }
+```

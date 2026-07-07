@@ -1,0 +1,3 @@
+# Every change to fogpipe/terraform-provider-fpcloud requires review from an owner.
+# Direct-push / auto-merge bypass is limited to the @fogpipe/automation team (see ruleset).
+* @phelian @lorentzlasson @lillheaton

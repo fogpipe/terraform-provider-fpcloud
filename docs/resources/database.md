@@ -38,9 +38,14 @@ resource "fpcloud_database" "main" {
 ### Optional
 
 - `backup` (Attributes) Backup configuration for the database. (see [below for nested schema](#nestedatt--backup))
+- `cpu` (String) CPU request/limit (e.g. "500m", "1"). Mutable in place. The server applies its default when unset; the API does not echo this back, so out-of-band changes are not detected.
 - `engine` (String) The database engine (e.g. postgres).
-- `plan` (String) The database plan (e.g. starter, standard, premium).
-- `version` (String) The database engine version.
+- `instances` (Number) Number of Postgres instances (1 = single, >1 = HA replicas). Mutable in place. Not settable at create time via this attribute — it is reconciled immediately after create.
+- `memory` (String) Memory request/limit (e.g. "512Mi", "2Gi"). Mutable in place. Server default applies when unset; not echoed by the API, so out-of-band changes are not detected.
+- `plan` (String, Deprecated) Deprecated: use cpu/memory/storage/instances instead. Accepted but ignored by the API.
+- `pooler` (Boolean) Whether a PgBouncer connection pooler is provisioned (injects DATABASE_POOL_URL). Mutable in place.
+- `storage` (String) Persistent volume size (e.g. "10Gi"). Mutable in place but grow-only — the API rejects a shrink. Server default applies when unset; not echoed by the API, so out-of-band changes are not detected.
+- `version` (String) The database engine major version (e.g. "17"). Mutable: raising it triggers an in-place major-version upgrade (forward-only; the API rejects downgrades).
 
 ### Read-Only
 

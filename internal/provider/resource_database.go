@@ -45,6 +45,11 @@ type DatabaseResourceModel struct {
 	Engine           types.String         `tfsdk:"engine"`
 	Version          types.String         `tfsdk:"version"`
 	Plan             types.String         `tfsdk:"plan"`
+	CPU              types.String         `tfsdk:"cpu"`
+	Memory           types.String         `tfsdk:"memory"`
+	Storage          types.String         `tfsdk:"storage"`
+	Instances        types.Int64          `tfsdk:"instances"`
+	Pooler           types.Bool           `tfsdk:"pooler"`
 	Status           types.String         `tfsdk:"status"`
 	Host             types.String         `tfsdk:"host"`
 	Port             types.Int64          `tfsdk:"port"`
@@ -94,19 +99,44 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				},
 			},
 			"version": schema.StringAttribute{
-				Description: "The database engine version.",
-				Optional:    true,
-				Computed:    true,
-				Default:     stringdefault.StaticString("17"),
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
+				Description: "The database engine major version (e.g. \"17\"). Mutable: raising it triggers an " +
+					"in-place major-version upgrade (forward-only; the API rejects downgrades).",
+				Optional: true,
+				Computed: true,
+				Default:  stringdefault.StaticString("17"),
 			},
 			"plan": schema.StringAttribute{
-				Description: "The database plan (e.g. starter, standard, premium).",
+				Description:        "Deprecated: use cpu/memory/storage/instances instead. Accepted but ignored by the API.",
+				DeprecationMessage: "The `plan` attribute is ignored by the API; size the database with cpu, memory, storage, and instances instead.",
+				Optional:           true,
+				Computed:           true,
+				Default:            stringdefault.StaticString("starter"),
+			},
+			"cpu": schema.StringAttribute{
+				Description: "CPU request/limit (e.g. \"500m\", \"1\"). Mutable in place. The server applies its " +
+					"default when unset; the API does not echo this back, so out-of-band changes are not detected.",
+				Optional: true,
+			},
+			"memory": schema.StringAttribute{
+				Description: "Memory request/limit (e.g. \"512Mi\", \"2Gi\"). Mutable in place. Server default applies " +
+					"when unset; not echoed by the API, so out-of-band changes are not detected.",
+				Optional: true,
+			},
+			"storage": schema.StringAttribute{
+				Description: "Persistent volume size (e.g. \"10Gi\"). Mutable in place but grow-only — the API rejects " +
+					"a shrink. Server default applies when unset; not echoed by the API, so out-of-band changes are not detected.",
+				Optional: true,
+			},
+			"instances": schema.Int64Attribute{
+				Description: "Number of Postgres instances (1 = single, >1 = HA replicas). Mutable in place. " +
+					"Not settable at create time via this attribute — it is reconciled immediately after create.",
+				Optional: true,
+			},
+			"pooler": schema.BoolAttribute{
+				Description: "Whether a PgBouncer connection pooler is provisioned (injects DATABASE_POOL_URL). Mutable in place.",
 				Optional:    true,
 				Computed:    true,
-				Default:     stringdefault.StaticString("starter"),
+				Default:     booldefault.StaticBool(false),
 			},
 			"status": schema.StringAttribute{
 				Description: "The current status of the database.",
@@ -188,16 +218,33 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// TODO: expose cpu/memory/storage as TF attributes; for now the server
-	// applies its defaults. The legacy `plan` attribute is accepted but ignored.
+	// cpu/memory/storage/pooler are accepted by CreateDatabase; the server applies
+	// its defaults for any left unset. The legacy `plan` attribute is ignored.
 	db, err := r.client.CreateDatabase(ctx, plan.ProjectID.ValueString(), client.CreateDatabaseRequest{
 		Name:    plan.Name.ValueString(),
 		Engine:  plan.Engine.ValueString(),
 		Version: plan.Version.ValueString(),
+		CPU:     plan.CPU.ValueString(),
+		Memory:  plan.Memory.ValueString(),
+		Storage: plan.Storage.ValueString(),
+		Pooler:  plan.Pooler.ValueBool(),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating database", err.Error())
 		return
+	}
+
+	// instances has no create-time field on the API, so reconcile it in place
+	// right after create when the user asked for more than the default single
+	// instance.
+	if !plan.Instances.IsNull() && !plan.Instances.IsUnknown() && plan.Instances.ValueInt64() > 0 {
+		instances := plan.Instances.ValueInt64()
+		updated, uerr := r.client.UpdateDatabase(ctx, db.ID, client.UpdateDatabaseRequest{Instances: &instances})
+		if uerr != nil {
+			resp.Diagnostics.AddError("Error setting database instances after creation", uerr.Error())
+			return
+		}
+		db = updated
 	}
 
 	mapDatabaseToState(db, &plan)
@@ -253,15 +300,80 @@ func (r *DatabaseResource) Read(ctx context.Context, req resource.ReadRequest, r
 }
 
 func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	// The control-plane API now supports in-place reconcile (PATCH /databases/{id},
-	// client.UpdateDatabase) for cpu/memory/storage/instances/version/pooler. The TF
-	// schema does not yet expose those as mutable attributes — every current attribute
-	// is RequiresReplace — so there is nothing for Update to reconcile. Exposing the
-	// mutable resource attributes here is a follow-up (TASK-010).
-	resp.Diagnostics.AddError(
-		"Update not supported",
-		"In-place updates aren't wired into the Terraform provider yet (the API supports them via PATCH /databases/{id}). Change an immutable field to trigger replacement, or use `fpcloud db update`.",
-	)
+	var plan, state DatabaseResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Reconcile the mutable spec (cpu/memory/storage/version/instances/pooler) in
+	// place via PATCH /databases/{id}. Only changed fields are sent.
+	var updReq client.UpdateDatabaseRequest
+	changed := false
+	if !plan.CPU.Equal(state.CPU) {
+		updReq.CPU = plan.CPU.ValueString()
+		changed = true
+	}
+	if !plan.Memory.Equal(state.Memory) {
+		updReq.Memory = plan.Memory.ValueString()
+		changed = true
+	}
+	if !plan.Storage.Equal(state.Storage) {
+		updReq.Storage = plan.Storage.ValueString()
+		changed = true
+	}
+	if !plan.Version.Equal(state.Version) {
+		updReq.Version = plan.Version.ValueString()
+		changed = true
+	}
+	if !plan.Instances.Equal(state.Instances) && !plan.Instances.IsNull() {
+		instances := plan.Instances.ValueInt64()
+		updReq.Instances = &instances
+		changed = true
+	}
+	if !plan.Pooler.Equal(state.Pooler) {
+		pooler := plan.Pooler.ValueBool()
+		updReq.Pooler = &pooler
+		changed = true
+	}
+
+	if changed {
+		db, err := r.client.UpdateDatabase(ctx, state.ID.ValueString(), updReq)
+		if err != nil {
+			resp.Diagnostics.AddError("Error updating database", err.Error())
+			return
+		}
+		mapDatabaseToState(db, &plan)
+	} else {
+		// No spec change — carry the server-computed fields forward from prior
+		// state so they don't go unknown.
+		plan.ID = state.ID
+		plan.Status = state.Status
+		plan.Host = state.Host
+		plan.Port = state.Port
+		plan.Username = state.Username
+		plan.Password = state.Password
+		plan.ConnectionString = state.ConnectionString
+		plan.CreatedAt = state.CreatedAt
+	}
+
+	// Reconcile backup config toward the desired state (idempotent).
+	if plan.Backup != nil {
+		if err := r.client.UpdateBackupConfig(ctx, state.ID.ValueString(), client.BackupConfig{
+			Enabled:   plan.Backup.Enabled.ValueBool(),
+			Schedule:  plan.Backup.Schedule.ValueString(),
+			Retention: plan.Backup.Retention.ValueString(),
+		}); err != nil {
+			resp.Diagnostics.AddWarning("Error updating backup configuration", err.Error())
+		}
+	} else if state.Backup != nil {
+		if err := r.client.UpdateBackupConfig(ctx, state.ID.ValueString(), client.BackupConfig{Enabled: false}); err != nil {
+			resp.Diagnostics.AddWarning("Error disabling backup configuration", err.Error())
+		}
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *DatabaseResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -289,8 +401,12 @@ func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 	state.Engine = types.StringValue(db.Engine)
 	state.Version = types.StringValue(db.Version)
 	state.Plan = types.StringValue(db.Plan)
+	state.Pooler = types.BoolValue(db.Pooler)
 	state.Status = types.StringValue(db.Status)
 	state.CreatedAt = types.StringValue(db.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
+	// Note: cpu/memory/storage/instances are intentionally NOT mapped here — the
+	// API Database response does not echo them, so they are preserved from the
+	// plan/state (write-only from Terraform's point of view).
 
 	// Parse connection string to extract host/port/username/password.
 	connStr := db.ConnectionString

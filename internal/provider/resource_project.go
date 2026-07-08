@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/fogpipe/terraform-provider-fpcloud/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -25,13 +26,14 @@ type ProjectResource struct {
 
 // ProjectResourceModel describes the resource data model.
 type ProjectResourceModel struct {
-	ID        types.String `tfsdk:"id"`
-	Name      types.String `tfsdk:"name"`
-	Org       types.String `tfsdk:"org"`
-	Egress    types.String `tfsdk:"egress"`
-	Plan      types.String `tfsdk:"plan"`
-	CreatedAt types.String `tfsdk:"created_at"`
-	UpdatedAt types.String `tfsdk:"updated_at"`
+	ID            types.String `tfsdk:"id"`
+	Name          types.String `tfsdk:"name"`
+	Org           types.String `tfsdk:"org"`
+	Egress        types.String `tfsdk:"egress"`
+	Plan          types.String `tfsdk:"plan"`
+	AdoptExisting types.Bool   `tfsdk:"adopt_existing"`
+	CreatedAt     types.String `tfsdk:"created_at"`
+	UpdatedAt     types.String `tfsdk:"updated_at"`
 }
 
 // NewProjectResource returns a new project resource.
@@ -84,6 +86,13 @@ func (r *ProjectResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"adopt_existing": schema.BoolAttribute{
+				Description: "When true, if a project with this name already exists in the target " +
+					"organization, adopt it into Terraform state on create instead of failing with a 409 " +
+					"conflict. Defaults to false, so create never silently takes ownership of a project it " +
+					"did not create.",
+				Optional: true,
+			},
 			"created_at": schema.StringAttribute{
 				Description: "Timestamp when the project was created.",
 				Computed:    true,
@@ -132,12 +141,45 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 		project, err = r.client.CreateProject(ctx, apiReq)
 	}
 	if err != nil {
-		resp.Diagnostics.AddError("Error creating project", err.Error())
-		return
+		if isConflict(err) && plan.AdoptExisting.ValueBool() {
+			project, err = r.findProjectByName(ctx, plan.Org.ValueString(), plan.Name.ValueString())
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Error adopting existing project",
+					adoptErrorDetail("project", plan.Name.ValueString(), err),
+				)
+				return
+			}
+		} else {
+			resp.Diagnostics.AddError("Error creating project", err.Error())
+			return
+		}
 	}
 
 	r.apply(&plan, project)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// findProjectByName resolves a project by name, scoped to org when provided
+// (project names are unique per organization). An empty org uses the API key's
+// default organization via ListProjects.
+func (r *ProjectResource) findProjectByName(ctx context.Context, org, name string) (*client.Project, error) {
+	var projects []*client.Project
+	var err error
+	if org != "" {
+		projects, err = r.client.ListProjectsInOrg(ctx, org)
+	} else {
+		projects, err = r.client.ListProjects(ctx)
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range projects {
+		if p.Name == name {
+			return p, nil
+		}
+	}
+	return nil, fmt.Errorf("project %q is %w", name, errNotAccessible)
 }
 
 func (r *ProjectResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -211,8 +253,32 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 	}
 }
 
+// ImportState accepts a project id (UUID), a bare project name, or an
+// "org/name" pair. The id is tried first; on a miss the value is resolved as a
+// name (optionally org-scoped) via the list API.
 func (r *ProjectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	id := req.ID
+	if _, err := r.client.GetProject(ctx, id); err == nil {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id)...)
+		return
+	} else if !isNotFound(err) {
+		resp.Diagnostics.AddError("Error importing project", err.Error())
+		return
+	}
+
+	org, name := "", id
+	if parts := strings.SplitN(id, "/", 2); len(parts) == 2 {
+		org, name = parts[0], parts[1]
+	}
+	project, err := r.findProjectByName(ctx, org, name)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error importing project",
+			fmt.Sprintf("%q is not a known project id, name, or org/name: %s", id, err.Error()),
+		)
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), project.ID)...)
 }
 
 // apply copies API-returned fields onto the model. The org is write-only at

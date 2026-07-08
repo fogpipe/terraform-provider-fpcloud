@@ -30,6 +30,7 @@ resource "fpcloud_project" "production" {
 
 ### Optional
 
+- `adopt_existing` (Boolean) When true, if a project with this name already exists in the target organization, adopt it into Terraform state on create instead of failing with a 409 conflict. Defaults to false, so create never silently takes ownership of a project it did not create.
 - `egress` (String) Egress policy: "restricted" (default), "https", or "all".
 - `org` (String) Organization (ID or name) the project belongs to. Defaults to the API key's organization. Changing it forces a new project.
 - `plan` (String) Project plan: "starter", "standard", or "premium".
@@ -39,3 +40,21 @@ resource "fpcloud_project" "production" {
 - `created_at` (String) Timestamp when the project was created.
 - `id` (String) Project ID.
 - `updated_at` (String) Timestamp when the project was last updated.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# Import by "org/name", by bare name (default org), or by project id / UUID.
+terraform import fpcloud_project.web acme/web
+terraform import fpcloud_project.web web
+
+# Or declaratively (Terraform 1.5+ / OpenTofu):
+#   import {
+#     to = fpcloud_project.web
+#     id = "acme/web"
+#   }
+```

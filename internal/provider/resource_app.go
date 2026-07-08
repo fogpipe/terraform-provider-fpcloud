@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/fogpipe/terraform-provider-fpcloud/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -49,6 +50,7 @@ type AppResourceModel struct {
 	HealthCheckTimeout  types.Int64  `tfsdk:"health_check_timeout"`
 	HealthCheckInterval types.Int64  `tfsdk:"health_check_interval"`
 	HealthCheckRetries  types.Int64  `tfsdk:"health_check_retries"`
+	AdoptExisting       types.Bool   `tfsdk:"adopt_existing"`
 	Traffic             types.List   `tfsdk:"traffic"`
 	Status              types.String `tfsdk:"status"`
 	URL                 types.String `tfsdk:"url"`
@@ -199,6 +201,14 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Computed:    true,
 				Default:     int64default.StaticInt64(3),
 			},
+			"adopt_existing": schema.BoolAttribute{
+				Description: "When true, if an app with this name already exists in the project, adopt it " +
+					"into Terraform state on create instead of failing with a 409 conflict. Defaults to " +
+					"false, so create never silently takes ownership of an app it did not create. Note: " +
+					"adoption records the existing app in state but does not push the configured image/env/" +
+					"secret — run a subsequent apply to reconcile them.",
+				Optional: true,
+			},
 			"traffic": schema.ListNestedAttribute{
 				Description: "Traffic routing configuration. Each block specifies a revision and its traffic percentage. Use '@latest' to route to the latest revision.",
 				Optional:    true,
@@ -305,6 +315,24 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	app, err := r.client.CreateApp(ctx, plan.ProjectID.ValueString(), createReq)
 	if err != nil {
+		if isConflict(err) && plan.AdoptExisting.ValueBool() {
+			existing, ferr := r.findAppByName(ctx, plan.ProjectID.ValueString(), plan.Name.ValueString())
+			if ferr != nil {
+				resp.Diagnostics.AddError(
+					"Error adopting existing app",
+					adoptErrorDetail("app", plan.Name.ValueString(), ferr),
+				)
+				return
+			}
+			// Record the existing app in state as-is. Image/env/secret/scaling are
+			// not pushed here; a subsequent apply reconciles them against the config.
+			r.setModelFromApp(&plan, existing)
+			if targets, terr := r.client.GetTraffic(ctx, existing.ID); terr == nil {
+				r.setTrafficOnModel(ctx, &plan, targets, &resp.Diagnostics)
+			}
+			resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+			return
+		}
 		resp.Diagnostics.AddError("Error creating app", err.Error())
 		return
 	}
@@ -578,8 +606,73 @@ func (r *AppResource) Delete(ctx context.Context, req resource.DeleteRequest, re
 	}
 }
 
+// ImportState accepts an app id (UUID) or a "project/name" pair where project
+// is a project id or name. The id is tried first; on a miss the value is
+// resolved as project/name via the list API.
 func (r *AppResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	id := req.ID
+	if _, err := r.client.GetApp(ctx, id); err == nil {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id)...)
+		return
+	} else if !isNotFound(err) {
+		resp.Diagnostics.AddError("Error importing app", err.Error())
+		return
+	}
+
+	parts := strings.SplitN(id, "/", 2)
+	if len(parts) != 2 {
+		resp.Diagnostics.AddError(
+			"Error importing app",
+			fmt.Sprintf("%q is not a known app id; import by name requires a \"project/name\" identifier", id),
+		)
+		return
+	}
+	app, err := r.findAppByName(ctx, parts[0], parts[1])
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error importing app",
+			fmt.Sprintf("could not resolve app %q: %s", id, err.Error()),
+		)
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), app.ID)...)
+}
+
+// findAppByName resolves an app by name within a project. projectRef may be a
+// project id or a project name.
+func (r *AppResource) findAppByName(ctx context.Context, projectRef, name string) (*client.App, error) {
+	projectID := projectRef
+	if _, err := r.client.GetProject(ctx, projectRef); err != nil {
+		if !isNotFound(err) {
+			return nil, err
+		}
+		projects, lerr := r.client.ListProjects(ctx)
+		if lerr != nil {
+			return nil, lerr
+		}
+		found := false
+		for _, p := range projects {
+			if p.Name == projectRef {
+				projectID = p.ID
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("project %q is %w", projectRef, errNotAccessible)
+		}
+	}
+
+	apps, err := r.client.ListApps(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range apps {
+		if a.Name == name {
+			return a, nil
+		}
+	}
+	return nil, fmt.Errorf("app %q in project %q is %w", name, projectRef, errNotAccessible)
 }
 
 // trafficTargetAttrTypes returns the attribute types for the traffic target object.

@@ -25,10 +25,11 @@ type OrgResource struct {
 
 // OrgResourceModel describes the resource data model.
 type OrgResourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	Name        types.String `tfsdk:"name"`
-	DisplayName types.String `tfsdk:"display_name"`
-	CreatedAt   types.String `tfsdk:"created_at"`
+	ID            types.String `tfsdk:"id"`
+	Name          types.String `tfsdk:"name"`
+	DisplayName   types.String `tfsdk:"display_name"`
+	AdoptExisting types.Bool   `tfsdk:"adopt_existing"`
+	CreatedAt     types.String `tfsdk:"created_at"`
 }
 
 // NewOrgResource returns a new organization resource.
@@ -69,6 +70,12 @@ func (r *OrgResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"adopt_existing": schema.BoolAttribute{
+				Description: "When true, if an organization with this name already exists, adopt it into " +
+					"Terraform state on create instead of failing with a 409 conflict. Defaults to false, " +
+					"so create never silently takes ownership of an organization it did not create.",
+				Optional: true,
+			},
 			"created_at": schema.StringAttribute{
 				Description: "Timestamp when the organization was created.",
 				Computed:    true,
@@ -101,12 +108,37 @@ func (r *OrgResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	org, err := r.client.CreateOrg(ctx, plan.Name.ValueString(), plan.DisplayName.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Error creating organization", err.Error())
-		return
+		if isConflict(err) && plan.AdoptExisting.ValueBool() {
+			org, err = r.findOrgByName(ctx, plan.Name.ValueString())
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Error adopting existing organization",
+					adoptErrorDetail("organization", plan.Name.ValueString(), err),
+				)
+				return
+			}
+		} else {
+			resp.Diagnostics.AddError("Error creating organization", err.Error())
+			return
+		}
 	}
 
 	r.apply(&plan, org)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// findOrgByName resolves an organization by its name (slug) via the list API.
+func (r *OrgResource) findOrgByName(ctx context.Context, name string) (*client.Organization, error) {
+	orgs, err := r.client.ListOrgs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, o := range orgs {
+		if o.Name == name {
+			return o, nil
+		}
+	}
+	return nil, fmt.Errorf("organization %q is %w", name, errNotAccessible)
 }
 
 func (r *OrgResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -151,8 +183,26 @@ func (r *OrgResource) Delete(_ context.Context, _ resource.DeleteRequest, resp *
 	)
 }
 
+// ImportState accepts either an organization id (UUID) or an organization name.
+// The id is tried first; on a miss it is resolved as a name via the list API.
 func (r *OrgResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	id := req.ID
+	if _, err := r.client.GetOrg(ctx, id); err != nil {
+		if !isNotFound(err) {
+			resp.Diagnostics.AddError("Error importing organization", err.Error())
+			return
+		}
+		org, ferr := r.findOrgByName(ctx, id)
+		if ferr != nil {
+			resp.Diagnostics.AddError(
+				"Error importing organization",
+				fmt.Sprintf("%q is not a known organization id or name: %s", id, ferr.Error()),
+			)
+			return
+		}
+		id = org.ID
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id)...)
 }
 
 func (r *OrgResource) apply(m *OrgResourceModel, org *client.Organization) {

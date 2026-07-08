@@ -144,7 +144,10 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 		if isConflict(err) && plan.AdoptExisting.ValueBool() {
 			project, err = r.findProjectByName(ctx, plan.Org.ValueString(), plan.Name.ValueString())
 			if err != nil {
-				resp.Diagnostics.AddError("Error adopting existing project", err.Error())
+				resp.Diagnostics.AddError(
+					"Error adopting existing project",
+					adoptErrorDetail("project", plan.Name.ValueString(), err),
+				)
 				return
 			}
 		} else {
@@ -176,7 +179,7 @@ func (r *ProjectResource) findProjectByName(ctx context.Context, org, name strin
 			return p, nil
 		}
 	}
-	return nil, fmt.Errorf("no project named %q found", name)
+	return nil, fmt.Errorf("project %q is %w", name, errNotAccessible)
 }
 
 func (r *ProjectResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {

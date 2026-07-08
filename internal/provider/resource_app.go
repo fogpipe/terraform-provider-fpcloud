@@ -318,7 +318,10 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		if isConflict(err) && plan.AdoptExisting.ValueBool() {
 			existing, ferr := r.findAppByName(ctx, plan.ProjectID.ValueString(), plan.Name.ValueString())
 			if ferr != nil {
-				resp.Diagnostics.AddError("Error adopting existing app", ferr.Error())
+				resp.Diagnostics.AddError(
+					"Error adopting existing app",
+					adoptErrorDetail("app", plan.Name.ValueString(), ferr),
+				)
 				return
 			}
 			// Record the existing app in state as-is. Image/env/secret/scaling are
@@ -656,7 +659,7 @@ func (r *AppResource) findAppByName(ctx context.Context, projectRef, name string
 			}
 		}
 		if !found {
-			return nil, fmt.Errorf("no project named %q found", projectRef)
+			return nil, fmt.Errorf("project %q is %w", projectRef, errNotAccessible)
 		}
 	}
 
@@ -669,7 +672,7 @@ func (r *AppResource) findAppByName(ctx context.Context, projectRef, name string
 			return a, nil
 		}
 	}
-	return nil, fmt.Errorf("no app named %q found in project %q", name, projectRef)
+	return nil, fmt.Errorf("app %q in project %q is %w", name, projectRef, errNotAccessible)
 }
 
 // trafficTargetAttrTypes returns the attribute types for the traffic target object.

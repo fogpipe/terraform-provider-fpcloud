@@ -111,7 +111,10 @@ func (r *OrgResource) Create(ctx context.Context, req resource.CreateRequest, re
 		if isConflict(err) && plan.AdoptExisting.ValueBool() {
 			org, err = r.findOrgByName(ctx, plan.Name.ValueString())
 			if err != nil {
-				resp.Diagnostics.AddError("Error adopting existing organization", err.Error())
+				resp.Diagnostics.AddError(
+					"Error adopting existing organization",
+					adoptErrorDetail("organization", plan.Name.ValueString(), err),
+				)
 				return
 			}
 		} else {
@@ -135,7 +138,7 @@ func (r *OrgResource) findOrgByName(ctx context.Context, name string) (*client.O
 			return o, nil
 		}
 	}
-	return nil, fmt.Errorf("no organization named %q found", name)
+	return nil, fmt.Errorf("organization %q is %w", name, errNotAccessible)
 }
 
 func (r *OrgResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {

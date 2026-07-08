@@ -17,7 +17,9 @@ resource "fpcloud_database" "main" {
   project_id = fpcloud_project.production.id
   name       = "maindb"
   version    = "17"
-  plan       = "standard"
+  cpu        = "1"
+  memory     = "2Gi"
+  storage    = "20Gi"
 
   backup {
     enabled   = true
@@ -38,13 +40,12 @@ resource "fpcloud_database" "main" {
 ### Optional
 
 - `backup` (Attributes) Backup configuration for the database. (see [below for nested schema](#nestedatt--backup))
-- `cpu` (String) CPU request/limit (e.g. "500m", "1"). Mutable in place. The server applies its default when unset; the API does not echo this back, so out-of-band changes are not detected.
+- `cpu` (String) CPU request/limit (e.g. "500m", "1"). Mutable in place. Defaults to "250m". Not echoed by the API, so out-of-band changes are not detected.
 - `engine` (String) The database engine (e.g. postgres).
 - `instances` (Number) Number of Postgres instances (1 = single, >1 = HA replicas). Mutable in place. Not settable at create time via this attribute — it is reconciled immediately after create.
-- `memory` (String) Memory request/limit (e.g. "512Mi", "2Gi"). Mutable in place. Server default applies when unset; not echoed by the API, so out-of-band changes are not detected.
-- `plan` (String, Deprecated) Deprecated: use cpu/memory/storage/instances instead. Accepted but ignored by the API.
+- `memory` (String) Memory request/limit (e.g. "512Mi", "2Gi"). Mutable in place. Defaults to "512Mi". Not echoed by the API, so out-of-band changes are not detected.
 - `pooler` (Boolean) Whether a PgBouncer connection pooler is provisioned (injects DATABASE_POOL_URL). Mutable in place.
-- `storage` (String) Persistent volume size (e.g. "10Gi"). Mutable in place but grow-only — the API rejects a shrink. Server default applies when unset; not echoed by the API, so out-of-band changes are not detected.
+- `storage` (String) Persistent volume size (e.g. "10Gi"). Mutable in place but grow-only — the API rejects a shrink. Defaults to "10Gi". Not echoed by the API, so out-of-band changes are not detected.
 - `version` (String) The database engine major version (e.g. "17"). Mutable: raising it triggers an in-place major-version upgrade (forward-only; the API rejects downgrades).
 
 ### Read-Only
@@ -54,6 +55,7 @@ resource "fpcloud_database" "main" {
 - `host` (String) The database host address.
 - `id` (String) The unique identifier of the database.
 - `password` (String, Sensitive) The database password.
+- `plan` (String) Legacy size tier, derived by the server from cpu/memory (e.g. "starter", "custom"). Read-only — size the database with cpu/memory/storage/instances instead.
 - `port` (Number) The database port.
 - `status` (String) The current status of the database.
 - `username` (String) The database username.

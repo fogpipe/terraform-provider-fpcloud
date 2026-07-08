@@ -106,26 +106,39 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Default:  stringdefault.StaticString("17"),
 			},
 			"plan": schema.StringAttribute{
-				Description:        "Deprecated: use cpu/memory/storage/instances instead. Accepted but ignored by the API.",
-				DeprecationMessage: "The `plan` attribute is ignored by the API; size the database with cpu, memory, storage, and instances instead.",
-				Optional:           true,
-				Computed:           true,
-				Default:            stringdefault.StaticString("starter"),
+				Description: "Legacy size tier, derived by the server from cpu/memory (e.g. \"starter\", \"custom\"). " +
+					"Read-only — size the database with cpu/memory/storage/instances instead.",
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
+			// cpu/memory/storage are Optional+Computed with defaults matching the
+			// server's, because the update API requires all three on every PATCH
+			// (it caps-checks each) yet never echoes them back in the Database
+			// response. Defaulting them keeps them always-known so the provider can
+			// always send them; not being echoed means out-of-band changes aren't
+			// detected (they're effectively write-only from Terraform's side).
 			"cpu": schema.StringAttribute{
-				Description: "CPU request/limit (e.g. \"500m\", \"1\"). Mutable in place. The server applies its " +
-					"default when unset; the API does not echo this back, so out-of-band changes are not detected.",
+				Description: "CPU request/limit (e.g. \"500m\", \"1\"). Mutable in place. Defaults to \"250m\". " +
+					"Not echoed by the API, so out-of-band changes are not detected.",
 				Optional: true,
+				Computed: true,
+				Default:  stringdefault.StaticString("250m"),
 			},
 			"memory": schema.StringAttribute{
-				Description: "Memory request/limit (e.g. \"512Mi\", \"2Gi\"). Mutable in place. Server default applies " +
-					"when unset; not echoed by the API, so out-of-band changes are not detected.",
+				Description: "Memory request/limit (e.g. \"512Mi\", \"2Gi\"). Mutable in place. Defaults to \"512Mi\". " +
+					"Not echoed by the API, so out-of-band changes are not detected.",
 				Optional: true,
+				Computed: true,
+				Default:  stringdefault.StaticString("512Mi"),
 			},
 			"storage": schema.StringAttribute{
 				Description: "Persistent volume size (e.g. \"10Gi\"). Mutable in place but grow-only — the API rejects " +
-					"a shrink. Server default applies when unset; not echoed by the API, so out-of-band changes are not detected.",
+					"a shrink. Defaults to \"10Gi\". Not echoed by the API, so out-of-band changes are not detected.",
 				Optional: true,
+				Computed: true,
+				Default:  stringdefault.StaticString("10Gi"),
 			},
 			"instances": schema.Int64Attribute{
 				Description: "Number of Postgres instances (1 = single, >1 = HA replicas). Mutable in place. " +
@@ -236,10 +249,10 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 
 	// instances has no create-time field on the API, so reconcile it in place
 	// right after create when the user asked for more than the default single
-	// instance.
-	if !plan.Instances.IsNull() && !plan.Instances.IsUnknown() && plan.Instances.ValueInt64() > 0 {
-		instances := plan.Instances.ValueInt64()
-		updated, uerr := r.client.UpdateDatabase(ctx, db.ID, client.UpdateDatabaseRequest{Instances: &instances})
+	// instance. The update API requires cpu/memory/storage on every PATCH, so
+	// the full spec is sent (databaseUpdateReq), not just instances.
+	if !plan.Instances.IsNull() && !plan.Instances.IsUnknown() && plan.Instances.ValueInt64() > 1 {
+		updated, uerr := r.client.UpdateDatabase(ctx, db.ID, databaseUpdateReq(&plan))
 		if uerr != nil {
 			resp.Diagnostics.AddError("Error setting database instances after creation", uerr.Error())
 			return
@@ -307,56 +320,18 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Reconcile the mutable spec (cpu/memory/storage/version/instances/pooler) in
-	// place via PATCH /databases/{id}. Only changed fields are sent.
-	var updReq client.UpdateDatabaseRequest
-	changed := false
-	if !plan.CPU.Equal(state.CPU) {
-		updReq.CPU = plan.CPU.ValueString()
-		changed = true
+	// Reconcile the mutable spec via PATCH /databases/{id}. The API caps-checks
+	// cpu/memory/storage on every update (rejecting empty), so all three are
+	// always sent — they're always known here (Optional+Computed with defaults).
+	// version defaults to current server-side but is forward-only, so it is always
+	// sent (equal is allowed); pooler is always sent (it overlays the desired
+	// value); instances is sent only when set.
+	db, err := r.client.UpdateDatabase(ctx, state.ID.ValueString(), databaseUpdateReq(&plan))
+	if err != nil {
+		resp.Diagnostics.AddError("Error updating database", err.Error())
+		return
 	}
-	if !plan.Memory.Equal(state.Memory) {
-		updReq.Memory = plan.Memory.ValueString()
-		changed = true
-	}
-	if !plan.Storage.Equal(state.Storage) {
-		updReq.Storage = plan.Storage.ValueString()
-		changed = true
-	}
-	if !plan.Version.Equal(state.Version) {
-		updReq.Version = plan.Version.ValueString()
-		changed = true
-	}
-	if !plan.Instances.Equal(state.Instances) && !plan.Instances.IsNull() {
-		instances := plan.Instances.ValueInt64()
-		updReq.Instances = &instances
-		changed = true
-	}
-	if !plan.Pooler.Equal(state.Pooler) {
-		pooler := plan.Pooler.ValueBool()
-		updReq.Pooler = &pooler
-		changed = true
-	}
-
-	if changed {
-		db, err := r.client.UpdateDatabase(ctx, state.ID.ValueString(), updReq)
-		if err != nil {
-			resp.Diagnostics.AddError("Error updating database", err.Error())
-			return
-		}
-		mapDatabaseToState(db, &plan)
-	} else {
-		// No spec change — carry the server-computed fields forward from prior
-		// state so they don't go unknown.
-		plan.ID = state.ID
-		plan.Status = state.Status
-		plan.Host = state.Host
-		plan.Port = state.Port
-		plan.Username = state.Username
-		plan.Password = state.Password
-		plan.ConnectionString = state.ConnectionString
-		plan.CreatedAt = state.CreatedAt
-	}
+	mapDatabaseToState(db, &plan)
 
 	// Reconcile backup config toward the desired state (idempotent).
 	if plan.Backup != nil {
@@ -391,6 +366,27 @@ func (r *DatabaseResource) Delete(ctx context.Context, req resource.DeleteReques
 		}
 		resp.Diagnostics.AddError("Error deleting database", err.Error())
 	}
+}
+
+// databaseUpdateReq builds the full PATCH body from the planned model. The API
+// caps-checks cpu/memory/storage on every update (empty is rejected), so all
+// three are always included; they are always known because they are
+// Optional+Computed with defaults. version/pooler are always sent (forward-only
+// / overlay semantics); instances only when set.
+func databaseUpdateReq(plan *DatabaseResourceModel) client.UpdateDatabaseRequest {
+	pooler := plan.Pooler.ValueBool()
+	req := client.UpdateDatabaseRequest{
+		CPU:     plan.CPU.ValueString(),
+		Memory:  plan.Memory.ValueString(),
+		Storage: plan.Storage.ValueString(),
+		Version: plan.Version.ValueString(),
+		Pooler:  &pooler,
+	}
+	if !plan.Instances.IsNull() && !plan.Instances.IsUnknown() {
+		instances := plan.Instances.ValueInt64()
+		req.Instances = &instances
+	}
+	return req
 }
 
 // mapDatabaseToState maps an API Database response to the Terraform state model.

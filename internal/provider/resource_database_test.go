@@ -73,7 +73,8 @@ func TestAccDatabaseResourceWithOptions(t *testing.T) {
 						name       = "testdb"
 						engine     = "postgres"
 						version    = "17"
-						plan       = "standard"
+						cpu        = "1"
+						memory     = "2Gi"
 					}
 				`,
 			},

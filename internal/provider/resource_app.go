@@ -42,6 +42,7 @@ type AppResourceModel struct {
 	ServiceAccount      types.String `tfsdk:"service_account"`
 	Env                 types.Map    `tfsdk:"env"`
 	Secret              types.Map    `tfsdk:"secret"`
+	Replicas            types.Int64  `tfsdk:"replicas"`
 	MinScale            types.Int64  `tfsdk:"min_scale"`
 	MaxScale            types.Int64  `tfsdk:"max_scale"`
 	CPULimit            types.String `tfsdk:"cpu_limit"`
@@ -152,6 +153,12 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Sensitive:   true,
 				ElementType: types.StringType,
 				Description: "Secret environment variables (encrypted at rest)",
+			},
+			"replicas": schema.Int64Attribute{
+				Description: "Fixed replica count for dedicated-tier apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.",
+				Optional:    true,
+				Computed:    true,
+				Default:     int64default.StaticInt64(1),
 			},
 			"min_scale": schema.Int64Attribute{
 				Description: "Minimum number of instances. Defaults to 1.",
@@ -312,6 +319,10 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	if !plan.ServiceAccount.IsNull() && !plan.ServiceAccount.IsUnknown() {
 		createReq.ServiceAccount = plan.ServiceAccount.ValueString()
 	}
+	// Replicas is a dedicated-tier setting; leave it unset for serverless apps.
+	if plan.Tier.ValueString() == "dedicated" {
+		createReq.Replicas = int(plan.Replicas.ValueInt64())
+	}
 
 	app, err := r.client.CreateApp(ctx, plan.ProjectID.ValueString(), createReq)
 	if err != nil {
@@ -354,16 +365,23 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	// Apply scaling if non-default values were specified.
 	minScale := int32(plan.MinScale.ValueInt64())
 	maxScale := int32(plan.MaxScale.ValueInt64())
+	replicas := int32(plan.Replicas.ValueInt64())
 	cpuLimit := plan.CPULimit.ValueString()
 	memoryLimit := plan.MemoryLimit.ValueString()
+	dedicated := plan.Tier.ValueString() == "dedicated"
 
-	if minScale != 1 || maxScale != 10 || cpuLimit != "500m" || memoryLimit != "512Mi" {
-		scaled, err := r.client.ScaleApp(ctx, app.ID, client.ScaleRequest{
+	if minScale != 1 || maxScale != 10 || cpuLimit != "500m" || memoryLimit != "512Mi" || (dedicated && replicas != 1) {
+		scaleReq := client.ScaleRequest{
 			MinScale:    &minScale,
 			MaxScale:    &maxScale,
 			CPULimit:    cpuLimit,
 			MemoryLimit: memoryLimit,
-		})
+		}
+		// Replicas is a dedicated-tier setting; sending it on a serverless app is a 400.
+		if dedicated {
+			scaleReq.Replicas = &replicas
+		}
+		scaled, err := r.client.ScaleApp(ctx, app.ID, scaleReq)
 		if err != nil {
 			resp.Diagnostics.AddError("Error scaling app after creation", err.Error())
 			return
@@ -462,17 +480,24 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	// Update scaling if any scaling attributes changed.
 	if plan.MinScale.ValueInt64() != state.MinScale.ValueInt64() ||
 		plan.MaxScale.ValueInt64() != state.MaxScale.ValueInt64() ||
+		plan.Replicas.ValueInt64() != state.Replicas.ValueInt64() ||
 		plan.CPULimit.ValueString() != state.CPULimit.ValueString() ||
 		plan.MemoryLimit.ValueString() != state.MemoryLimit.ValueString() {
 
 		minScale := int32(plan.MinScale.ValueInt64())
 		maxScale := int32(plan.MaxScale.ValueInt64())
-		scaled, err := r.client.ScaleApp(ctx, appID, client.ScaleRequest{
+		replicas := int32(plan.Replicas.ValueInt64())
+		scaleReq := client.ScaleRequest{
 			MinScale:    &minScale,
 			MaxScale:    &maxScale,
 			CPULimit:    plan.CPULimit.ValueString(),
 			MemoryLimit: plan.MemoryLimit.ValueString(),
-		})
+		}
+		// Replicas is a dedicated-tier setting; sending it on a serverless app is a 400.
+		if plan.Tier.ValueString() == "dedicated" {
+			scaleReq.Replicas = &replicas
+		}
+		scaled, err := r.client.ScaleApp(ctx, appID, scaleReq)
 		if err != nil {
 			resp.Diagnostics.AddError("Error scaling app", err.Error())
 			return
@@ -717,6 +742,7 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App) 
 	model.Tier = types.StringValue(app.Tier)
 	model.Storage = types.StringValue(app.Storage)
 	model.StoragePath = types.StringValue(app.StoragePath)
+	model.Replicas = types.Int64Value(int64(app.Replicas))
 	model.MinScale = types.Int64Value(int64(app.MinScale))
 	model.MaxScale = types.Int64Value(int64(app.MaxScale))
 	model.CPULimit = types.StringValue(app.CPULimit)

@@ -30,6 +30,7 @@ resource "fpcloud_app" "web" {
     SESSION_SECRET = var.session_secret
   }
 
+  replicas     = 2 # fixed replica count (dedicated tier)
   min_scale    = 1
   max_scale    = 5
   cpu_limit    = "500m"
@@ -60,6 +61,7 @@ resource "fpcloud_app" "web" {
 - `memory_limit` (String) Memory limit (e.g. 512Mi). Defaults to 512Mi.
 - `min_scale` (Number) Minimum number of instances. Defaults to 1.
 - `port` (Number) Container port. Defaults to 8080.
+- `replicas` (Number) Fixed replica count for dedicated-tier apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.
 - `secret` (Map of String, Sensitive) Secret environment variables (encrypted at rest)
 - `service_account` (String) Service account email to attach as workload identity. The app will receive credentials to call the Fogpipe API as this service account.
 - `storage` (String) Persistent volume size (e.g. '50Gi'). Opt-in and dedicated-tier only. Grow-only — the volume can never shrink.

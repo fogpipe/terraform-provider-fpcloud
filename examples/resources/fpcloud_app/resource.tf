@@ -15,6 +15,7 @@ resource "fpcloud_app" "web" {
     SESSION_SECRET = var.session_secret
   }
 
+  replicas     = 2 # fixed replica count (dedicated tier)
   min_scale    = 1
   max_scale    = 5
   cpu_limit    = "500m"

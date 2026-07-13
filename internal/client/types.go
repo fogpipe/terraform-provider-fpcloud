@@ -135,6 +135,7 @@ type TrafficResponse struct {
 type ScaleRequest struct {
 	MinScale    *int32 `json:"min_scale,omitempty"`
 	MaxScale    *int32 `json:"max_scale,omitempty"`
+	Replicas    *int32 `json:"replicas,omitempty"`
 	CPULimit    string `json:"cpu_limit,omitempty"`
 	MemoryLimit string `json:"memory_limit,omitempty"`
 }

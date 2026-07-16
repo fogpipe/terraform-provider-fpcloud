@@ -1,0 +1,33 @@
+name: acceptance
+
+# Terraform acceptance tests (TF_ACC) run against a LIVE fpcloud API — they
+# create and destroy real projects, apps, and buckets. They are therefore NOT
+# run on every PR; trigger them manually via workflow_dispatch, or let the weekly
+# schedule catch "Provider produced inconsistent result after apply" regressions.
+#
+# Required repo config:
+#   secrets.FPCLOUD_API_KEY — an fpcloud API key (fp-...) for a throwaway org
+#   vars.FPCLOUD_API_URL    — API base URL (defaults to prod if unset)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run acceptance tests
+        env:
+          TF_ACC: "1"
+          FPCLOUD_API_KEY: ${{ secrets.FPCLOUD_API_KEY }}
+          FPCLOUD_API_URL: ${{ vars.FPCLOUD_API_URL }}
+        run: go test ./internal/provider/ -run TestAcc -v -timeout 30m

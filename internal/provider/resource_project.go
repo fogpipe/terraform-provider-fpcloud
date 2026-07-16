@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -28,9 +29,13 @@ type ProjectResource struct {
 type ProjectResourceModel struct {
 	ID            types.String `tfsdk:"id"`
 	Name          types.String `tfsdk:"name"`
+	DisplayName   types.String `tfsdk:"display_name"`
 	Org           types.String `tfsdk:"org"`
 	Egress        types.String `tfsdk:"egress"`
-	Plan          types.String `tfsdk:"plan"`
+	MaxCPU        types.String `tfsdk:"max_cpu"`
+	MaxMemory     types.String `tfsdk:"max_memory"`
+	MaxPods       types.Int64  `tfsdk:"max_pods"`
+	MaxStorage    types.String `tfsdk:"max_storage"`
 	AdoptExisting types.Bool   `tfsdk:"adopt_existing"`
 	CreatedAt     types.String `tfsdk:"created_at"`
 	UpdatedAt     types.String `tfsdk:"updated_at"`
@@ -63,6 +68,14 @@ func (r *ProjectResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
+			"display_name": schema.StringAttribute{
+				Description: "Human-readable display name (mutable cosmetic label). Defaults to the name.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"org": schema.StringAttribute{
 				Description: "Organization (ID or name) the project belongs to. Defaults to the API key's organization. Changing it forces a new project.",
 				Optional:    true,
@@ -78,10 +91,38 @@ func (r *ProjectResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"plan": schema.StringAttribute{
-				Description: "Project plan: \"starter\", \"standard\", or \"premium\".",
-				Optional:    true,
-				Computed:    true,
+			"max_cpu": schema.StringAttribute{
+				Description: "Operator-only CPU cap for the project's namespace ResourceQuota (e.g. \"4\"). " +
+					"Server-defaulted; only an operator or org owner may raise it.",
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"max_memory": schema.StringAttribute{
+				Description: "Operator-only memory cap for the project's namespace ResourceQuota (e.g. \"8Gi\"). " +
+					"Server-defaulted; only an operator or org owner may raise it.",
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"max_pods": schema.Int64Attribute{
+				Description: "Operator-only pod-count cap for the project's namespace ResourceQuota. " +
+					"Server-defaulted; only an operator or org owner may raise it.",
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
+			},
+			"max_storage": schema.StringAttribute{
+				Description: "Operator-only storage cap for the project's namespace ResourceQuota (e.g. \"100Gi\"). " +
+					"Server-defaulted; only an operator or org owner may raise it.",
+				Optional: true,
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -128,9 +169,9 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	apiReq := client.CreateProjectRequest{
-		Name:   plan.Name.ValueString(),
-		Egress: plan.Egress.ValueString(),
-		Plan:   plan.Plan.ValueString(),
+		Name:        plan.Name.ValueString(),
+		DisplayName: plan.DisplayName.ValueString(),
+		Egress:      plan.Egress.ValueString(),
 	}
 
 	var project *client.Project
@@ -156,8 +197,41 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 		}
 	}
 
+	// Resource caps are operator-only and not accepted at create — apply any the
+	// user explicitly set via a follow-up quota update.
+	if maxCPU, maxMemory, maxPods, maxStorage, any := plan.quotaCaps(); any {
+		updated, qerr := r.client.UpdateProjectQuota(ctx, project.ID, maxCPU, maxMemory, maxPods, maxStorage)
+		if qerr != nil {
+			resp.Diagnostics.AddError("Error setting project resource caps", qerr.Error())
+			return
+		}
+		project = updated
+	}
+
 	r.apply(&plan, project)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// quotaCaps returns the operator-only caps the user explicitly set (nil for any
+// left unset/computed), plus whether at least one is present.
+func (m *ProjectResourceModel) quotaCaps() (maxCPU, maxMemory *string, maxPods *int, maxStorage *string, any bool) {
+	if !m.MaxCPU.IsNull() && !m.MaxCPU.IsUnknown() {
+		v := m.MaxCPU.ValueString()
+		maxCPU, any = &v, true
+	}
+	if !m.MaxMemory.IsNull() && !m.MaxMemory.IsUnknown() {
+		v := m.MaxMemory.ValueString()
+		maxMemory, any = &v, true
+	}
+	if !m.MaxPods.IsNull() && !m.MaxPods.IsUnknown() {
+		v := int(m.MaxPods.ValueInt64())
+		maxPods, any = &v, true
+	}
+	if !m.MaxStorage.IsNull() && !m.MaxStorage.IsUnknown() {
+		v := m.MaxStorage.ValueString()
+		maxStorage, any = &v, true
+	}
+	return maxCPU, maxMemory, maxPods, maxStorage, any
 }
 
 // findProjectByName resolves a project by name, scoped to org when provided
@@ -214,7 +288,8 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	id := state.ID.ValueString()
 
-	// egress and plan are the only mutable fields; name and org force replacement.
+	// egress, display_name, and the operator-only caps are the mutable fields;
+	// name and org force replacement.
 	if plan.Egress.ValueString() != state.Egress.ValueString() {
 		project, err := r.client.UpdateProjectEgress(ctx, id, plan.Egress.ValueString())
 		if err != nil {
@@ -224,13 +299,27 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 		r.apply(&plan, project)
 	}
 
-	if plan.Plan.ValueString() != state.Plan.ValueString() {
-		project, err := r.client.UpdateProjectPlan(ctx, id, plan.Plan.ValueString())
+	if plan.DisplayName.ValueString() != state.DisplayName.ValueString() {
+		project, err := r.client.UpdateProjectDisplayName(ctx, id, plan.DisplayName.ValueString())
 		if err != nil {
-			resp.Diagnostics.AddError("Error updating project plan", err.Error())
+			resp.Diagnostics.AddError("Error updating project display name", err.Error())
 			return
 		}
 		r.apply(&plan, project)
+	}
+
+	if plan.MaxCPU.ValueString() != state.MaxCPU.ValueString() ||
+		plan.MaxMemory.ValueString() != state.MaxMemory.ValueString() ||
+		plan.MaxPods.ValueInt64() != state.MaxPods.ValueInt64() ||
+		plan.MaxStorage.ValueString() != state.MaxStorage.ValueString() {
+		if maxCPU, maxMemory, maxPods, maxStorage, any := plan.quotaCaps(); any {
+			project, err := r.client.UpdateProjectQuota(ctx, id, maxCPU, maxMemory, maxPods, maxStorage)
+			if err != nil {
+				resp.Diagnostics.AddError("Error updating project resource caps", err.Error())
+				return
+			}
+			r.apply(&plan, project)
+		}
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -286,8 +375,12 @@ func (r *ProjectResource) ImportState(ctx context.Context, req resource.ImportSt
 func (r *ProjectResource) apply(m *ProjectResourceModel, project *client.Project) {
 	m.ID = types.StringValue(project.ID)
 	m.Name = types.StringValue(project.Name)
+	m.DisplayName = types.StringValue(project.DisplayName)
 	m.Egress = types.StringValue(project.Egress)
-	m.Plan = types.StringValue(project.Plan)
+	m.MaxCPU = types.StringValue(project.MaxCPU)
+	m.MaxMemory = types.StringValue(project.MaxMemory)
+	m.MaxPods = types.Int64Value(int64(project.MaxPods))
+	m.MaxStorage = types.StringValue(project.MaxStorage)
 	m.CreatedAt = types.StringValue(project.CreatedAt.String())
 	m.UpdatedAt = types.StringValue(project.UpdatedAt.String())
 }

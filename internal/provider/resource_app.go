@@ -33,10 +33,13 @@ type AppResourceModel struct {
 	ID                  types.String `tfsdk:"id"`
 	ProjectID           types.String `tfsdk:"project_id"`
 	Name                types.String `tfsdk:"name"`
+	DisplayName         types.String `tfsdk:"display_name"`
 	Image               types.String `tfsdk:"image"`
+	Command             types.List   `tfsdk:"command"`
+	Args                types.List   `tfsdk:"args"`
 	Port                types.Int64  `tfsdk:"port"`
 	Ingress             types.String `tfsdk:"ingress"`
-	Tier                types.String `tfsdk:"tier"`
+	Mode                types.String `tfsdk:"mode"`
 	Storage             types.String `tfsdk:"storage"`
 	StoragePath         types.String `tfsdk:"storage_path"`
 	ServiceAccount      types.String `tfsdk:"service_account"`
@@ -94,15 +97,36 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "App name.",
-				Required:    true,
+				Description: "App name. Doubles as the frozen resource identity (namespace object names, " +
+					"registry path), so changing it forces a new app.",
+				Required: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"display_name": schema.StringAttribute{
+				Description: "Human-readable display name (mutable cosmetic label). Defaults to the name.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"image": schema.StringAttribute{
 				Description: "Container image to deploy.",
 				Required:    true,
+			},
+			"command": schema.ListAttribute{
+				Description: "Container entrypoint override (ENTRYPOINT). Write-only from Terraform's " +
+					"perspective — the API does not echo it back, so out-of-band changes are not detected.",
+				Optional:    true,
+				ElementType: types.StringType,
+			},
+			"args": schema.ListAttribute{
+				Description: "Container arguments (CMD/args). Write-only from Terraform's perspective — the " +
+					"API does not echo it back, so out-of-band changes are not detected.",
+				Optional:    true,
+				ElementType: types.StringType,
 			},
 			"port": schema.Int64Attribute{
 				Description: "Container port. Defaults to 8080.",
@@ -116,11 +140,11 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Default:     stringdefault.StaticString("internal"),
 				Description: "Ingress setting: 'all' for public access, 'internal' for project-only (default)",
 			},
-			"tier": schema.StringAttribute{
+			"mode": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Default:     stringdefault.StaticString("dedicated"),
-				Description: "Hosting tier: 'dedicated' (always-on Deployment, default) or 'serverless' (scale-to-zero Knative). Changing the tier replaces the app.",
+				Default:     stringdefault.StaticString("always-on"),
+				Description: "Hosting mode: 'always-on' (plain Deployment, default) or 'serverless' (scale-to-zero Knative). Changing the mode replaces the app.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -128,7 +152,7 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			"storage": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Persistent volume size (e.g. '50Gi'). Opt-in and dedicated-tier only. Grow-only — the volume can never shrink.",
+				Description: "Persistent volume size (e.g. '50Gi'). Opt-in and always-on mode only. Grow-only — the volume can never shrink.",
 			},
 			"storage_path": schema.StringAttribute{
 				Optional:    true,
@@ -155,7 +179,7 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Description: "Secret environment variables (encrypted at rest)",
 			},
 			"replicas": schema.Int64Attribute{
-				Description: "Fixed replica count for dedicated-tier apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.",
+				Description: "Fixed replica count for always-on apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.",
 				Optional:    true,
 				Computed:    true,
 				Default:     int64default.StaticInt64(1),
@@ -302,12 +326,21 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		}
 	}
 
+	command := stringListToSlice(ctx, plan.Command, &resp.Diagnostics)
+	args := stringListToSlice(ctx, plan.Args, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	createReq := client.CreateAppRequest{
 		Name:                plan.Name.ValueString(),
+		DisplayName:         plan.DisplayName.ValueString(),
 		Image:               plan.Image.ValueString(),
+		Command:             command,
+		Args:                args,
 		Port:                int(plan.Port.ValueInt64()),
 		Ingress:             plan.Ingress.ValueString(),
-		Tier:                plan.Tier.ValueString(),
+		Mode:                plan.Mode.ValueString(),
 		Storage:             plan.Storage.ValueString(),
 		StoragePath:         plan.StoragePath.ValueString(),
 		EnvVars:             envVars,
@@ -319,8 +352,8 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	if !plan.ServiceAccount.IsNull() && !plan.ServiceAccount.IsUnknown() {
 		createReq.ServiceAccount = plan.ServiceAccount.ValueString()
 	}
-	// Replicas is a dedicated-tier setting; leave it unset for serverless apps.
-	if plan.Tier.ValueString() == "dedicated" {
+	// Replicas is an always-on setting; leave it unset for serverless apps.
+	if plan.Mode.ValueString() != "serverless" {
 		createReq.Replicas = int(plan.Replicas.ValueInt64())
 	}
 
@@ -368,17 +401,17 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	replicas := int32(plan.Replicas.ValueInt64())
 	cpuLimit := plan.CPULimit.ValueString()
 	memoryLimit := plan.MemoryLimit.ValueString()
-	dedicated := plan.Tier.ValueString() == "dedicated"
+	alwaysOn := plan.Mode.ValueString() != "serverless"
 
-	if minScale != 1 || maxScale != 10 || cpuLimit != "500m" || memoryLimit != "512Mi" || (dedicated && replicas != 1) {
+	if minScale != 1 || maxScale != 10 || cpuLimit != "500m" || memoryLimit != "512Mi" || (alwaysOn && replicas != 1) {
 		scaleReq := client.ScaleRequest{
 			MinScale:    &minScale,
 			MaxScale:    &maxScale,
 			CPULimit:    cpuLimit,
 			MemoryLimit: memoryLimit,
 		}
-		// Replicas is a dedicated-tier setting; sending it on a serverless app is a 400.
-		if dedicated {
+		// Replicas is an always-on setting; sending it on a serverless app is a 400.
+		if alwaysOn {
 			scaleReq.Replicas = &replicas
 		}
 		scaled, err := r.client.ScaleApp(ctx, app.ID, scaleReq)
@@ -477,6 +510,33 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		app = deployed
 	}
 
+	// Update the cosmetic display name if it changed.
+	if plan.DisplayName.ValueString() != state.DisplayName.ValueString() {
+		renamed, err := r.client.UpdateAppDisplayName(ctx, appID, plan.DisplayName.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Error updating app display name", err.Error())
+			return
+		}
+		app = renamed
+	}
+
+	// Update the container command/args if either changed. A non-nil pointer
+	// (including an empty slice) replaces the value; an empty slice clears the
+	// override back to the image defaults.
+	if !plan.Command.Equal(state.Command) || !plan.Args.Equal(state.Args) {
+		command := stringListToSlice(ctx, plan.Command, &resp.Diagnostics)
+		args := stringListToSlice(ctx, plan.Args, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		updated, err := r.client.UpdateAppCommand(ctx, appID, &command, &args)
+		if err != nil {
+			resp.Diagnostics.AddError("Error updating app command", err.Error())
+			return
+		}
+		app = updated
+	}
+
 	// Update scaling if any scaling attributes changed.
 	if plan.MinScale.ValueInt64() != state.MinScale.ValueInt64() ||
 		plan.MaxScale.ValueInt64() != state.MaxScale.ValueInt64() ||
@@ -493,8 +553,8 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			CPULimit:    plan.CPULimit.ValueString(),
 			MemoryLimit: plan.MemoryLimit.ValueString(),
 		}
-		// Replicas is a dedicated-tier setting; sending it on a serverless app is a 400.
-		if plan.Tier.ValueString() == "dedicated" {
+		// Replicas is an always-on setting; sending it on a serverless app is a 400.
+		if plan.Mode.ValueString() != "serverless" {
 			scaleReq.Replicas = &replicas
 		}
 		scaled, err := r.client.ScaleApp(ctx, appID, scaleReq)
@@ -737,9 +797,10 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App) 
 	model.ID = types.StringValue(app.ID)
 	model.ProjectID = types.StringValue(app.ProjectID)
 	model.Name = types.StringValue(app.Name)
+	model.DisplayName = types.StringValue(app.DisplayName)
 	model.Image = types.StringValue(app.Image)
 	model.Ingress = types.StringValue(app.Ingress)
-	model.Tier = types.StringValue(app.Tier)
+	model.Mode = types.StringValue(app.Mode)
 	model.Storage = types.StringValue(app.Storage)
 	model.StoragePath = types.StringValue(app.StoragePath)
 	model.Replicas = types.Int64Value(int64(app.Replicas))
@@ -756,5 +817,17 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App) 
 	model.CreatedAt = types.StringValue(app.CreatedAt.String())
 	model.UpdatedAt = types.StringValue(app.UpdatedAt.String())
 	// Note: env and secret maps are preserved from the plan/state — not returned by API.
+	// Note: command and args are preserved from the plan/state — not returned by API.
 	// Note: service_account is preserved from the plan/state — the API returns service_account_id.
+}
+
+// stringListToSlice converts a Terraform string list to a Go slice. A null or
+// unknown list yields nil (the request field is then omitted).
+func stringListToSlice(ctx context.Context, l types.List, diags *diag.Diagnostics) []string {
+	if l.IsNull() || l.IsUnknown() {
+		return nil
+	}
+	var out []string
+	diags.Append(l.ElementsAs(ctx, &out, false)...)
+	return out
 }

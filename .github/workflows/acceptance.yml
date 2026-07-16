@@ -25,6 +25,15 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # Install the Terraform CLI ourselves and point the test framework at it via
+      # TF_ACC_TERRAFORM_PATH, so terraform-plugin-testing skips its own hc-install
+      # download+GPG-verify path (HashiCorp's embedded signing key has expired →
+      # "openpgp: key expired").
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+      - name: Pin Terraform path for the test framework
+        run: echo "TF_ACC_TERRAFORM_PATH=$(which terraform)" >> "$GITHUB_ENV"
       - name: Run acceptance tests
         env:
           TF_ACC: "1"

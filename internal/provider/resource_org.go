@@ -106,7 +106,8 @@ func (r *OrgResource) Create(ctx context.Context, req resource.CreateRequest, re
 		return
 	}
 
-	org, err := r.client.CreateOrg(ctx, plan.Name.ValueString(), plan.DisplayName.ValueString())
+	// short_id is server-derived from the name; the provider does not expose it.
+	org, err := r.client.CreateOrg(ctx, plan.Name.ValueString(), plan.DisplayName.ValueString(), "")
 	if err != nil {
 		if isConflict(err) && plan.AdoptExisting.ValueBool() {
 			org, err = r.findOrgByName(ctx, plan.Name.ValueString())

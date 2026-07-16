@@ -26,7 +26,7 @@ resource "fpcloud_project" "test" {
 					resource.TestCheckResourceAttrSet("fpcloud_project.test", "id"),
 					resource.TestCheckResourceAttr("fpcloud_project.test", "name", "tf-acc-test-project"),
 					resource.TestCheckResourceAttr("fpcloud_project.test", "egress", "restricted"),
-					resource.TestCheckResourceAttrSet("fpcloud_project.test", "plan"),
+					resource.TestCheckResourceAttrSet("fpcloud_project.test", "max_pods"),
 					resource.TestCheckResourceAttrSet("fpcloud_project.test", "created_at"),
 					resource.TestCheckResourceAttrSet("fpcloud_project.test", "updated_at"),
 				),

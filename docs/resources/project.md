@@ -14,10 +14,17 @@ Manages a Fogpipe project. A project maps 1:1 to a Kubernetes namespace.
 
 ```terraform
 resource "fpcloud_project" "production" {
-  name   = "my-production-app"
-  org    = "fogpipe"     # optional; defaults to the API key's organization
-  egress = "restricted"  # restricted (default) | https | all
-  plan   = "standard"    # starter | standard | premium
+  name         = "my-production-app"
+  display_name = "My Production App" # optional; mutable cosmetic label
+  org          = "fogpipe"           # optional; defaults to the API key's organization
+  egress       = "restricted"        # restricted (default) | https | all
+
+  # Operator-only resource caps (namespace ResourceQuota). Server-defaulted;
+  # only an operator or org owner may raise them.
+  max_cpu     = "4"
+  max_memory  = "8Gi"
+  max_pods    = 50
+  max_storage = "100Gi"
 }
 ```
 
@@ -31,9 +38,13 @@ resource "fpcloud_project" "production" {
 ### Optional
 
 - `adopt_existing` (Boolean) When true, if a project with this name already exists in the target organization, adopt it into Terraform state on create instead of failing with a 409 conflict. Defaults to false, so create never silently takes ownership of a project it did not create.
+- `display_name` (String) Human-readable display name (mutable cosmetic label). Defaults to the name.
 - `egress` (String) Egress policy: "restricted" (default), "https", or "all".
+- `max_cpu` (String) Operator-only CPU cap for the project's namespace ResourceQuota (e.g. "4"). Server-defaulted; only an operator or org owner may raise it.
+- `max_memory` (String) Operator-only memory cap for the project's namespace ResourceQuota (e.g. "8Gi"). Server-defaulted; only an operator or org owner may raise it.
+- `max_pods` (Number) Operator-only pod-count cap for the project's namespace ResourceQuota. Server-defaulted; only an operator or org owner may raise it.
+- `max_storage` (String) Operator-only storage cap for the project's namespace ResourceQuota (e.g. "100Gi"). Server-defaulted; only an operator or org owner may raise it.
 - `org` (String) Organization (ID or name) the project belongs to. Defaults to the API key's organization. Changing it forces a new project.
-- `plan` (String) Project plan: "starter", "standard", or "premium".
 
 ### Read-Only
 

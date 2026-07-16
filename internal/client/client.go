@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -104,6 +105,82 @@ func (c *Client) GetMe(ctx context.Context) (*MeResponse, error) {
 	return &resp, nil
 }
 
+// RegistryRepository is one image repository visible to a project, with the
+// <org_short_id>/<project>/ prefix stripped for display.
+type RegistryRepository struct {
+	Name string `json:"name"`
+}
+
+// RegistryTagList is the set of image tags for one repository.
+type RegistryTagList struct {
+	Repository string   `json:"repository"`
+	Tags       []string `json:"tags"`
+}
+
+// RegistryVulnerabilities is a CVE severity roll-up for one image, from zot's
+// search-extension Trivy scanner. Nil/absent when CVE scanning is not enabled.
+type RegistryVulnerabilities struct {
+	MaxSeverity string `json:"max_severity"`
+	Total       int    `json:"total"`
+	Critical    int    `json:"critical"`
+	High        int    `json:"high"`
+	Medium      int    `json:"medium"`
+	Low         int    `json:"low"`
+	Unknown     int    `json:"unknown"`
+}
+
+// RegistryImage is one tagged image with metadata from the zot search extension.
+// Size/Digest/PushedAt are zero when the search extension is unavailable.
+type RegistryImage struct {
+	Tag             string                   `json:"tag"`
+	Digest          string                   `json:"digest,omitempty"`
+	Size            int64                    `json:"size,omitempty"`
+	PushedAt        *time.Time               `json:"pushed_at,omitempty"`
+	Vulnerabilities *RegistryVulnerabilities `json:"vulnerabilities,omitempty"`
+}
+
+// RegistryImageList is the enriched set of images for one repository.
+type RegistryImageList struct {
+	Repository string          `json:"repository"`
+	Images     []RegistryImage `json:"images"`
+}
+
+// RegistryRetentionPolicy is an auto-delete rule for a project's registry repos.
+// An empty Repo is the project-wide default. KeepLast keeps the newest N tags;
+// MaxAgeDays deletes tags older than N days (newest KeepLast always protected).
+type RegistryRetentionPolicy struct {
+	ID         string    `json:"id"`
+	ProjectID  string    `json:"project_id"`
+	Repo       string    `json:"repo"`
+	KeepLast   int       `json:"keep_last"`
+	MaxAgeDays int       `json:"max_age_days"`
+	Enabled    bool      `json:"enabled"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// SetRetentionPolicyRequest upserts a retention policy for (project, repo).
+type SetRetentionPolicyRequest struct {
+	Repo       string `json:"repo"`
+	KeepLast   int    `json:"keep_last"`
+	MaxAgeDays int    `json:"max_age_days"`
+	Enabled    bool   `json:"enabled"`
+}
+
+// RetentionPreviewItem is one tag a retention policy would delete.
+type RetentionPreviewItem struct {
+	Repo     string     `json:"repo"`
+	Tag      string     `json:"tag"`
+	Digest   string     `json:"digest,omitempty"`
+	Reason   string     `json:"reason"`
+	PushedAt *time.Time `json:"pushed_at,omitempty"`
+}
+
+// RetentionPreview is the dry-run (or applied) set of retention deletions.
+type RetentionPreview struct {
+	Items []RetentionPreviewItem `json:"items"`
+}
+
 // RegistryCredentials is a project-scoped registry credential for a tenant's CI.
 type RegistryCredentials struct {
 	Server     string `json:"server"`
@@ -113,7 +190,7 @@ type RegistryCredentials struct {
 }
 
 // GetRegistryCredentials fetches the caller's project-scoped registry credential
-// (a Zot user limited to tenants/<project>/**). The caller authenticates with a
+// (a Zot user limited to <org_short_id>/<project>/**). The caller authenticates with a
 // service-account API key — e.g. one minted by OIDC federation.
 func (c *Client) GetRegistryCredentials(ctx context.Context) (*RegistryCredentials, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/registry/credentials", nil)
@@ -206,9 +283,10 @@ func (c *Client) UpdateProjectEgress(ctx context.Context, id, egress string) (*P
 	return &project, nil
 }
 
-// UpdateProjectPlan sets a project's plan tier (starter, standard, premium).
-func (c *Client) UpdateProjectPlan(ctx context.Context, id, plan string) (*Project, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/projects/"+id, UpdateProjectRequest{Plan: plan})
+// UpdateProjectQuota sets a project's operator-only resource caps; only the
+// non-nil caps are changed.
+func (c *Client) UpdateProjectQuota(ctx context.Context, id string, maxCPU, maxMemory *string, maxPods *int, maxStorage *string) (*Project, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/projects/"+id, UpdateProjectRequest{MaxCPU: maxCPU, MaxMemory: maxMemory, MaxPods: maxPods, MaxStorage: maxStorage})
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +298,7 @@ func (c *Client) UpdateProjectPlan(ctx context.Context, id, plan string) (*Proje
 }
 
 // ListAudit returns audit log entries, optionally filtered by query params
-// (resource_type, resource_id, actor, limit).
+// (resource_type, resource_id, actor, limit, offset).
 func (c *Client) ListAudit(ctx context.Context, query string) ([]*AuditEntry, error) {
 	path := "/api/v1/audit"
 	if query != "" {
@@ -244,6 +322,43 @@ func (c *Client) DeleteProject(ctx context.Context, id string) error {
 		return err
 	}
 	return c.do(httpReq, nil)
+}
+
+// MoveProjectResult is the response from re-homing a project to its org-prefixed
+// namespace: the updated project plus any per-app redeploy warnings.
+type MoveProjectResult struct {
+	Project  *Project `json:"project"`
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// MoveProject re-homes a project into its canonical org-prefixed namespace
+// (<org short id>-<name>). force proceeds past the stateful-resource guard;
+// database/PVC data is not migrated and must be handled separately.
+func (c *Client) MoveProject(ctx context.Context, id string, force bool) (*MoveProjectResult, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/projects/"+id+"/move", map[string]bool{"force": force})
+	if err != nil {
+		return nil, err
+	}
+	var res MoveProjectResult
+	if err := c.do(httpReq, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+// UpdateProjectDisplayName changes a project's mutable, cosmetic display name
+// (ADR-036). The frozen name — which anchors the k8s namespace and registry path —
+// is untouched, so this is a plain label change with no cluster impact.
+func (c *Client) UpdateProjectDisplayName(ctx context.Context, id, displayName string) (*Project, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/projects/"+id, UpdateProjectRequest{DisplayName: displayName})
+	if err != nil {
+		return nil, err
+	}
+	var proj Project
+	if err := c.do(httpReq, &proj); err != nil {
+		return nil, err
+	}
+	return &proj, nil
 }
 
 // CreateApp creates a new app in a project.
@@ -311,9 +426,11 @@ func (c *Client) ScaleApp(ctx context.Context, id string, req ScaleRequest) (*Ap
 	return &app, nil
 }
 
-// SwitchTier migrates an app between hosting tiers ("dedicated"/"serverless").
-func (c *Client) SwitchTier(ctx context.Context, id, tier string) (*App, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/tier", SwitchTierRequest{Tier: tier})
+// UpdateAppDisplayName changes an app's mutable, cosmetic display name (ADR-036).
+// The frozen name — which names the k8s resources and the URL — is untouched, so
+// this is a plain label change with no downtime or redeploy.
+func (c *Client) UpdateAppDisplayName(ctx context.Context, id, displayName string) (*App, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/apps/"+id, UpdateAppRequest{DisplayName: displayName})
 	if err != nil {
 		return nil, err
 	}
@@ -324,9 +441,53 @@ func (c *Client) SwitchTier(ctx context.Context, id, tier string) (*App, error) 
 	return &app, nil
 }
 
-// UpdateAppStorage grows an app's persistent volume (grow-only, dedicated tier).
+// UpdateAppURLSlug sets or clears an app's optional vanity host override (ADR-040).
+// An empty slug clears it, reverting the host to the derived label; a non-empty slug
+// makes the app reachable at <slug>.app.<platform_domain>. Always-on mode only.
+func (c *Client) UpdateAppURLSlug(ctx context.Context, id, slug string) (*App, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/apps/"+id, UpdateAppRequest{URLSlug: &slug})
+	if err != nil {
+		return nil, err
+	}
+	var app App
+	if err := c.do(httpReq, &app); err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
+// SwitchMode migrates an app between hosting modes ("always-on"/"serverless").
+func (c *Client) SwitchMode(ctx context.Context, id, mode string) (*App, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/mode", SwitchModeRequest{Mode: mode})
+	if err != nil {
+		return nil, err
+	}
+	var app App
+	if err := c.do(httpReq, &app); err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
+// UpdateAppStorage grows an app's persistent volume (grow-only, always-on mode).
 func (c *Client) UpdateAppStorage(ctx context.Context, id, storage string) (*App, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/storage", UpdateStorageRequest{Storage: storage})
+	if err != nil {
+		return nil, err
+	}
+	var app App
+	if err := c.do(httpReq, &app); err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
+// UpdateAppCommand changes an app's container entrypoint override (command) and
+// arguments (args). Each is optional: a nil pointer leaves the value untouched, a
+// non-nil pointer (including an empty slice) replaces it — an empty slice clears
+// the override back to the image defaults.
+func (c *Client) UpdateAppCommand(ctx context.Context, id string, command, args *[]string) (*App, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/command", UpdateCommandRequest{Command: command, Args: args})
 	if err != nil {
 		return nil, err
 	}
@@ -489,6 +650,208 @@ func (c *Client) DeleteDatabase(ctx context.Context, id string) error {
 	return c.do(httpReq, nil)
 }
 
+// CreateBucket provisions a managed object-storage bucket in a project (ADR-039).
+// The response carries the one-time secret access key.
+func (c *Client) CreateBucket(ctx context.Context, projectID string, req CreateBucketRequest) (*Bucket, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/projects/"+projectID+"/buckets", req)
+	if err != nil {
+		return nil, err
+	}
+	var b Bucket
+	if err := c.do(httpReq, &b); err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// ListBuckets lists all buckets in a project.
+func (c *Client) ListBuckets(ctx context.Context, projectID string) ([]*Bucket, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/projects/"+projectID+"/buckets", nil)
+	if err != nil {
+		return nil, err
+	}
+	var buckets []*Bucket
+	if err := c.do(httpReq, &buckets); err != nil {
+		return nil, err
+	}
+	return buckets, nil
+}
+
+// GetBucket retrieves a bucket by ID.
+func (c *Client) GetBucket(ctx context.Context, id string) (*Bucket, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/buckets/"+id, nil)
+	if err != nil {
+		return nil, err
+	}
+	var b Bucket
+	if err := c.do(httpReq, &b); err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// DeleteBucket deletes a bucket by ID. A non-empty bucket returns a 409 APIError.
+func (c *Client) DeleteBucket(ctx context.Context, id string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/buckets/"+id, nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
+// GetBucketCredentials returns a bucket's S3 connection details. The secret is
+// only present when a fresh key was minted.
+func (c *Client) GetBucketCredentials(ctx context.Context, id string) (*BucketCredentials, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/buckets/"+id+"/credentials", nil)
+	if err != nil {
+		return nil, err
+	}
+	var creds BucketCredentials
+	if err := c.do(httpReq, &creds); err != nil {
+		return nil, err
+	}
+	return &creds, nil
+}
+
+// SetBucketQuota updates a bucket's quotas (bytes / object count; 0 = unlimited).
+func (c *Client) SetBucketQuota(ctx context.Context, id string, maxSize, maxObjects int64) (*Bucket, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/buckets/"+id+"/quota", SetBucketQuotaRequest{QuotaMaxSize: maxSize, QuotaMaxObjects: maxObjects})
+	if err != nil {
+		return nil, err
+	}
+	var b Bucket
+	if err := c.do(httpReq, &b); err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// CreateBucketKey mints a scoped S3 access key for a bucket. The response carries
+// the one-time secret access key.
+func (c *Client) CreateBucketKey(ctx context.Context, bucketID string, req CreateBucketKeyRequest) (*BucketKey, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/buckets/"+bucketID+"/keys", req)
+	if err != nil {
+		return nil, err
+	}
+	var k BucketKey
+	if err := c.do(httpReq, &k); err != nil {
+		return nil, err
+	}
+	return &k, nil
+}
+
+// ListBucketKeys lists a bucket's scoped keys (never the secret).
+func (c *Client) ListBucketKeys(ctx context.Context, bucketID string) ([]*BucketKey, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/buckets/"+bucketID+"/keys", nil)
+	if err != nil {
+		return nil, err
+	}
+	var keys []*BucketKey
+	if err := c.do(httpReq, &keys); err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
+// DeleteBucketKey revokes a scoped access key.
+func (c *Client) DeleteBucketKey(ctx context.Context, bucketID, accessKeyID string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/buckets/"+bucketID+"/keys/"+accessKeyID, nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
+// UpdateBucketKeyPermissions changes a scoped key's read/write/owner grants.
+func (c *Client) UpdateBucketKeyPermissions(ctx context.Context, bucketID, accessKeyID string, req UpdateBucketKeyPermissionsRequest) (*BucketKey, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/buckets/"+bucketID+"/keys/"+accessKeyID, req)
+	if err != nil {
+		return nil, err
+	}
+	var k BucketKey
+	if err := c.do(httpReq, &k); err != nil {
+		return nil, err
+	}
+	return &k, nil
+}
+
+// ListBucketObjects lists a bucket's objects under prefix, grouping folders at
+// "/" (in-browser object browser, #268). An empty prefix lists the root.
+func (c *Client) ListBucketObjects(ctx context.Context, bucketID, prefix string) (*ObjectListing, error) {
+	path := "/api/v1/buckets/" + bucketID + "/objects?delimiter=" + url.QueryEscape("/")
+	if prefix != "" {
+		path += "&prefix=" + url.QueryEscape(prefix)
+	}
+	httpReq, err := c.newRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var listing ObjectListing
+	if err := c.do(httpReq, &listing); err != nil {
+		return nil, err
+	}
+	return &listing, nil
+}
+
+// PresignBucketObject mints a presigned S3 URL for a GET (download) or PUT
+// (upload) so the browser transfers bytes straight to the object store (#268).
+func (c *Client) PresignBucketObject(ctx context.Context, bucketID string, req PresignObjectRequest) (*PresignResponse, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/buckets/"+bucketID+"/objects/presign", req)
+	if err != nil {
+		return nil, err
+	}
+	var res PresignResponse
+	if err := c.do(httpReq, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+// DeleteBucketObject deletes a single object from a bucket (#268).
+func (c *Client) DeleteBucketObject(ctx context.Context, bucketID, key string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/buckets/"+bucketID+"/objects?key="+url.QueryEscape(key), nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
+// BindAppBucket binds a bucket to an app, injecting its S3_*/AWS_* credentials
+// into the app's pod (#264). readOnly requests a read-only scoped key.
+func (c *Client) BindAppBucket(ctx context.Context, appID, bucketID string, readOnly bool) (*AppBucketBinding, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/apps/"+appID+"/buckets", BindBucketRequest{BucketID: bucketID, ReadOnly: readOnly})
+	if err != nil {
+		return nil, err
+	}
+	var b AppBucketBinding
+	if err := c.do(httpReq, &b); err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// ListAppBuckets lists an app's bucket bindings (never the secret).
+func (c *Client) ListAppBuckets(ctx context.Context, appID string) ([]*AppBucketBinding, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/apps/"+appID+"/buckets", nil)
+	if err != nil {
+		return nil, err
+	}
+	var bindings []*AppBucketBinding
+	if err := c.do(httpReq, &bindings); err != nil {
+		return nil, err
+	}
+	return bindings, nil
+}
+
+// UnbindAppBucket removes an app ⇄ bucket binding, dropping the injected creds.
+func (c *Client) UnbindAppBucket(ctx context.Context, appID, bucketID string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/apps/"+appID+"/buckets/"+bucketID, nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
 // ListBackups lists all backups for a database.
 func (c *Client) ListBackups(ctx context.Context, dbID string) ([]DatabaseBackup, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/databases/"+dbID+"/backups", nil)
@@ -515,6 +878,16 @@ func (c *Client) CreateBackup(ctx context.Context, dbID string) (*DatabaseBackup
 	return &backup, nil
 }
 
+// DeleteBackup removes a single managed backup (its Backup CR + object-store
+// artifact). The API refuses to delete the backup anchoring the recovery window.
+func (c *Client) DeleteBackup(ctx context.Context, dbID, name string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/databases/"+dbID+"/backups/"+name, nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
 // GetBackupConfig retrieves the backup configuration for a database.
 func (c *Client) GetBackupConfig(ctx context.Context, dbID string) (*BackupConfig, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/databases/"+dbID+"/backup-config", nil)
@@ -535,6 +908,70 @@ func (c *Client) UpdateBackupConfig(ctx context.Context, dbID string, config Bac
 		return err
 	}
 	return c.do(httpReq, nil)
+}
+
+// GetBackupDestination retrieves a database's external (BYOB) backup destination.
+func (c *Client) GetBackupDestination(ctx context.Context, dbID string) (*BackupDestination, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/databases/"+dbID+"/backup-destination", nil)
+	if err != nil {
+		return nil, err
+	}
+	var dest BackupDestination
+	if err := c.do(httpReq, &dest); err != nil {
+		return nil, err
+	}
+	return &dest, nil
+}
+
+// SetBackupDestination configures (or replaces) a database's external backup
+// destination — the customer's own bucket, keyless.
+func (c *Client) SetBackupDestination(ctx context.Context, dbID string, dest BackupDestination) (*BackupDestination, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/databases/"+dbID+"/backup-destination", dest)
+	if err != nil {
+		return nil, err
+	}
+	var out BackupDestination
+	if err := c.do(httpReq, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeleteBackupDestination removes a database's external backup destination.
+func (c *Client) DeleteBackupDestination(ctx context.Context, dbID string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/databases/"+dbID+"/backup-destination", nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
+// RunBackupDestination starts an on-demand external backup (pg_dump → the
+// customer bucket). The backup runs asynchronously as a k8s Job.
+func (c *Client) RunBackupDestination(ctx context.Context, dbID string) (*BackupDestinationRun, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/databases/"+dbID+"/backup-destination/sync", nil)
+	if err != nil {
+		return nil, err
+	}
+	var run BackupDestinationRun
+	if err := c.do(httpReq, &run); err != nil {
+		return nil, err
+	}
+	return &run, nil
+}
+
+// RestoreBackupDestination restores a database from a dump in the customer bucket
+// (pg_restore). object names the dump; empty restores the latest.
+func (c *Client) RestoreBackupDestination(ctx context.Context, dbID, object string) (*BackupDestinationRun, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/databases/"+dbID+"/backup-destination/restore", map[string]string{"object": object})
+	if err != nil {
+		return nil, err
+	}
+	var run BackupDestinationRun
+	if err := c.do(httpReq, &run); err != nil {
+		return nil, err
+	}
+	return &run, nil
 }
 
 // RestoreDatabase restores a database from a backup.
@@ -574,6 +1011,20 @@ func (c *Client) ListDomains(ctx context.Context, appID string) ([]*Domain, erro
 		return nil, err
 	}
 	return domains, nil
+}
+
+// VerifyDomain re-checks TXT ownership + DNS pointing for a custom domain and
+// returns the full verification breakdown plus the records still needed.
+func (c *Client) VerifyDomain(ctx context.Context, appID string, domain string) (*DomainVerification, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/apps/"+appID+"/domains/"+domain+"/verify", nil)
+	if err != nil {
+		return nil, err
+	}
+	var v DomainVerification
+	if err := c.do(httpReq, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
 }
 
 // RemoveDomain removes a custom domain from an app.
@@ -690,9 +1141,14 @@ func (c *Client) GetDeployment(ctx context.Context, appID, deploymentID string) 
 // --- Organization methods ---
 
 // ListOrgs lists all organizations the authenticated user belongs to.
-// CreateOrg creates a new organization (the caller becomes its owner).
-func (c *Client) CreateOrg(ctx context.Context, name, displayName string) (*Organization, error) {
+// CreateOrg creates a new organization (the caller becomes its owner). shortID
+// optionally sets an explicit org id (the platform-org override); empty = an
+// opaque random id is assigned server-side.
+func (c *Client) CreateOrg(ctx context.Context, name, displayName, shortID string) (*Organization, error) {
 	body := map[string]string{"name": name, "display_name": displayName}
+	if shortID != "" {
+		body["short_id"] = shortID
+	}
 	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/orgs", body)
 	if err != nil {
 		return nil, err
@@ -719,6 +1175,20 @@ func (c *Client) ListOrgs(ctx context.Context) ([]*Organization, error) {
 // GetOrg retrieves an organization by ID.
 func (c *Client) GetOrg(ctx context.Context, id string) (*Organization, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/orgs/"+id, nil)
+	if err != nil {
+		return nil, err
+	}
+	var org Organization
+	if err := c.do(httpReq, &org); err != nil {
+		return nil, err
+	}
+	return &org, nil
+}
+
+// UpdateOrgFKE toggles an organization's FKE entitlement (kubectl/kubeconfig
+// access). Operator-only server-side: a tenant cannot enable it for their org.
+func (c *Client) UpdateOrgFKE(ctx context.Context, id string, enabled bool) (*Organization, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/orgs/"+id, UpdateOrgRequest{FKEEnabled: &enabled})
 	if err != nil {
 		return nil, err
 	}
@@ -935,6 +1405,76 @@ func (c *Client) ListIAMBindings(ctx context.Context, projectID string) ([]*IAMB
 // RemoveIAMBinding removes an IAM binding from a project.
 func (c *Client) RemoveIAMBinding(ctx context.Context, projectID, bindingID string) error {
 	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/projects/"+projectID+"/iam/"+bindingID, nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
+// ListOrgSecrets lists an org's Fogpipe Secrets Manager bundles (key names only).
+func (c *Client) ListOrgSecrets(ctx context.Context, orgID string) ([]*OrgSecret, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/orgs/"+orgID+"/secrets", nil)
+	if err != nil {
+		return nil, err
+	}
+	var secrets []*OrgSecret
+	if err := c.do(httpReq, &secrets); err != nil {
+		return nil, err
+	}
+	return secrets, nil
+}
+
+// GetOrgSecret retrieves a single bundle. When reveal is true, the decrypted
+// values are returned in Data (requires org write permission).
+func (c *Client) GetOrgSecret(ctx context.Context, orgID, name string, reveal bool) (*OrgSecret, error) {
+	path := "/api/v1/orgs/" + orgID + "/secrets/" + name
+	if reveal {
+		path += "?reveal=true"
+	}
+	httpReq, err := c.newRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var secret OrgSecret
+	if err := c.do(httpReq, &secret); err != nil {
+		return nil, err
+	}
+	return &secret, nil
+}
+
+// CreateOrgSecret creates a new bundle with the given key/value data, mirrored
+// into the given target project ids.
+func (c *Client) CreateOrgSecret(ctx context.Context, orgID, name string, data map[string]string, targets []string) (*OrgSecret, error) {
+	body := map[string]any{"name": name, "data": data, "targets": targets}
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/orgs/"+orgID+"/secrets", body)
+	if err != nil {
+		return nil, err
+	}
+	var secret OrgSecret
+	if err := c.do(httpReq, &secret); err != nil {
+		return nil, err
+	}
+	return &secret, nil
+}
+
+// UpdateOrgSecret replaces an existing bundle's data and target projects
+// (full-desired-state replace).
+func (c *Client) UpdateOrgSecret(ctx context.Context, orgID, name string, data map[string]string, targets []string) (*OrgSecret, error) {
+	body := map[string]any{"data": data, "targets": targets}
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/orgs/"+orgID+"/secrets/"+name, body)
+	if err != nil {
+		return nil, err
+	}
+	var secret OrgSecret
+	if err := c.do(httpReq, &secret); err != nil {
+		return nil, err
+	}
+	return &secret, nil
+}
+
+// DeleteOrgSecret removes a bundle.
+func (c *Client) DeleteOrgSecret(ctx context.Context, orgID, name string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/orgs/"+orgID+"/secrets/"+name, nil)
 	if err != nil {
 		return err
 	}

@@ -18,7 +18,8 @@ resource "fpcloud_app" "web" {
   name       = "web"
   image      = "ghcr.io/myorg/webapp:latest"
   port       = 3000
-  ingress    = "all" # "all" = public, "internal" = default
+  ingress    = "all"        # "all" = public, "internal" = default
+  mode       = "always-on"  # "always-on" (plain Deployment, default) | "serverless" (Knative)
 
   env = {
     APP_NAME = "My App"
@@ -30,7 +31,7 @@ resource "fpcloud_app" "web" {
     SESSION_SECRET = var.session_secret
   }
 
-  replicas     = 2 # fixed replica count (dedicated tier)
+  replicas     = 2 # fixed replica count (always-on mode)
   min_scale    = 1
   max_scale    = 5
   cpu_limit    = "500m"
@@ -44,13 +45,16 @@ resource "fpcloud_app" "web" {
 ### Required
 
 - `image` (String) Container image to deploy.
-- `name` (String) App name.
+- `name` (String) App name. Doubles as the frozen resource identity (namespace object names, registry path), so changing it forces a new app.
 - `project_id` (String) ID of the project this app belongs to.
 
 ### Optional
 
 - `adopt_existing` (Boolean) When true, if an app with this name already exists in the project, adopt it into Terraform state on create instead of failing with a 409 conflict. Defaults to false, so create never silently takes ownership of an app it did not create. Note: adoption records the existing app in state but does not push the configured image/env/secret — run a subsequent apply to reconcile them.
+- `args` (List of String) Container arguments (CMD/args). Write-only from Terraform's perspective — the API does not echo it back, so out-of-band changes are not detected.
+- `command` (List of String) Container entrypoint override (ENTRYPOINT). Write-only from Terraform's perspective — the API does not echo it back, so out-of-band changes are not detected.
 - `cpu_limit` (String) CPU limit (e.g. 500m). Defaults to 500m.
+- `display_name` (String) Human-readable display name (mutable cosmetic label). Defaults to the name.
 - `env` (Map of String) Environment variables (plaintext)
 - `health_check_interval` (Number) Health check interval in seconds. Defaults to 10.
 - `health_check_path` (String) HTTP path for health checks. Defaults to '/'. Set to a custom path (e.g. '/healthz') to enable startup probes.
@@ -60,13 +64,13 @@ resource "fpcloud_app" "web" {
 - `max_scale` (Number) Maximum number of instances. Defaults to 10.
 - `memory_limit` (String) Memory limit (e.g. 512Mi). Defaults to 512Mi.
 - `min_scale` (Number) Minimum number of instances. Defaults to 1.
+- `mode` (String) Hosting mode: 'always-on' (plain Deployment, default) or 'serverless' (scale-to-zero Knative). Changing the mode replaces the app.
 - `port` (Number) Container port. Defaults to 8080.
-- `replicas` (Number) Fixed replica count for dedicated-tier apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.
+- `replicas` (Number) Fixed replica count for always-on apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.
 - `secret` (Map of String, Sensitive) Secret environment variables (encrypted at rest)
 - `service_account` (String) Service account email to attach as workload identity. The app will receive credentials to call the Fogpipe API as this service account.
-- `storage` (String) Persistent volume size (e.g. '50Gi'). Opt-in and dedicated-tier only. Grow-only — the volume can never shrink.
+- `storage` (String) Persistent volume size (e.g. '50Gi'). Opt-in and always-on mode only. Grow-only — the volume can never shrink.
 - `storage_path` (String) Mount path for the persistent volume. Defaults to '/data' when storage is set. Immutable — changing it replaces the app.
-- `tier` (String) Hosting tier: 'dedicated' (always-on Deployment, default) or 'serverless' (scale-to-zero Knative). Changing the tier replaces the app.
 - `traffic` (Attributes List) Traffic routing configuration. Each block specifies a revision and its traffic percentage. Use '@latest' to route to the latest revision. (see [below for nested schema](#nestedatt--traffic))
 
 ### Read-Only

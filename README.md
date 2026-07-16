@@ -56,6 +56,32 @@ just snapshot      # local GoReleaser dry-run (no publish)
 To run a local build against a config, use a `dev_overrides` block in
 `~/.terraformrc` pointing `fogpipe/fpcloud` at your `$GOBIN`.
 
+## Acceptance tests
+
+The `TestAcc*` tests in `internal/provider/` are **acceptance tests**: they drive
+the real provider against a **live fpcloud API**, creating and destroying real
+projects, apps, and buckets. They exist to catch "Provider produced inconsistent
+result after apply" regressions (two have shipped: the app `tier`→`mode` rename
+and `fpcloud_bucket` quota defaults).
+
+They only run when `TF_ACC=1` is set — a plain `go test ./...` skips them, so
+unit CI stays offline-safe. **Warning: running them mutates a live API.** Point
+them at a throwaway org, never production.
+
+```bash
+TF_ACC=1 \
+  FPCLOUD_API_URL=https://api.cloud.fogpipe.com \
+  FPCLOUD_API_KEY=fp-... \
+  go test ./internal/provider -run TestAcc -v -timeout 30m
+# or, via the flake toolchain:
+just testacc
+```
+
+Each test randomizes resource names and asserts a `CheckDestroy` so a failed run
+does not leave resources behind. In CI they run only on manual dispatch (and a
+weekly schedule) via `.github/workflows/acceptance.yml`, which reads
+`secrets.FPCLOUD_API_KEY` and `vars.FPCLOUD_API_URL`.
+
 ## Releasing
 
 Releases are cut by GoReleaser in CI on a `v*` tag. The registry requires signed

@@ -12,10 +12,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 var (
@@ -34,9 +37,12 @@ type AppResourceModel struct {
 	ProjectID           types.String `tfsdk:"project_id"`
 	Name                types.String `tfsdk:"name"`
 	DisplayName         types.String `tfsdk:"display_name"`
+	URLSlug             types.String `tfsdk:"url_slug"`
 	Image               types.String `tfsdk:"image"`
 	Command             types.List   `tfsdk:"command"`
 	Args                types.List   `tfsdk:"args"`
+	VolumeMounts        types.List   `tfsdk:"volume_mounts"`
+	SecurityContext     types.Object `tfsdk:"security_context"`
 	Port                types.Int64  `tfsdk:"port"`
 	Ingress             types.String `tfsdk:"ingress"`
 	Mode                types.String `tfsdk:"mode"`
@@ -67,6 +73,23 @@ type TrafficTargetModel struct {
 	Revision types.String `tfsdk:"revision"`
 	Percent  types.Int64  `tfsdk:"percent"`
 	URL      types.String `tfsdk:"url"`
+}
+
+// VolumeMountModel describes a file/scratch volume mount in Terraform state.
+type VolumeMountModel struct {
+	Source    types.String `tfsdk:"source"`
+	Name      types.String `tfsdk:"name"`
+	MountPath types.String `tfsdk:"mount_path"`
+	SubPath   types.String `tfsdk:"sub_path"`
+}
+
+// SecurityContextModel describes the pod/container hardening block in state.
+type SecurityContextModel struct {
+	RunAsUser              types.Int64 `tfsdk:"run_as_user"`
+	RunAsGroup             types.Int64 `tfsdk:"run_as_group"`
+	FSGroup                types.Int64 `tfsdk:"fs_group"`
+	RunAsNonRoot           types.Bool  `tfsdk:"run_as_non_root"`
+	ReadOnlyRootFilesystem types.Bool  `tfsdk:"read_only_root_filesystem"`
 }
 
 // NewAppResource returns a new app resource.
@@ -112,6 +135,17 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"url_slug": schema.StringAttribute{
+				Description: "Optional vanity host override (ADR-040): sets the app's public host to " +
+					"'<url_slug>.app.<platform_domain>'. When empty, the host is derived from the app/" +
+					"project/org names. Globally unique, a DNS-1123 label, always-on mode only. Set to an " +
+					"empty string to clear it back to the derived host.",
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"image": schema.StringAttribute{
 				Description: "Container image to deploy.",
 				Required:    true,
@@ -127,6 +161,67 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					"API does not echo it back, so out-of-band changes are not detected.",
 				Optional:    true,
 				ElementType: types.StringType,
+			},
+			"volume_mounts": schema.ListNestedAttribute{
+				Description: "Mount a ConfigMap or Secret as read-only files, or an emptyDir as writable " +
+					"scratch, at a container path. Create-only — the API has no update path and does not " +
+					"echo these back, so any change forces the app to be replaced.",
+				Optional: true,
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.RequiresReplace(),
+				},
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"source": schema.StringAttribute{
+							Description: "Volume source: 'configmap', 'secret', or 'emptydir'.",
+							Required:    true,
+						},
+						"name": schema.StringAttribute{
+							Description: "ConfigMap or Secret name to mount (ignored for emptydir).",
+							Optional:    true,
+						},
+						"mount_path": schema.StringAttribute{
+							Description: "Container path to mount at.",
+							Required:    true,
+						},
+						"sub_path": schema.StringAttribute{
+							Description: "Mount a single key from the source instead of the whole directory.",
+							Optional:    true,
+						},
+					},
+				},
+			},
+			"security_context": schema.SingleNestedAttribute{
+				Description: "Opt-in pod/container hardening. When set, the container is locked to the " +
+					"PSS-restricted baseline (drop ALL capabilities, no privilege escalation, RuntimeDefault " +
+					"seccomp) plus the run-as identity below. Create-only — the API has no update path and " +
+					"does not echo it back, so any change forces the app to be replaced.",
+				Optional: true,
+				PlanModifiers: []planmodifier.Object{
+					objectplanmodifier.RequiresReplace(),
+				},
+				Attributes: map[string]schema.Attribute{
+					"run_as_user": schema.Int64Attribute{
+						Description: "UID to run the container process as.",
+						Optional:    true,
+					},
+					"run_as_group": schema.Int64Attribute{
+						Description: "GID to run the container process as.",
+						Optional:    true,
+					},
+					"fs_group": schema.Int64Attribute{
+						Description: "Supplemental group applied to mounted volumes.",
+						Optional:    true,
+					},
+					"run_as_non_root": schema.BoolAttribute{
+						Description: "Require the container to run as a non-root user.",
+						Optional:    true,
+					},
+					"read_only_root_filesystem": schema.BoolAttribute{
+						Description: "Mount the container root filesystem read-only.",
+						Optional:    true,
+					},
+				},
 			},
 			"port": schema.Int64Attribute{
 				Description: "Container port. Defaults to 8080.",
@@ -328,6 +423,8 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	command := stringListToSlice(ctx, plan.Command, &resp.Diagnostics)
 	args := stringListToSlice(ctx, plan.Args, &resp.Diagnostics)
+	volumeMounts := volumeMountsFromModel(ctx, plan.VolumeMounts, &resp.Diagnostics)
+	securityContext := securityContextFromModel(ctx, plan.SecurityContext, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -335,9 +432,12 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	createReq := client.CreateAppRequest{
 		Name:                plan.Name.ValueString(),
 		DisplayName:         plan.DisplayName.ValueString(),
+		URLSlug:             plan.URLSlug.ValueString(),
 		Image:               plan.Image.ValueString(),
 		Command:             command,
 		Args:                args,
+		VolumeMounts:        volumeMounts,
+		SecurityContext:     securityContext,
 		Port:                int(plan.Port.ValueInt64()),
 		Ingress:             plan.Ingress.ValueString(),
 		Mode:                plan.Mode.ValueString(),
@@ -518,6 +618,17 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			return
 		}
 		app = renamed
+	}
+
+	// Update the vanity host override if it changed. An empty string clears it
+	// back to the derived host (the API accepts a non-nil pointer to "").
+	if plan.URLSlug.ValueString() != state.URLSlug.ValueString() {
+		reslugged, err := r.client.UpdateAppURLSlug(ctx, appID, plan.URLSlug.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Error updating app URL slug", err.Error())
+			return
+		}
+		app = reslugged
 	}
 
 	// Update the container command/args if either changed. A non-nil pointer
@@ -798,6 +909,7 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App) 
 	model.ProjectID = types.StringValue(app.ProjectID)
 	model.Name = types.StringValue(app.Name)
 	model.DisplayName = types.StringValue(app.DisplayName)
+	model.URLSlug = types.StringValue(app.URLSlug)
 	model.Image = types.StringValue(app.Image)
 	model.Ingress = types.StringValue(app.Ingress)
 	model.Mode = types.StringValue(app.Mode)
@@ -818,7 +930,61 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App) 
 	model.UpdatedAt = types.StringValue(app.UpdatedAt.String())
 	// Note: env and secret maps are preserved from the plan/state — not returned by API.
 	// Note: command and args are preserved from the plan/state — not returned by API.
+	// Note: volume_mounts and security_context are preserved from the plan/state — not returned by API.
 	// Note: service_account is preserved from the plan/state — the API returns service_account_id.
+}
+
+// volumeMountsFromModel converts the Terraform volume_mounts list to client
+// VolumeMount values. A null or unknown list yields nil (the field is omitted).
+func volumeMountsFromModel(ctx context.Context, l types.List, diags *diag.Diagnostics) []client.VolumeMount {
+	if l.IsNull() || l.IsUnknown() {
+		return nil
+	}
+	var models []VolumeMountModel
+	diags.Append(l.ElementsAs(ctx, &models, false)...)
+	if diags.HasError() {
+		return nil
+	}
+	out := make([]client.VolumeMount, len(models))
+	for i, m := range models {
+		out[i] = client.VolumeMount{
+			Source:    m.Source.ValueString(),
+			Name:      m.Name.ValueString(),
+			MountPath: m.MountPath.ValueString(),
+			SubPath:   m.SubPath.ValueString(),
+		}
+	}
+	return out
+}
+
+// securityContextFromModel converts the Terraform security_context object to a
+// client SecurityContext. A null or unknown object yields nil (image default).
+func securityContextFromModel(ctx context.Context, o types.Object, diags *diag.Diagnostics) *client.SecurityContext {
+	if o.IsNull() || o.IsUnknown() {
+		return nil
+	}
+	var m SecurityContextModel
+	diags.Append(o.As(ctx, &m, basetypes.ObjectAsOptions{})...)
+	if diags.HasError() {
+		return nil
+	}
+	sc := &client.SecurityContext{
+		RunAsNonRoot:           m.RunAsNonRoot.ValueBool(),
+		ReadOnlyRootFilesystem: m.ReadOnlyRootFilesystem.ValueBool(),
+	}
+	if !m.RunAsUser.IsNull() && !m.RunAsUser.IsUnknown() {
+		v := m.RunAsUser.ValueInt64()
+		sc.RunAsUser = &v
+	}
+	if !m.RunAsGroup.IsNull() && !m.RunAsGroup.IsUnknown() {
+		v := m.RunAsGroup.ValueInt64()
+		sc.RunAsGroup = &v
+	}
+	if !m.FSGroup.IsNull() && !m.FSGroup.IsUnknown() {
+		v := m.FSGroup.ValueInt64()
+		sc.FSGroup = &v
+	}
+	return sc
 }
 
 // stringListToSlice converts a Terraform string list to a Go slice. A null or

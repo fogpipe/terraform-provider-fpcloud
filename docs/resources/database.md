@@ -41,6 +41,7 @@ resource "fpcloud_database" "main" {
 
 - `backup` (Attributes) Backup configuration for the database. (see [below for nested schema](#nestedatt--backup))
 - `cpu` (String) CPU request/limit (e.g. "500m", "1"). Mutable in place. Defaults to "250m". Not echoed by the API, so out-of-band changes are not detected.
+- `display_name` (String) Human-readable display name (mutable cosmetic label). Defaults to the name.
 - `engine` (String) The database engine (e.g. postgres).
 - `instances` (Number) Number of Postgres instances (1 = single, >1 = HA replicas). Mutable in place. Not settable at create time via this attribute — it is reconciled immediately after create.
 - `memory` (String) Memory request/limit (e.g. "512Mi", "2Gi"). Mutable in place. Defaults to "512Mi". Not echoed by the API, so out-of-band changes are not detected.

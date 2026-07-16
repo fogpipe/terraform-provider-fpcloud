@@ -68,10 +68,13 @@ resource "fpcloud_app" "web" {
 - `port` (Number) Container port. Defaults to 8080.
 - `replicas` (Number) Fixed replica count for always-on apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.
 - `secret` (Map of String, Sensitive) Secret environment variables (encrypted at rest)
+- `security_context` (Attributes) Opt-in pod/container hardening. When set, the container is locked to the PSS-restricted baseline (drop ALL capabilities, no privilege escalation, RuntimeDefault seccomp) plus the run-as identity below. Create-only — the API has no update path and does not echo it back, so any change forces the app to be replaced. (see [below for nested schema](#nestedatt--security_context))
 - `service_account` (String) Service account email to attach as workload identity. The app will receive credentials to call the Fogpipe API as this service account.
 - `storage` (String) Persistent volume size (e.g. '50Gi'). Opt-in and always-on mode only. Grow-only — the volume can never shrink.
 - `storage_path` (String) Mount path for the persistent volume. Defaults to '/data' when storage is set. Immutable — changing it replaces the app.
 - `traffic` (Attributes List) Traffic routing configuration. Each block specifies a revision and its traffic percentage. Use '@latest' to route to the latest revision. (see [below for nested schema](#nestedatt--traffic))
+- `url_slug` (String) Optional vanity host override (ADR-040): sets the app's public host to '<url_slug>.app.<platform_domain>'. When empty, the host is derived from the app/project/org names. Globally unique, a DNS-1123 label, always-on mode only. Set to an empty string to clear it back to the derived host.
+- `volume_mounts` (Attributes List) Mount a ConfigMap or Secret as read-only files, or an emptyDir as writable scratch, at a container path. Create-only — the API has no update path and does not echo these back, so any change forces the app to be replaced. (see [below for nested schema](#nestedatt--volume_mounts))
 
 ### Read-Only
 
@@ -80,6 +83,18 @@ resource "fpcloud_app" "web" {
 - `status` (String) Current status of the app.
 - `updated_at` (String) Timestamp when the app was last updated.
 - `url` (String) URL where the app is accessible.
+
+<a id="nestedatt--security_context"></a>
+### Nested Schema for `security_context`
+
+Optional:
+
+- `fs_group` (Number) Supplemental group applied to mounted volumes.
+- `read_only_root_filesystem` (Boolean) Mount the container root filesystem read-only.
+- `run_as_group` (Number) GID to run the container process as.
+- `run_as_non_root` (Boolean) Require the container to run as a non-root user.
+- `run_as_user` (Number) UID to run the container process as.
+
 
 <a id="nestedatt--traffic"></a>
 ### Nested Schema for `traffic`
@@ -92,6 +107,20 @@ Required:
 Read-Only:
 
 - `url` (String) URL for this traffic target (computed by Knative).
+
+
+<a id="nestedatt--volume_mounts"></a>
+### Nested Schema for `volume_mounts`
+
+Required:
+
+- `mount_path` (String) Container path to mount at.
+- `source` (String) Volume source: 'configmap', 'secret', or 'emptydir'.
+
+Optional:
+
+- `name` (String) ConfigMap or Secret name to mount (ignored for emptydir).
+- `sub_path` (String) Mount a single key from the source instead of the whole directory.
 
 ## Import
 

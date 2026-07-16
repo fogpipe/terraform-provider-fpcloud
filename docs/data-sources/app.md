@@ -30,3 +30,4 @@ Use this data source to read a Fogpipe application by ID.
 - `project_id` (String) The ID of the project this app belongs to.
 - `status` (String) The current status of the application.
 - `url` (String) The URL where the application is accessible.
+- `url_slug` (String) The vanity host override, if set (empty when the host is derived from the app/project/org names).

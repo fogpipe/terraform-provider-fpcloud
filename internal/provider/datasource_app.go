@@ -22,6 +22,7 @@ type AppDataSourceModel struct {
 	ID        types.String `tfsdk:"id"`
 	ProjectID types.String `tfsdk:"project_id"`
 	Name      types.String `tfsdk:"name"`
+	URLSlug   types.String `tfsdk:"url_slug"`
 	Image     types.String `tfsdk:"image"`
 	Port      types.Int64  `tfsdk:"port"`
 	Status    types.String `tfsdk:"status"`
@@ -54,6 +55,10 @@ func (d *AppDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, re
 			},
 			"name": schema.StringAttribute{
 				Description: "The application name.",
+				Computed:    true,
+			},
+			"url_slug": schema.StringAttribute{
+				Description: "The vanity host override, if set (empty when the host is derived from the app/project/org names).",
 				Computed:    true,
 			},
 			"image": schema.StringAttribute{
@@ -125,6 +130,7 @@ func (d *AppDataSource) Read(ctx context.Context, req datasource.ReadRequest, re
 	data.ID = types.StringValue(app.ID)
 	data.ProjectID = types.StringValue(app.ProjectID)
 	data.Name = types.StringValue(app.Name)
+	data.URLSlug = types.StringValue(app.URLSlug)
 	data.Image = types.StringValue(app.Image)
 	data.Port = types.Int64Value(0) // Port is not exposed in the API response; default to 0.
 	data.Status = types.StringValue(app.Status)

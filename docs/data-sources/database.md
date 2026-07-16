@@ -23,6 +23,7 @@ Use this data source to read a Fogpipe managed database by ID.
 
 - `connection_string` (String, Sensitive) The full connection string for the database.
 - `created_at` (String) The creation timestamp of the database.
+- `display_name` (String) The human-readable display name.
 - `engine` (String) The database engine (e.g. postgres).
 - `host` (String) The database host address.
 - `name` (String) The database name.

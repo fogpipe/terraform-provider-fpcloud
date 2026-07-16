@@ -22,6 +22,7 @@ type DatabaseDataSourceModel struct {
 	ID               types.String `tfsdk:"id"`
 	ProjectID        types.String `tfsdk:"project_id"`
 	Name             types.String `tfsdk:"name"`
+	DisplayName      types.String `tfsdk:"display_name"`
 	Engine           types.String `tfsdk:"engine"`
 	Version          types.String `tfsdk:"version"`
 	Plan             types.String `tfsdk:"plan"`
@@ -56,6 +57,10 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 			},
 			"name": schema.StringAttribute{
 				Description: "The database name.",
+				Computed:    true,
+			},
+			"display_name": schema.StringAttribute{
+				Description: "The human-readable display name.",
 				Computed:    true,
 			},
 			"engine": schema.StringAttribute{
@@ -136,6 +141,7 @@ func (d *DatabaseDataSource) Read(ctx context.Context, req datasource.ReadReques
 	data.ID = types.StringValue(db.ID)
 	data.ProjectID = types.StringValue(db.ProjectID)
 	data.Name = types.StringValue(db.Name)
+	data.DisplayName = types.StringValue(db.DisplayName)
 	data.Engine = types.StringValue(db.Engine)
 	data.Version = types.StringValue(db.Version)
 	data.Plan = types.StringValue(db.Plan)

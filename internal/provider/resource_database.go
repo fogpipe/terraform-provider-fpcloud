@@ -42,6 +42,7 @@ type DatabaseResourceModel struct {
 	ID               types.String         `tfsdk:"id"`
 	ProjectID        types.String         `tfsdk:"project_id"`
 	Name             types.String         `tfsdk:"name"`
+	DisplayName      types.String         `tfsdk:"display_name"`
 	Engine           types.String         `tfsdk:"engine"`
 	Version          types.String         `tfsdk:"version"`
 	Plan             types.String         `tfsdk:"plan"`
@@ -87,6 +88,14 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"display_name": schema.StringAttribute{
+				Description: "Human-readable display name (mutable cosmetic label). Defaults to the name.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"engine": schema.StringAttribute{
@@ -234,13 +243,14 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 	// cpu/memory/storage/pooler are accepted by CreateDatabase; the server applies
 	// its defaults for any left unset. The legacy `plan` attribute is ignored.
 	db, err := r.client.CreateDatabase(ctx, plan.ProjectID.ValueString(), client.CreateDatabaseRequest{
-		Name:    plan.Name.ValueString(),
-		Engine:  plan.Engine.ValueString(),
-		Version: plan.Version.ValueString(),
-		CPU:     plan.CPU.ValueString(),
-		Memory:  plan.Memory.ValueString(),
-		Storage: plan.Storage.ValueString(),
-		Pooler:  plan.Pooler.ValueBool(),
+		Name:        plan.Name.ValueString(),
+		DisplayName: plan.DisplayName.ValueString(),
+		Engine:      plan.Engine.ValueString(),
+		Version:     plan.Version.ValueString(),
+		CPU:         plan.CPU.ValueString(),
+		Memory:      plan.Memory.ValueString(),
+		Storage:     plan.Storage.ValueString(),
+		Pooler:      plan.Pooler.ValueBool(),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating database", err.Error())
@@ -376,11 +386,12 @@ func (r *DatabaseResource) Delete(ctx context.Context, req resource.DeleteReques
 func databaseUpdateReq(plan *DatabaseResourceModel) client.UpdateDatabaseRequest {
 	pooler := plan.Pooler.ValueBool()
 	req := client.UpdateDatabaseRequest{
-		CPU:     plan.CPU.ValueString(),
-		Memory:  plan.Memory.ValueString(),
-		Storage: plan.Storage.ValueString(),
-		Version: plan.Version.ValueString(),
-		Pooler:  &pooler,
+		DisplayName: plan.DisplayName.ValueString(),
+		CPU:         plan.CPU.ValueString(),
+		Memory:      plan.Memory.ValueString(),
+		Storage:     plan.Storage.ValueString(),
+		Version:     plan.Version.ValueString(),
+		Pooler:      &pooler,
 	}
 	if !plan.Instances.IsNull() && !plan.Instances.IsUnknown() {
 		instances := plan.Instances.ValueInt64()
@@ -394,6 +405,7 @@ func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 	state.ID = types.StringValue(db.ID)
 	state.ProjectID = types.StringValue(db.ProjectID)
 	state.Name = types.StringValue(db.Name)
+	state.DisplayName = types.StringValue(db.DisplayName)
 	state.Engine = types.StringValue(db.Engine)
 	state.Version = types.StringValue(db.Version)
 	state.Plan = types.StringValue(db.Plan)

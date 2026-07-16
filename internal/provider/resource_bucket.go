@@ -8,7 +8,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -74,16 +73,14 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"quota_max_size": schema.Int64Attribute{
-				Description: "Maximum total size in bytes (0 = unlimited). Mutable in place.",
+				Description: "Maximum total size in bytes (0 = unlimited; unset = the server default). Mutable in place.",
 				Optional:    true,
 				Computed:    true,
-				Default:     int64default.StaticInt64(0),
 			},
 			"quota_max_objects": schema.Int64Attribute{
-				Description: "Maximum number of objects (0 = unlimited). Mutable in place.",
+				Description: "Maximum number of objects (0 = unlimited; unset = the server default). Mutable in place.",
 				Optional:    true,
 				Computed:    true,
-				Default:     int64default.StaticInt64(0),
 			},
 			"endpoint": schema.StringAttribute{
 				Description: "S3 endpoint URL for the bucket.",

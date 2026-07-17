@@ -21,6 +21,28 @@ func testAccPreCheck(t *testing.T) {
 	}
 }
 
+// testAccAppScaffold renders a real project + always-on public app that
+// dependent-resource acceptance tests (app_config, webhook, domain) can attach
+// to. Referencing real IDs — rather than literal "test-app"/"test-project"
+// strings — is what keeps those creates from being rejected as forbidden. The
+// app is always-on + ingress=all so custom domains are accepted (ADR-030).
+// Reference fpcloud_project.scaffold.id / fpcloud_app.scaffold.id from the
+// caller's config.
+func testAccAppScaffold(projectName, appName string) string {
+	return fmt.Sprintf(`
+resource "fpcloud_project" "scaffold" {
+  name = %[1]q
+}
+
+resource "fpcloud_app" "scaffold" {
+  project_id = fpcloud_project.scaffold.id
+  name       = %[2]q
+  image      = "nginx:latest"
+  ingress    = "all"
+}
+`, projectName, appName)
+}
+
 // testAccClient builds an API client from the same environment variables the
 // provider reads, for use in CheckDestroy assertions.
 func testAccClient() *client.Client {

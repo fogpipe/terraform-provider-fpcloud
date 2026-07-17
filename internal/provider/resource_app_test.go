@@ -27,6 +27,7 @@ resource "fpcloud_app" "test" {
   name         = "tf-acc-test-app"
   image        = "nginx:latest"
   port         = 80
+  ingress      = "all"
   min_scale    = 1
   max_scale    = 5
   cpu_limit    = "250m"

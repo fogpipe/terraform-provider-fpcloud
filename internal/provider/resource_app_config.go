@@ -115,7 +115,14 @@ func (r *AppConfigResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 
+	// SetConfig does not echo secret values back, so mapAppConfigToState would
+	// blank the value and make the applied state diverge from the plan. Keep the
+	// configured value for secrets (mirrors the Read guard).
+	configuredValue := plan.Value
 	mapAppConfigToState(cfg, &plan)
+	if plan.IsSecret.ValueBool() && plan.Value.ValueString() == "" {
+		plan.Value = configuredValue
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -179,7 +186,14 @@ func (r *AppConfigResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
+	// SetConfig does not echo secret values back, so mapAppConfigToState would
+	// blank the value and make the applied state diverge from the plan. Keep the
+	// configured value for secrets (mirrors the Read guard).
+	configuredValue := plan.Value
 	mapAppConfigToState(cfg, &plan)
+	if plan.IsSecret.ValueBool() && plan.Value.ValueString() == "" {
+		plan.Value = configuredValue
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 

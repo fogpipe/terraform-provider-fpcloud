@@ -157,12 +157,13 @@ func (r *AppConfigResource) Read(ctx context.Context, req resource.ReadRequest, 
 		return
 	}
 
+	// A secret's plaintext value lives only in config/state — the API redacts or
+	// re-encrypts it — so keep the prior state value to avoid a perpetual diff.
+	// (mapAppConfigToState overwrites Value, so capture it first.)
+	priorValue := state.Value
 	mapAppConfigToState(found, &state)
-
-	// If the value is a secret and the API returns a redacted value,
-	// preserve the value from state to avoid unnecessary diffs.
-	if found.IsSecret && found.Value == "" {
-		// Keep existing state value — API redacts secret values.
+	if found.IsSecret {
+		state.Value = priorValue
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)

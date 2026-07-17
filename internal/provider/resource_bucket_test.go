@@ -15,8 +15,10 @@ import (
 // server defaults; step 2 sets explicit quotas in place (no re-create); step 3
 // round-trips through import.
 func TestAccBucketResource(t *testing.T) {
-	projectName := acctest.RandomWithPrefix("tf-acc-bkt-proj")
-	bucketName := acctest.RandomWithPrefix("tf-acc-bkt")
+	// Keep names short: the Garage global alias is "<project>-<bucket>" and must
+	// satisfy S3's 63-char bucket-name limit, so long RandomWithPrefix names fail.
+	projectName := acctest.RandomWithPrefix("tfa-p")
+	bucketName := acctest.RandomWithPrefix("tfa-b")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },

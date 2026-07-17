@@ -571,11 +571,15 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	r.setModelFromApp(&plan, app)
 	if plan.Traffic.IsNull() || plan.Traffic.IsUnknown() {
-		// Read current traffic from API.
+		// Read current traffic from the API. On error (e.g. a freshly-created
+		// serverless app with no ready revision yet) fall back to an empty set so
+		// traffic resolves to a known value — a Computed attribute left unknown
+		// after apply is an "invalid result object" error.
 		targets, err := r.client.GetTraffic(ctx, app.ID)
-		if err == nil {
-			r.setTrafficOnModel(ctx, &plan, targets, &resp.Diagnostics)
+		if err != nil {
+			targets = nil
 		}
+		r.setTrafficOnModel(ctx, &plan, targets, &resp.Diagnostics)
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }

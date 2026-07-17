@@ -1,9 +1,11 @@
 package provider_test
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
@@ -11,20 +13,23 @@ func TestAccProjectResource_basic(t *testing.T) {
 	if os.Getenv("FPCLOUD_API_KEY") == "" {
 		t.Skip("FPCLOUD_API_KEY not set, skipping acceptance test")
 	}
+	// Randomized so a transient delete failure can't leave a fixed-name project
+	// that collides with the next run.
+	name := acctest.RandomWithPrefix("tf-acc-proj")
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create and Read
 			{
-				Config: `
+				Config: fmt.Sprintf(`
 resource "fpcloud_project" "test" {
-  name = "tf-acc-test-project"
+  name = %q
 }
-`,
+`, name),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("fpcloud_project.test", "id"),
-					resource.TestCheckResourceAttr("fpcloud_project.test", "name", "tf-acc-test-project"),
+					resource.TestCheckResourceAttr("fpcloud_project.test", "name", name),
 					resource.TestCheckResourceAttr("fpcloud_project.test", "egress", "restricted"),
 					resource.TestCheckResourceAttrSet("fpcloud_project.test", "max_pods"),
 					resource.TestCheckResourceAttrSet("fpcloud_project.test", "created_at"),
@@ -33,12 +38,12 @@ resource "fpcloud_project" "test" {
 			},
 			// Update egress in place (no replacement)
 			{
-				Config: `
+				Config: fmt.Sprintf(`
 resource "fpcloud_project" "test" {
-  name   = "tf-acc-test-project"
+  name   = %q
   egress = "https"
 }
-`,
+`, name),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("fpcloud_project.test", "egress", "https"),
 				),

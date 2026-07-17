@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -54,27 +55,60 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body any) 
 }
 
 func (c *Client) do(req *http.Request, out any) error {
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("executing request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		apiErr := &APIError{StatusCode: resp.StatusCode}
-		if err := json.NewDecoder(resp.Body).Decode(apiErr); err != nil {
-			return &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("HTTP %d", resp.StatusCode)}
+	const maxRetries = 5
+	for attempt := 0; ; attempt++ {
+		resp, err := c.HTTPClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("executing request: %w", err)
 		}
-		return apiErr
-	}
 
-	if out != nil {
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-			return fmt.Errorf("decoding response: %w", err)
+		// Ride out rate limiting (429) with backoff so a burst of requests — a
+		// large plan/apply or the acceptance suite — retries instead of failing.
+		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRetries {
+			resp.Body.Close()
+			if req.GetBody != nil {
+				if body, berr := req.GetBody(); berr == nil {
+					req.Body = body
+				}
+			}
+			select {
+			case <-time.After(retryAfter(resp.Header.Get("Retry-After"), attempt)):
+			case <-req.Context().Done():
+				return req.Context().Err()
+			}
+			continue
 		}
-	}
 
-	return nil
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 400 {
+			apiErr := &APIError{StatusCode: resp.StatusCode}
+			if err := json.NewDecoder(resp.Body).Decode(apiErr); err != nil {
+				return &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("HTTP %d", resp.StatusCode)}
+			}
+			return apiErr
+		}
+
+		if out != nil {
+			if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+				return fmt.Errorf("decoding response: %w", err)
+			}
+		}
+		return nil
+	}
+}
+
+// retryAfter picks a backoff duration for a 429, honoring a numeric Retry-After
+// header when present and otherwise using capped exponential backoff.
+func retryAfter(header string, attempt int) time.Duration {
+	if secs, err := strconv.Atoi(header); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	d := 500 * time.Millisecond * time.Duration(int64(1)<<attempt)
+	if d > 8*time.Second {
+		d = 8 * time.Second
+	}
+	return d
 }
 
 // Register creates a new user account. Does not require authentication.

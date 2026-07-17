@@ -59,6 +59,15 @@ func isNotFoundErr(err error) bool {
 	return ok && apiErr.StatusCode == 404
 }
 
+// isGoneErr reports whether a resource is effectively gone. A test tears down the
+// resource and its parent project together; once the project is deleted its
+// scoped resources are no longer authorizable, so the API answers 403 rather than
+// 404. Treat both as "destroyed" in CheckDestroy.
+func isGoneErr(err error) bool {
+	apiErr, ok := err.(*client.APIError)
+	return ok && (apiErr.StatusCode == 404 || apiErr.StatusCode == 403)
+}
+
 // testAccCheckBucketDestroy verifies every fpcloud_bucket in state is gone from
 // the live API after the test tears down.
 func testAccCheckBucketDestroy(s *terraform.State) error {
@@ -71,7 +80,7 @@ func testAccCheckBucketDestroy(s *terraform.State) error {
 		if err == nil {
 			return fmt.Errorf("bucket %s still exists", rs.Primary.ID)
 		}
-		if !isNotFoundErr(err) {
+		if !isGoneErr(err) {
 			return fmt.Errorf("unexpected error checking bucket %s destroy: %w", rs.Primary.ID, err)
 		}
 	}
@@ -90,7 +99,7 @@ func testAccCheckAppDestroy(s *terraform.State) error {
 		if err == nil {
 			return fmt.Errorf("app %s still exists", rs.Primary.ID)
 		}
-		if !isNotFoundErr(err) {
+		if !isGoneErr(err) {
 			return fmt.Errorf("unexpected error checking app %s destroy: %w", rs.Primary.ID, err)
 		}
 	}

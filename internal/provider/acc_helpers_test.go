@@ -21,6 +21,28 @@ func testAccPreCheck(t *testing.T) {
 	}
 }
 
+// testAccAppScaffold renders a real project + always-on public app that
+// dependent-resource acceptance tests (app_config, webhook, domain) can attach
+// to. Referencing real IDs — rather than literal "test-app"/"test-project"
+// strings — is what keeps those creates from being rejected as forbidden. The
+// app is always-on + ingress=all so custom domains are accepted (ADR-030).
+// Reference fpcloud_project.scaffold.id / fpcloud_app.scaffold.id from the
+// caller's config.
+func testAccAppScaffold(projectName, appName string) string {
+	return fmt.Sprintf(`
+resource "fpcloud_project" "scaffold" {
+  name = %[1]q
+}
+
+resource "fpcloud_app" "scaffold" {
+  project_id = fpcloud_project.scaffold.id
+  name       = %[2]q
+  image      = "nginx:latest"
+  ingress    = "all"
+}
+`, projectName, appName)
+}
+
 // testAccClient builds an API client from the same environment variables the
 // provider reads, for use in CheckDestroy assertions.
 func testAccClient() *client.Client {
@@ -37,6 +59,15 @@ func isNotFoundErr(err error) bool {
 	return ok && apiErr.StatusCode == 404
 }
 
+// isGoneErr reports whether a resource is effectively gone. A test tears down the
+// resource and its parent project together; once the project is deleted its
+// scoped resources are no longer authorizable, so the API answers 403 rather than
+// 404. Treat both as "destroyed" in CheckDestroy.
+func isGoneErr(err error) bool {
+	apiErr, ok := err.(*client.APIError)
+	return ok && (apiErr.StatusCode == 404 || apiErr.StatusCode == 403)
+}
+
 // testAccCheckBucketDestroy verifies every fpcloud_bucket in state is gone from
 // the live API after the test tears down.
 func testAccCheckBucketDestroy(s *terraform.State) error {
@@ -49,7 +80,7 @@ func testAccCheckBucketDestroy(s *terraform.State) error {
 		if err == nil {
 			return fmt.Errorf("bucket %s still exists", rs.Primary.ID)
 		}
-		if !isNotFoundErr(err) {
+		if !isGoneErr(err) {
 			return fmt.Errorf("unexpected error checking bucket %s destroy: %w", rs.Primary.ID, err)
 		}
 	}
@@ -68,7 +99,7 @@ func testAccCheckAppDestroy(s *terraform.State) error {
 		if err == nil {
 			return fmt.Errorf("app %s still exists", rs.Primary.ID)
 		}
-		if !isNotFoundErr(err) {
+		if !isGoneErr(err) {
 			return fmt.Errorf("unexpected error checking app %s destroy: %w", rs.Primary.ID, err)
 		}
 	}

@@ -97,12 +97,20 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"access_key_id": schema.StringAttribute{
 				Description: "S3 access key ID for the bucket's initial access key.",
 				Computed:    true,
+				// GetBucket doesn't echo the key, so keep the create-time value
+				// across refreshes/updates instead of going unknown.
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"secret_access_key": schema.StringAttribute{
 				Description: "S3 secret access key for the bucket's initial access key. Returned only " +
 					"on creation — an imported bucket leaves this empty.",
 				Computed:  true,
 				Sensitive: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 	}
@@ -236,5 +244,11 @@ func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 	m.Endpoint = types.StringValue(bucket.Endpoint)
 	m.Region = types.StringValue(bucket.Region)
 	m.Status = types.StringValue(bucket.Status)
-	m.AccessKeyID = types.StringValue(bucket.AccessKeyID)
+	// GetBucket does not echo the access key back (only create does), so only
+	// overwrite it when present — otherwise the post-create refresh would blank
+	// the value that create captured. Mirrors secret_access_key, which apply
+	// never touches.
+	if bucket.AccessKeyID != "" {
+		m.AccessKeyID = types.StringValue(bucket.AccessKeyID)
+	}
 }

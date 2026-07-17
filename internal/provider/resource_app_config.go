@@ -115,7 +115,15 @@ func (r *AppConfigResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 
+	// A secret's plaintext value lives only in config — the API never echoes it
+	// back verbatim (it stores it encrypted), so trusting mapAppConfigToState's
+	// value would make the applied state diverge from the plan. Always keep the
+	// configured value for secrets.
+	configuredValue := plan.Value
 	mapAppConfigToState(cfg, &plan)
+	if plan.IsSecret.ValueBool() {
+		plan.Value = configuredValue
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -149,12 +157,13 @@ func (r *AppConfigResource) Read(ctx context.Context, req resource.ReadRequest, 
 		return
 	}
 
+	// A secret's plaintext value lives only in config/state — the API redacts or
+	// re-encrypts it — so keep the prior state value to avoid a perpetual diff.
+	// (mapAppConfigToState overwrites Value, so capture it first.)
+	priorValue := state.Value
 	mapAppConfigToState(found, &state)
-
-	// If the value is a secret and the API returns a redacted value,
-	// preserve the value from state to avoid unnecessary diffs.
-	if found.IsSecret && found.Value == "" {
-		// Keep existing state value — API redacts secret values.
+	if found.IsSecret {
+		state.Value = priorValue
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -179,7 +188,15 @@ func (r *AppConfigResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
+	// A secret's plaintext value lives only in config — the API never echoes it
+	// back verbatim (it stores it encrypted), so trusting mapAppConfigToState's
+	// value would make the applied state diverge from the plan. Always keep the
+	// configured value for secrets.
+	configuredValue := plan.Value
 	mapAppConfigToState(cfg, &plan)
+	if plan.IsSecret.ValueBool() {
+		plan.Value = configuredValue
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 

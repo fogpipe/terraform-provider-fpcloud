@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -280,16 +281,26 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Default:     int64default.StaticInt64(1),
 			},
 			"min_scale": schema.Int64Attribute{
-				Description: "Minimum number of instances. Defaults to 1.",
+				// No static default: min_scale is mode-dependent (always-on and
+				// serverless resolve it differently server-side), so a fixed
+				// default would fight the API's computed value and produce a
+				// "provider produced inconsistent result after apply". Left
+				// Computed, the API value flows in when unset; UseStateForUnknown
+				// keeps it stable across updates that don't touch scaling.
+				Description: "Minimum number of instances. Server-computed when unset.",
 				Optional:    true,
 				Computed:    true,
-				Default:     int64default.StaticInt64(1),
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
 			},
 			"max_scale": schema.Int64Attribute{
-				Description: "Maximum number of instances. Defaults to 10.",
+				Description: "Maximum number of instances. Server-computed when unset.",
 				Optional:    true,
 				Computed:    true,
-				Default:     int64default.StaticInt64(10),
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
 			},
 			"cpu_limit": schema.StringAttribute{
 				Description: "CPU limit (e.g. 500m). Defaults to 500m.",
@@ -495,25 +506,35 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		}
 	}
 
-	// Apply scaling if non-default values were specified.
-	minScale := int32(plan.MinScale.ValueInt64())
-	maxScale := int32(plan.MaxScale.ValueInt64())
+	// Reconcile scaling after create. min/max scale are sent only when the user
+	// set them (they have no static default now — see the schema), so an unset
+	// value picks up the API's mode-appropriate default without a plan-vs-apply
+	// drift.
 	replicas := int32(plan.Replicas.ValueInt64())
 	cpuLimit := plan.CPULimit.ValueString()
 	memoryLimit := plan.MemoryLimit.ValueString()
 	alwaysOn := plan.Mode.ValueString() != "serverless"
 
-	if minScale != 1 || maxScale != 10 || cpuLimit != "500m" || memoryLimit != "512Mi" || (alwaysOn && replicas != 1) {
-		scaleReq := client.ScaleRequest{
-			MinScale:    &minScale,
-			MaxScale:    &maxScale,
-			CPULimit:    cpuLimit,
-			MemoryLimit: memoryLimit,
-		}
-		// Replicas is an always-on setting; sending it on a serverless app is a 400.
-		if alwaysOn {
-			scaleReq.Replicas = &replicas
-		}
+	scaleReq := client.ScaleRequest{
+		CPULimit:    cpuLimit,
+		MemoryLimit: memoryLimit,
+	}
+	sendScale := cpuLimit != "500m" || memoryLimit != "512Mi" || (alwaysOn && replicas != 1)
+	if !plan.MinScale.IsNull() {
+		m := int32(plan.MinScale.ValueInt64())
+		scaleReq.MinScale = &m
+		sendScale = true
+	}
+	if !plan.MaxScale.IsNull() {
+		m := int32(plan.MaxScale.ValueInt64())
+		scaleReq.MaxScale = &m
+		sendScale = true
+	}
+	// Replicas is an always-on setting; sending it on a serverless app is a 400.
+	if alwaysOn {
+		scaleReq.Replicas = &replicas
+	}
+	if sendScale {
 		scaled, err := r.client.ScaleApp(ctx, app.ID, scaleReq)
 		if err != nil {
 			resp.Diagnostics.AddError("Error scaling app after creation", err.Error())
@@ -550,11 +571,15 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	r.setModelFromApp(&plan, app)
 	if plan.Traffic.IsNull() || plan.Traffic.IsUnknown() {
-		// Read current traffic from API.
+		// Read current traffic from the API. On error (e.g. a freshly-created
+		// serverless app with no ready revision yet) fall back to an empty set so
+		// traffic resolves to a known value — a Computed attribute left unknown
+		// after apply is an "invalid result object" error.
 		targets, err := r.client.GetTraffic(ctx, app.ID)
-		if err == nil {
-			r.setTrafficOnModel(ctx, &plan, targets, &resp.Diagnostics)
+		if err != nil {
+			targets = nil
 		}
+		r.setTrafficOnModel(ctx, &plan, targets, &resp.Diagnostics)
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }

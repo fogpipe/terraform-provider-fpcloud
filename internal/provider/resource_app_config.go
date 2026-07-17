@@ -115,12 +115,13 @@ func (r *AppConfigResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 
-	// SetConfig does not echo secret values back, so mapAppConfigToState would
-	// blank the value and make the applied state diverge from the plan. Keep the
-	// configured value for secrets (mirrors the Read guard).
+	// A secret's plaintext value lives only in config — the API never echoes it
+	// back verbatim (it stores it encrypted), so trusting mapAppConfigToState's
+	// value would make the applied state diverge from the plan. Always keep the
+	// configured value for secrets.
 	configuredValue := plan.Value
 	mapAppConfigToState(cfg, &plan)
-	if plan.IsSecret.ValueBool() && plan.Value.ValueString() == "" {
+	if plan.IsSecret.ValueBool() {
 		plan.Value = configuredValue
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -186,12 +187,13 @@ func (r *AppConfigResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
-	// SetConfig does not echo secret values back, so mapAppConfigToState would
-	// blank the value and make the applied state diverge from the plan. Keep the
-	// configured value for secrets (mirrors the Read guard).
+	// A secret's plaintext value lives only in config — the API never echoes it
+	// back verbatim (it stores it encrypted), so trusting mapAppConfigToState's
+	// value would make the applied state diverge from the plan. Always keep the
+	// configured value for secrets.
 	configuredValue := plan.Value
 	mapAppConfigToState(cfg, &plan)
-	if plan.IsSecret.ValueBool() && plan.Value.ValueString() == "" {
+	if plan.IsSecret.ValueBool() {
 		plan.Value = configuredValue
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)

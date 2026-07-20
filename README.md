@@ -37,6 +37,8 @@ resource "fpcloud_app" "api" {
 
 Set the API key out of band — `export FPCLOUD_API_KEY=fp-...` — rather than in HCL.
 
+Credentials resolve in order: provider block → `FPCLOUD_API_KEY`/`FPCLOUD_API_URL` env → the fpcloud CLI login (`~/.fpcloud/config.yaml`, honouring `FPCLOUD_CONFIG_DIR`). So after `fpcloud auth login` a bare `tofu apply` just works — the AWS/GCP model where the CLI login doubles as the provider's default credentials. Prefer the env var in CI (minted by OIDC federation); the CLI fallback is for local, interactive use.
+
 See [`examples/`](./examples) for per-resource usage.
 
 ## Development

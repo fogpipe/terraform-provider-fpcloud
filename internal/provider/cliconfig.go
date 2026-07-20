@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
@@ -37,4 +39,28 @@ func loadCLIConfig() cliConfig {
 		return cliConfig{}
 	}
 	return cfg
+}
+
+// cliOIDCToken shells out to `fpcloud get-token` and returns the Google OIDC
+// id-token the CLI login caches — transparently refreshed by the CLI from its
+// stored refresh token. This is the gcloud-ADC model: the provider can't refresh
+// itself (the OAuth client is baked into the fpcloud binary, not here), so it
+// delegates to the CLI, exactly like a kubectl exec credential plugin. The API
+// accepts this id-token as a bearer credential. Best-effort: a missing binary,
+// no login, or a stale refresh token yields "" (never an error) so it stays a
+// silent last resort behind the block, env var, and config.yaml key.
+func cliOIDCToken() string {
+	out, err := exec.Command("fpcloud", "get-token").Output()
+	if err != nil {
+		return ""
+	}
+	var cred struct {
+		Status struct {
+			Token string `json:"token"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(out, &cred); err != nil {
+		return ""
+	}
+	return cred.Status.Token
 }

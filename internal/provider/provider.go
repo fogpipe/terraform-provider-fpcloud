@@ -42,7 +42,7 @@ func (p *FogpipeProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 		Description: "The Fogpipe provider manages resources on the Fogpipe PaaS platform.",
 		Attributes: map[string]schema.Attribute{
 			"api_key": schema.StringAttribute{
-				Description: "API key for Fogpipe. Can also be set via the FPCLOUD_API_KEY environment variable, or inherited from the fpcloud CLI login (~/.fpcloud/config.yaml, honouring FPCLOUD_CONFIG_DIR).",
+				Description: "API key for Fogpipe. Can also be set via the FPCLOUD_API_KEY environment variable, or inherited from the fpcloud CLI login — an API key in ~/.fpcloud/config.yaml (honouring FPCLOUD_CONFIG_DIR), or the Google OIDC token from `fpcloud login` via `fpcloud get-token` (requires the fpcloud CLI on PATH).",
 				Optional:    true,
 				Sensitive:   true,
 			},
@@ -66,7 +66,10 @@ func (p *FogpipeProvider) Configure(ctx context.Context, req provider.ConfigureR
 	// AWS/GCP model (env var wins, CLI config file is the login-based fallback).
 	cli := loadCLIConfig()
 
-	// Resolve API key: config > env var > CLI config
+	// Resolve API key: config > env var > CLI config key > CLI OIDC login.
+	// The last step delegates to `fpcloud get-token`, so the default Google
+	// login (`fpcloud login`) works with nothing in HCL or env — bare
+	// `tofu apply`, the AWS/GCP way.
 	apiKey := cli.APIKey
 	if envKey := os.Getenv("FPCLOUD_API_KEY"); envKey != "" {
 		apiKey = envKey
@@ -75,9 +78,12 @@ func (p *FogpipeProvider) Configure(ctx context.Context, req provider.ConfigureR
 		apiKey = config.APIKey.ValueString()
 	}
 	if apiKey == "" {
+		apiKey = cliOIDCToken()
+	}
+	if apiKey == "" {
 		resp.Diagnostics.AddError(
-			"Missing API Key",
-			"The provider requires an API key. Set it in the provider configuration, via the FPCLOUD_API_KEY environment variable, or by logging in with the fpcloud CLI (`fpcloud auth login`).",
+			"Missing credentials",
+			"The provider found no credentials. Log in with the fpcloud CLI (`fpcloud login` or `fpcloud auth login`), set FPCLOUD_API_KEY, or set api_key in the provider configuration.",
 		)
 		return
 	}

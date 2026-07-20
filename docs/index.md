@@ -31,5 +31,5 @@ provider "fpcloud" {
 
 ### Optional
 
-- `api_key` (String, Sensitive) API key for Fogpipe. Can also be set via the FPCLOUD_API_KEY environment variable, or inherited from the fpcloud CLI login (~/.fpcloud/config.yaml, honouring FPCLOUD_CONFIG_DIR).
+- `api_key` (String, Sensitive) API key for Fogpipe. Can also be set via the FPCLOUD_API_KEY environment variable, or inherited from the fpcloud CLI login — an API key in ~/.fpcloud/config.yaml (honouring FPCLOUD_CONFIG_DIR), or the Google OIDC token from `fpcloud login` via `fpcloud get-token` (requires the fpcloud CLI on PATH).
 - `api_url` (String) API URL for Fogpipe. Defaults to https://api.cloud.fogpipe.com. Can also be set via the FPCLOUD_API_URL environment variable, or inherited from the fpcloud CLI config.

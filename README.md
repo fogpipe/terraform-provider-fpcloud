@@ -37,6 +37,8 @@ resource "fpcloud_app" "api" {
 
 Set the API key out of band — `export FPCLOUD_API_KEY=fp-...` — rather than in HCL.
 
+Credentials resolve in order: provider block → `FPCLOUD_API_KEY`/`FPCLOUD_API_URL` env → an API key in the fpcloud CLI config (`~/.fpcloud/config.yaml`, honouring `FPCLOUD_CONFIG_DIR`) → the Google OIDC login via `fpcloud get-token`. So after **any** CLI login — `fpcloud login` (Google) or `fpcloud auth login` (API key) — a bare `tofu apply` just works, with nothing in HCL or env. This is the AWS/GCP model: the CLI login doubles as the provider's default credentials, and the OIDC path delegates token refresh to the CLI exactly like a kubectl exec plugin (so the `fpcloud` binary must be on `PATH`). Prefer the env var in CI (minted by OIDC federation); the CLI fallback is for local, interactive use.
+
 See [`examples/`](./examples) for per-resource usage.
 
 ## Development

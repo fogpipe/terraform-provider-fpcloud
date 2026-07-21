@@ -516,12 +516,13 @@ func (c *Client) UpdateAppStorage(ctx context.Context, id, storage string) (*App
 	return &app, nil
 }
 
-// UpdateAppCommand changes an app's container entrypoint override (command) and
-// arguments (args). Each is optional: a nil pointer leaves the value untouched, a
-// non-nil pointer (including an empty slice) replaces it — an empty slice clears
-// the override back to the image defaults.
-func (c *Client) UpdateAppCommand(ctx context.Context, id string, command, args *[]string) (*App, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/command", UpdateCommandRequest{Command: command, Args: args})
+// UpdateAppCommand changes an app's container entrypoint override (command),
+// arguments (args), and/or release command. Each is optional: a nil pointer
+// leaves the value untouched, a non-nil pointer (including an empty slice)
+// replaces it — an empty slice clears the override back to the image defaults
+// (or drops the release phase).
+func (c *Client) UpdateAppCommand(ctx context.Context, id string, command, args, releaseCommand *[]string) (*App, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/command", UpdateCommandRequest{Command: command, Args: args, ReleaseCommand: releaseCommand})
 	if err != nil {
 		return nil, err
 	}

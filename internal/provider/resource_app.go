@@ -42,6 +42,7 @@ type AppResourceModel struct {
 	Image               types.String `tfsdk:"image"`
 	Command             types.List   `tfsdk:"command"`
 	Args                types.List   `tfsdk:"args"`
+	ReleaseCommand      types.List   `tfsdk:"release_command"`
 	VolumeMounts        types.List   `tfsdk:"volume_mounts"`
 	SecurityContext     types.Object `tfsdk:"security_context"`
 	Port                types.Int64  `tfsdk:"port"`
@@ -160,6 +161,14 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			"args": schema.ListAttribute{
 				Description: "Container arguments (CMD/args). Write-only from Terraform's perspective — the " +
 					"API does not echo it back, so out-of-band changes are not detected.",
+				Optional:    true,
+				ElementType: types.StringType,
+			},
+			"release_command": schema.ListAttribute{
+				Description: "Command run once per deploy — from the exact image being deployed, with the " +
+					"app's env/secrets — before the new version goes live; a failure aborts the deploy " +
+					"(e.g. DB migrations). A single element containing spaces runs via 'sh -c'; use " +
+					"multiple elements for exec form. Write-only from Terraform's perspective.",
 				Optional:    true,
 				ElementType: types.StringType,
 			},
@@ -434,6 +443,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	command := stringListToSlice(ctx, plan.Command, &resp.Diagnostics)
 	args := stringListToSlice(ctx, plan.Args, &resp.Diagnostics)
+	releaseCommand := stringListToSlice(ctx, plan.ReleaseCommand, &resp.Diagnostics)
 	volumeMounts := volumeMountsFromModel(ctx, plan.VolumeMounts, &resp.Diagnostics)
 	securityContext := securityContextFromModel(ctx, plan.SecurityContext, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
@@ -447,6 +457,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		Image:               plan.Image.ValueString(),
 		Command:             command,
 		Args:                args,
+		ReleaseCommand:      releaseCommand,
 		VolumeMounts:        volumeMounts,
 		SecurityContext:     securityContext,
 		Port:                int(plan.Port.ValueInt64()),
@@ -656,16 +667,18 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		app = reslugged
 	}
 
-	// Update the container command/args if either changed. A non-nil pointer
-	// (including an empty slice) replaces the value; an empty slice clears the
-	// override back to the image defaults.
-	if !plan.Command.Equal(state.Command) || !plan.Args.Equal(state.Args) {
+	// Update the container command/args/release command if any changed. A
+	// non-nil pointer (including an empty slice) replaces the value; an empty
+	// slice clears the override back to the image defaults (or drops the
+	// release phase).
+	if !plan.Command.Equal(state.Command) || !plan.Args.Equal(state.Args) || !plan.ReleaseCommand.Equal(state.ReleaseCommand) {
 		command := stringListToSlice(ctx, plan.Command, &resp.Diagnostics)
 		args := stringListToSlice(ctx, plan.Args, &resp.Diagnostics)
+		releaseCommand := stringListToSlice(ctx, plan.ReleaseCommand, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		updated, err := r.client.UpdateAppCommand(ctx, appID, &command, &args)
+		updated, err := r.client.UpdateAppCommand(ctx, appID, &command, &args, &releaseCommand)
 		if err != nil {
 			resp.Diagnostics.AddError("Error updating app command", err.Error())
 			return
@@ -954,7 +967,7 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App) 
 	model.CreatedAt = types.StringValue(app.CreatedAt.String())
 	model.UpdatedAt = types.StringValue(app.UpdatedAt.String())
 	// Note: env and secret maps are preserved from the plan/state — not returned by API.
-	// Note: command and args are preserved from the plan/state — not returned by API.
+	// Note: command, args, and release_command are preserved from the plan/state — not returned by API.
 	// Note: volume_mounts and security_context are preserved from the plan/state — not returned by API.
 	// Note: service_account is preserved from the plan/state — the API returns service_account_id.
 }

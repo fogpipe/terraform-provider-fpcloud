@@ -127,6 +127,7 @@ type CreateAppRequest struct {
 	Image               string            `json:"image"`
 	Command             []string          `json:"command,omitempty"`
 	Args                []string          `json:"args,omitempty"`
+	ReleaseCommand      []string          `json:"release_command,omitempty"` // run once per deploy, before the new version goes live
 	VolumeMounts        []VolumeMount     `json:"volume_mounts,omitempty"`
 	SecurityContext     *SecurityContext  `json:"security_context,omitempty"`
 	Port                int               `json:"port,omitempty"`
@@ -199,8 +200,9 @@ type UpdateAppRequest struct {
 // the value untouched, a non-nil pointer (including an empty array) replaces it —
 // an empty array clears the override back to the image defaults.
 type UpdateCommandRequest struct {
-	Command *[]string `json:"command,omitempty"`
-	Args    *[]string `json:"args,omitempty"`
+	Command        *[]string `json:"command,omitempty"`
+	Args           *[]string `json:"args,omitempty"`
+	ReleaseCommand *[]string `json:"release_command,omitempty"`
 }
 
 // RollbackRequest is the request body for rolling back an app.

@@ -61,9 +61,9 @@ resource "fpcloud_app" "web" {
 - `health_check_retries` (Number) Health check failure threshold. Defaults to 3.
 - `health_check_timeout` (Number) Health check timeout in seconds. Defaults to 5.
 - `ingress` (String) Ingress setting: 'all' for public access, 'internal' for project-only (default)
-- `max_scale` (Number) Maximum number of instances. Defaults to 10.
+- `max_scale` (Number) Maximum number of instances. Server-computed when unset.
 - `memory_limit` (String) Memory limit (e.g. 512Mi). Defaults to 512Mi.
-- `min_scale` (Number) Minimum number of instances. Defaults to 1.
+- `min_scale` (Number) Minimum number of instances. Server-computed when unset.
 - `mode` (String) Hosting mode: 'always-on' (plain Deployment, default) or 'serverless' (scale-to-zero Knative). Changing the mode replaces the app.
 - `port` (Number) Container port. Defaults to 8080.
 - `release_command` (List of String) Command run once per deploy — from the exact image being deployed, with the app's env/secrets — before the new version goes live; a failure aborts the deploy (e.g. DB migrations). A single element containing spaces runs via 'sh -c'; use multiple elements for exec form. Write-only from Terraform's perspective.

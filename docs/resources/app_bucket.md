@@ -3,14 +3,12 @@
 page_title: "fpcloud_app_bucket Resource - fpcloud"
 subcategory: ""
 description: |-
-  Binds a managed bucket to an app, injecting the bucket's S3_*/AWS_* credentials into the app's pod via a k8s Secret (envFrom). The secret access key is never returned. Every attribute forces a new binding when changed.
+  Binds a managed bucket to an app, injecting the bucket's S3_/AWS_ credentials into the app's pod via a k8s Secret (envFrom). The secret access key is never returned. Every attribute forces a new binding when changed.
 ---
 
 # fpcloud_app_bucket (Resource)
 
 Binds a managed bucket to an app, injecting the bucket's S3_*/AWS_* credentials into the app's pod via a k8s Secret (envFrom). The secret access key is never returned. Every attribute forces a new binding when changed.
-
-Fogpipe mints a scoped S3 key for the app and injects `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` (and the `AWS_*` aliases) into the app's pod — so the app can read/write the bucket without wiring the credentials by hand. This is the Terraform equivalent of `fpcloud storage bucket bind`.
 
 ## Example Usage
 

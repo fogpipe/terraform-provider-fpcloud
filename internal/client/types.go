@@ -267,6 +267,14 @@ type Bucket struct {
 	Status          string    `json:"status"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+
+	// Static-website serving (#342). When enabled the bucket is served
+	// anonymously over HTTP (public read) at WebsiteURL.
+	WebsiteEnabled       bool   `json:"website_enabled"`
+	WebsiteIndexDocument string `json:"website_index_document,omitempty"`
+	WebsiteErrorDocument string `json:"website_error_document,omitempty"`
+	URLSlug              string `json:"url_slug"`
+	WebsiteURL           string `json:"website_url,omitempty"`
 }
 
 // CreateBucketRequest is the request body for creating a bucket.
@@ -280,6 +288,21 @@ type CreateBucketRequest struct {
 type SetBucketQuotaRequest struct {
 	QuotaMaxSize    int64 `json:"quota_max_size"`
 	QuotaMaxObjects int64 `json:"quota_max_objects"`
+}
+
+// SetBucketWebsiteRequest is the request body for toggling static-website
+// serving on a bucket (#342). Enabling makes the bucket world-readable over
+// HTTP; the index/error documents are optional (index defaults to index.html).
+type SetBucketWebsiteRequest struct {
+	Enabled       bool   `json:"enabled"`
+	IndexDocument string `json:"index_document,omitempty"`
+	ErrorDocument string `json:"error_document,omitempty"`
+}
+
+// SetBucketURLSlugRequest is the request body for setting (or clearing, with
+// "") a bucket website's vanity host label.
+type SetBucketURLSlugRequest struct {
+	URLSlug string `json:"url_slug"`
 }
 
 // BucketKey is a scoped S3 access key for a bucket. SecretAccessKey is only
@@ -376,7 +399,8 @@ type PresignResponse struct {
 // Domain represents a custom domain attached to an application.
 type Domain struct {
 	ID                string     `json:"id"`
-	AppID             string     `json:"app_id"`
+	AppID             string     `json:"app_id,omitempty"`
+	BucketID          string     `json:"bucket_id,omitempty"`
 	Domain            string     `json:"domain"`
 	Status            string     `json:"status"`
 	TLSStatus         string     `json:"tls_status"`

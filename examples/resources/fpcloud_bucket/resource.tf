@@ -6,6 +6,16 @@ resource "fpcloud_bucket" "assets" {
   quota_max_objects = 100000      # 0 = unlimited
 }
 
+# Serve a bucket as a public static website (world-readable over HTTP).
+resource "fpcloud_bucket" "site" {
+  project = fpcloud_project.production.id
+  name    = "site"
+
+  website_enabled        = true
+  website_error_document = "index.html" # SPA fallback: serve the app shell on misses
+  url_slug               = "mysite"     # optional vanity host: mysite.web.<platform domain>
+}
+
 # Wire the bucket's S3 credentials into an app. The secret access key is only
 # returned once, at creation — Terraform keeps it in state (marked sensitive).
 resource "fpcloud_app" "uploader" {

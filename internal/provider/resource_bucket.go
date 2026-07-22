@@ -35,6 +35,12 @@ type BucketResourceModel struct {
 	Status          types.String `tfsdk:"status"`
 	AccessKeyID     types.String `tfsdk:"access_key_id"`
 	SecretAccessKey types.String `tfsdk:"secret_access_key"`
+
+	WebsiteEnabled       types.Bool   `tfsdk:"website_enabled"`
+	WebsiteIndexDocument types.String `tfsdk:"website_index_document"`
+	WebsiteErrorDocument types.String `tfsdk:"website_error_document"`
+	URLSlug              types.String `tfsdk:"url_slug"`
+	WebsiteURL           types.String `tfsdk:"website_url"`
 }
 
 // NewBucketResource returns a new bucket resource.
@@ -112,6 +118,32 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"website_enabled": schema.BoolAttribute{
+				Description: "Serve the bucket as a public static website. Enabling makes the bucket's " +
+					"objects world-readable over HTTP. Mutable in place.",
+				Optional: true,
+				Computed: true,
+			},
+			"website_index_document": schema.StringAttribute{
+				Description: "Document served for a directory request (defaults to index.html when the website is enabled).",
+				Optional:    true,
+				Computed:    true,
+			},
+			"website_error_document": schema.StringAttribute{
+				Description: "Document served on a miss (e.g. 404.html; set it to the index document for SPA fallback).",
+				Optional:    true,
+				Computed:    true,
+			},
+			"url_slug": schema.StringAttribute{
+				Description: "Vanity website host label: the site moves to <url_slug>.web.<platform domain>. " +
+					"Globally unique; empty reverts to the derived host. Mutable in place.",
+				Optional: true,
+				Computed: true,
+			},
+			"website_url": schema.StringAttribute{
+				Description: "The URL the website is served at (present when the website is enabled).",
+				Computed:    true,
+			},
 		},
 	}
 }
@@ -150,6 +182,27 @@ func (r *BucketResource) Create(ctx context.Context, req resource.CreateRequest,
 
 	// The one-time secret access key is only present on the create response.
 	plan.SecretAccessKey = types.StringValue(bucket.SecretAccessKey)
+
+	// Website serving + vanity slug are separate API calls layered on the bucket.
+	if plan.WebsiteEnabled.ValueBool() {
+		bucket, err = r.client.SetBucketWebsite(ctx, bucket.ID, client.SetBucketWebsiteRequest{
+			Enabled:       true,
+			IndexDocument: plan.WebsiteIndexDocument.ValueString(),
+			ErrorDocument: plan.WebsiteErrorDocument.ValueString(),
+		})
+		if err != nil {
+			resp.Diagnostics.AddError("Error enabling bucket website", err.Error())
+			return
+		}
+	}
+	if slug := plan.URLSlug.ValueString(); slug != "" {
+		bucket, err = r.client.SetBucketURLSlug(ctx, bucket.ID, slug)
+		if err != nil {
+			resp.Diagnostics.AddError("Error setting bucket url slug", err.Error())
+			return
+		}
+	}
+
 	r.apply(&plan, bucket)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -184,14 +237,53 @@ func (r *BucketResource) Update(ctx context.Context, req resource.UpdateRequest,
 		return
 	}
 
-	// Quotas are the only mutable fields (project/name force replacement).
+	// Quotas, website serving, and the vanity slug are mutable in place
+	// (project/name force replacement).
 	bucket, err := r.client.SetBucketQuota(ctx, state.ID.ValueString(), plan.QuotaMaxSize.ValueInt64(), plan.QuotaMaxObjects.ValueInt64())
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating bucket quota", err.Error())
 		return
 	}
 
-	// SetBucketQuota does not return the secret — preserve it from prior state.
+	// An unset optional+computed attribute is unknown in the plan — treat it as
+	// "keep the current value" rather than a change to the zero value.
+	enabled := plan.WebsiteEnabled.ValueBool()
+	if plan.WebsiteEnabled.IsUnknown() {
+		enabled = state.WebsiteEnabled.ValueBool()
+	}
+	index := plan.WebsiteIndexDocument.ValueString()
+	if plan.WebsiteIndexDocument.IsUnknown() {
+		index = state.WebsiteIndexDocument.ValueString()
+	}
+	errorDoc := plan.WebsiteErrorDocument.ValueString()
+	if plan.WebsiteErrorDocument.IsUnknown() {
+		errorDoc = state.WebsiteErrorDocument.ValueString()
+	}
+	if enabled != state.WebsiteEnabled.ValueBool() ||
+		index != state.WebsiteIndexDocument.ValueString() ||
+		errorDoc != state.WebsiteErrorDocument.ValueString() {
+		bucket, err = r.client.SetBucketWebsite(ctx, state.ID.ValueString(), client.SetBucketWebsiteRequest{
+			Enabled: enabled, IndexDocument: index, ErrorDocument: errorDoc,
+		})
+		if err != nil {
+			resp.Diagnostics.AddError("Error updating bucket website", err.Error())
+			return
+		}
+	}
+
+	slug := plan.URLSlug.ValueString()
+	if plan.URLSlug.IsUnknown() {
+		slug = state.URLSlug.ValueString()
+	}
+	if slug != state.URLSlug.ValueString() {
+		bucket, err = r.client.SetBucketURLSlug(ctx, state.ID.ValueString(), slug)
+		if err != nil {
+			resp.Diagnostics.AddError("Error updating bucket url slug", err.Error())
+			return
+		}
+	}
+
+	// None of the update calls return the secret — preserve it from prior state.
 	plan.SecretAccessKey = state.SecretAccessKey
 	r.apply(&plan, bucket)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -251,4 +343,9 @@ func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 	if bucket.AccessKeyID != "" {
 		m.AccessKeyID = types.StringValue(bucket.AccessKeyID)
 	}
+	m.WebsiteEnabled = types.BoolValue(bucket.WebsiteEnabled)
+	m.WebsiteIndexDocument = types.StringValue(bucket.WebsiteIndexDocument)
+	m.WebsiteErrorDocument = types.StringValue(bucket.WebsiteErrorDocument)
+	m.URLSlug = types.StringValue(bucket.URLSlug)
+	m.WebsiteURL = types.StringValue(bucket.WebsiteURL)
 }

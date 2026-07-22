@@ -749,6 +749,82 @@ func (c *Client) GetBucketCredentials(ctx context.Context, id string) (*BucketCr
 }
 
 // SetBucketQuota updates a bucket's quotas (bytes / object count; 0 = unlimited).
+// SetBucketWebsite toggles static-website serving on a bucket (#342). Enabling
+// serves the bucket anonymously over HTTP at the returned WebsiteURL.
+func (c *Client) SetBucketWebsite(ctx context.Context, id string, req SetBucketWebsiteRequest) (*Bucket, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/buckets/"+id+"/website", req)
+	if err != nil {
+		return nil, err
+	}
+	var b Bucket
+	if err := c.do(httpReq, &b); err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// SetBucketURLSlug sets (or clears, with "") a bucket website's vanity host
+// label; the site moves to <slug>.web.<platform domain>.
+func (c *Client) SetBucketURLSlug(ctx context.Context, id, slug string) (*Bucket, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/buckets/"+id+"/url-slug", SetBucketURLSlugRequest{URLSlug: slug})
+	if err != nil {
+		return nil, err
+	}
+	var b Bucket
+	if err := c.do(httpReq, &b); err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// AddBucketDomain claims a custom domain for a website bucket (#342).
+func (c *Client) AddBucketDomain(ctx context.Context, bucketID, domain string) (*Domain, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/buckets/"+bucketID+"/domains", DomainRequest{Domain: domain})
+	if err != nil {
+		return nil, err
+	}
+	var d Domain
+	if err := c.do(httpReq, &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+// ListBucketDomains lists a website bucket's custom domains.
+func (c *Client) ListBucketDomains(ctx context.Context, bucketID string) ([]*Domain, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/buckets/"+bucketID+"/domains", nil)
+	if err != nil {
+		return nil, err
+	}
+	var domains []*Domain
+	if err := c.do(httpReq, &domains); err != nil {
+		return nil, err
+	}
+	return domains, nil
+}
+
+// VerifyBucketDomain re-checks a website bucket domain's ownership/pointing/cert.
+func (c *Client) VerifyBucketDomain(ctx context.Context, bucketID, domain string) (*DomainVerification, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/buckets/"+bucketID+"/domains/"+domain+"/verify", nil)
+	if err != nil {
+		return nil, err
+	}
+	var vr DomainVerification
+	if err := c.do(httpReq, &vr); err != nil {
+		return nil, err
+	}
+	return &vr, nil
+}
+
+// RemoveBucketDomain removes a custom domain from a website bucket.
+func (c *Client) RemoveBucketDomain(ctx context.Context, bucketID, domain string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/buckets/"+bucketID+"/domains/"+domain, nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
 func (c *Client) SetBucketQuota(ctx context.Context, id string, maxSize, maxObjects int64) (*Bucket, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/buckets/"+id+"/quota", SetBucketQuotaRequest{QuotaMaxSize: maxSize, QuotaMaxObjects: maxObjects})
 	if err != nil {

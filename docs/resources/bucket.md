@@ -21,6 +21,16 @@ resource "fpcloud_bucket" "assets" {
   quota_max_objects = 100000      # 0 = unlimited
 }
 
+# Serve a bucket as a public static website (world-readable over HTTP).
+resource "fpcloud_bucket" "site" {
+  project = fpcloud_project.production.id
+  name    = "site"
+
+  website_enabled        = true
+  website_error_document = "index.html" # SPA fallback: serve the app shell on misses
+  url_slug               = "mysite"     # optional vanity host: mysite.web.<platform domain>
+}
+
 # Wire the bucket's S3 credentials into an app. The secret access key is only
 # returned once, at creation — Terraform keeps it in state (marked sensitive).
 resource "fpcloud_app" "uploader" {
@@ -51,8 +61,12 @@ resource "fpcloud_app" "uploader" {
 
 ### Optional
 
-- `quota_max_objects` (Number) Maximum number of objects (0 = unlimited). Mutable in place.
-- `quota_max_size` (Number) Maximum total size in bytes (0 = unlimited). Mutable in place.
+- `quota_max_objects` (Number) Maximum number of objects (0 = unlimited; unset = the server default). Mutable in place.
+- `quota_max_size` (Number) Maximum total size in bytes (0 = unlimited; unset = the server default). Mutable in place.
+- `url_slug` (String) Vanity website host label: the site moves to <url_slug>.web.<platform domain>. Globally unique; empty reverts to the derived host. Mutable in place.
+- `website_enabled` (Boolean) Serve the bucket as a public static website. Enabling makes the bucket's objects world-readable over HTTP. Mutable in place.
+- `website_error_document` (String) Document served on a miss (e.g. 404.html; set it to the index document for SPA fallback).
+- `website_index_document` (String) Document served for a directory request (defaults to index.html when the website is enabled).
 
 ### Read-Only
 
@@ -62,6 +76,7 @@ resource "fpcloud_app" "uploader" {
 - `region` (String) S3 region for the bucket.
 - `secret_access_key` (String, Sensitive) S3 secret access key for the bucket's initial access key. Returned only on creation — an imported bucket leaves this empty.
 - `status` (String) Current status of the bucket.
+- `website_url` (String) The URL the website is served at (present when the website is enabled).
 
 ## Import
 

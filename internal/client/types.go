@@ -630,23 +630,27 @@ type BackupConfig struct {
 }
 
 // BackupDestination is an opt-in, per-database external backup target (issue
-// #130): the customer's own bucket (AWS or GCP) that a database backs up directly
-// to, keyless via OIDC federation — no secrets, only non-secret identifiers (AWS
-// role ARN, or GCP WIF provider + service account). Provider "aws" uses RoleARN;
-// "gcp" uses WIFProvider + ServiceAccount.
+// #130, #394): the customer's own bucket that a database backs up directly to.
+// Provider "aws"/"gcp" is keyless via OIDC federation (RoleARN, or WIFProvider +
+// ServiceAccount — no secrets); provider "s3" is a static key (Endpoint +
+// AccessKeyID + SecretAccessKey) for any S3-compatible store. SecretAccessKey is
+// write-only — the API never echoes it back.
 type BackupDestination struct {
-	Provider       string `json:"provider"` // "aws" | "gcp"
-	Bucket         string `json:"bucket"`
-	Region         string `json:"region,omitempty"`
-	Prefix         string `json:"prefix,omitempty"`
-	RoleARN        string `json:"role_arn,omitempty"`
-	WIFProvider    string `json:"wif_provider,omitempty"`
-	ServiceAccount string `json:"service_account,omitempty"`
-	Audience       string `json:"audience,omitempty"`
-	Schedule       string `json:"schedule,omitempty"`
-	Enabled        bool   `json:"enabled"`
-	LastRunAt      string `json:"last_run_at,omitempty"`
-	LastRunStatus  string `json:"last_run_status,omitempty"`
+	Provider        string `json:"provider"` // "aws" | "gcp" | "s3"
+	Bucket          string `json:"bucket"`
+	Region          string `json:"region,omitempty"`
+	Prefix          string `json:"prefix,omitempty"`
+	RoleARN         string `json:"role_arn,omitempty"`
+	WIFProvider     string `json:"wif_provider,omitempty"`
+	ServiceAccount  string `json:"service_account,omitempty"`
+	Audience        string `json:"audience,omitempty"`
+	Endpoint        string `json:"endpoint,omitempty"`          // s3
+	AccessKeyID     string `json:"access_key_id,omitempty"`     // s3
+	SecretAccessKey string `json:"secret_access_key,omitempty"` // s3 (write-only)
+	Schedule        string `json:"schedule,omitempty"`
+	Enabled         bool   `json:"enabled"`
+	LastRunAt       string `json:"last_run_at,omitempty"`
+	LastRunStatus   string `json:"last_run_status,omitempty"`
 }
 
 // BackupDestinationRun identifies an on-demand external backup that was started.

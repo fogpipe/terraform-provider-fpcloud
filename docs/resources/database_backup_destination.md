@@ -23,6 +23,7 @@ resource "fpcloud_database_backup_destination" "r2" {
   access_key_id     = var.r2_access_key_id
   secret_access_key = var.r2_secret_access_key
   schedule          = "0 4 * * *" # optional; omit for on-demand only
+  flat_layout       = true        # write dumps at the bucket root instead of <project>/<database>/
 }
 
 # Keyless AWS (IAM role assumed via web identity)
@@ -49,6 +50,7 @@ resource "fpcloud_database_backup_destination" "aws" {
 - `access_key_id` (String) s3: the static access key id.
 - `audience` (String) Optional OIDC token audience (provider default otherwise).
 - `endpoint` (String) s3: the custom endpoint URL (e.g. https://<acct>.r2.cloudflarestorage.com).
+- `flat_layout` (Boolean) Skip the <project>/<database> nesting fpcloud otherwise adds after prefix, so objects land at prefix/ (bucket root when prefix is also unset). Defaults to false (today's nested layout).
 - `prefix` (String) Optional key prefix within the bucket.
 - `region` (String) Bucket region. Required for aws; optional for s3 (e.g. "auto" for Cloudflare R2).
 - `role_arn` (String) aws: the IAM role ARN assumed via web identity.

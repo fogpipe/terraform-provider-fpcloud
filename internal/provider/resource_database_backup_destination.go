@@ -36,6 +36,7 @@ type DatabaseBackupDestinationResourceModel struct {
 	Bucket          types.String `tfsdk:"bucket"`
 	Region          types.String `tfsdk:"region"`
 	Prefix          types.String `tfsdk:"prefix"`
+	FlatLayout      types.Bool   `tfsdk:"flat_layout"`
 	RoleARN         types.String `tfsdk:"role_arn"`
 	WIFProvider     types.String `tfsdk:"wif_provider"`
 	ServiceAccount  types.String `tfsdk:"service_account"`
@@ -88,6 +89,10 @@ func (r *DatabaseBackupDestinationResource) Schema(_ context.Context, _ resource
 			},
 			"prefix": schema.StringAttribute{
 				Description: "Optional key prefix within the bucket.",
+				Optional:    true,
+			},
+			"flat_layout": schema.BoolAttribute{
+				Description: "Skip the <project>/<database> nesting fpcloud otherwise adds after prefix, so objects land at prefix/ (bucket root when prefix is also unset). Defaults to false (today's nested layout).",
 				Optional:    true,
 			},
 			"role_arn": schema.StringAttribute{
@@ -227,6 +232,7 @@ func (r *DatabaseBackupDestinationResource) set(ctx context.Context, plan *Datab
 		Bucket:          plan.Bucket.ValueString(),
 		Region:          plan.Region.ValueString(),
 		Prefix:          plan.Prefix.ValueString(),
+		FlatLayout:      plan.FlatLayout.ValueBool(),
 		RoleARN:         plan.RoleARN.ValueString(),
 		WIFProvider:     plan.WIFProvider.ValueString(),
 		ServiceAccount:  plan.ServiceAccount.ValueString(),
@@ -247,6 +253,7 @@ func mapBackupDestinationToState(dest *client.BackupDestination, state *Database
 	state.Bucket = types.StringValue(dest.Bucket)
 	state.Region = optionalString(dest.Region)
 	state.Prefix = optionalString(dest.Prefix)
+	state.FlatLayout = types.BoolValue(dest.FlatLayout)
 	state.RoleARN = optionalString(dest.RoleARN)
 	state.WIFProvider = optionalString(dest.WIFProvider)
 	state.ServiceAccount = optionalString(dest.ServiceAccount)

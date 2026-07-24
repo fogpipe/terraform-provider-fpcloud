@@ -681,6 +681,7 @@ type BackupDestination struct {
 	Bucket          string `json:"bucket"`
 	Region          string `json:"region,omitempty"`
 	Prefix          string `json:"prefix,omitempty"`
+	FlatLayout      bool   `json:"flat_layout,omitempty"` // skip the <project>/<database> nesting under prefix
 	RoleARN         string `json:"role_arn,omitempty"`
 	WIFProvider     string `json:"wif_provider,omitempty"`
 	ServiceAccount  string `json:"service_account,omitempty"`

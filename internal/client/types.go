@@ -461,6 +461,10 @@ type DomainVerification struct {
 	PointingType   string  `json:"pointing_type"`
 	PointingName   string  `json:"pointing_name"`
 	PointingValue  string  `json:"pointing_value"`
+	// AcmeCNAMEName/AcmeCNAMEValue are the one-time ACME DNS-01 delegation CNAME
+	// a wildcard-mode domain must add (ADR-044); empty for every other mode.
+	AcmeCNAMEName  string `json:"acme_cname_name,omitempty"`
+	AcmeCNAMEValue string `json:"acme_cname_value,omitempty"`
 }
 
 // AppConfig represents an environment variable or secret for an application.

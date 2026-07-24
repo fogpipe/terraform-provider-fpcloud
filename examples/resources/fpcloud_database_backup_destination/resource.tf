@@ -8,6 +8,7 @@ resource "fpcloud_database_backup_destination" "r2" {
   access_key_id     = var.r2_access_key_id
   secret_access_key = var.r2_secret_access_key
   schedule          = "0 4 * * *" # optional; omit for on-demand only
+  flat_layout       = true        # write dumps at the bucket root instead of <project>/<database>/
 }
 
 # Keyless AWS (IAM role assumed via web identity)

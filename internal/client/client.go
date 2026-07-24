@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 )
 
@@ -55,60 +54,27 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body any) 
 }
 
 func (c *Client) do(req *http.Request, out any) error {
-	const maxRetries = 5
-	for attempt := 0; ; attempt++ {
-		resp, err := c.HTTPClient.Do(req)
-		if err != nil {
-			return fmt.Errorf("executing request: %w", err)
-		}
-
-		// Ride out rate limiting (429) with backoff so a burst of requests — a
-		// large plan/apply or the acceptance suite — retries instead of failing.
-		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRetries {
-			resp.Body.Close()
-			if req.GetBody != nil {
-				if body, berr := req.GetBody(); berr == nil {
-					req.Body = body
-				}
-			}
-			select {
-			case <-time.After(retryAfter(resp.Header.Get("Retry-After"), attempt)):
-			case <-req.Context().Done():
-				return req.Context().Err()
-			}
-			continue
-		}
-
-		defer resp.Body.Close()
-
-		if resp.StatusCode >= 400 {
-			apiErr := &APIError{StatusCode: resp.StatusCode}
-			if err := json.NewDecoder(resp.Body).Decode(apiErr); err != nil {
-				return &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("HTTP %d", resp.StatusCode)}
-			}
-			return apiErr
-		}
-
-		if out != nil {
-			if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-				return fmt.Errorf("decoding response: %w", err)
-			}
-		}
-		return nil
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("executing request: %w", err)
 	}
-}
+	defer resp.Body.Close()
 
-// retryAfter picks a backoff duration for a 429, honoring a numeric Retry-After
-// header when present and otherwise using capped exponential backoff.
-func retryAfter(header string, attempt int) time.Duration {
-	if secs, err := strconv.Atoi(header); err == nil && secs > 0 {
-		return time.Duration(secs) * time.Second
+	if resp.StatusCode >= 400 {
+		apiErr := &APIError{StatusCode: resp.StatusCode}
+		if err := json.NewDecoder(resp.Body).Decode(apiErr); err != nil {
+			return &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("HTTP %d", resp.StatusCode)}
+		}
+		return apiErr
 	}
-	d := 500 * time.Millisecond * time.Duration(int64(1)<<attempt)
-	if d > 8*time.Second {
-		d = 8 * time.Second
+
+	if out != nil {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			return fmt.Errorf("decoding response: %w", err)
+		}
 	}
-	return d
+
+	return nil
 }
 
 // Register creates a new user account. Does not require authentication.
@@ -124,6 +90,52 @@ func (c *Client) Register(ctx context.Context, req RegisterRequest) (*RegisterRe
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// FKECredentials fetches the cluster connection facts for a kubeconfig context
+// scoped to the project (GET /projects/{id}/fke/credentials). Returns an error
+// matching client.ErrNotFound when the API predates the endpoint (404), letting
+// the CLI fall back to embedded constants.
+func (c *Client) FKECredentials(ctx context.Context, projectID string) (*ClusterCredentials, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/projects/"+projectID+"/fke/credentials", nil)
+	if err != nil {
+		return nil, err
+	}
+	var creds ClusterCredentials
+	if err := c.do(httpReq, &creds); err != nil {
+		return nil, err
+	}
+	return &creds, nil
+}
+
+// ClusterInfo fetches the project-independent cluster connection facts (apiserver
+// URL + CA) for assembling a cluster-admin kubeconfig — the staff FKE path, which
+// is not project-scoped.
+func (c *Client) ClusterInfo(ctx context.Context) (*ClusterInfo, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/cluster-info", nil)
+	if err != nil {
+		return nil, err
+	}
+	var info ClusterInfo
+	if err := c.do(httpReq, &info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// FKEToken mints a short-lived, namespace-scoped Kubernetes token bound to the
+// project's ServiceAccount (POST /projects/{id}/fke/token). kubectl's exec plugin
+// calls this transparently.
+func (c *Client) FKEToken(ctx context.Context, projectID string) (*ClusterToken, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/projects/"+projectID+"/fke/token", nil)
+	if err != nil {
+		return nil, err
+	}
+	var tok ClusterToken
+	if err := c.do(httpReq, &tok); err != nil {
+		return nil, err
+	}
+	return &tok, nil
 }
 
 // GetMe retrieves the current user's info.
@@ -201,6 +213,23 @@ type SetRetentionPolicyRequest struct {
 	Enabled    bool   `json:"enabled"`
 }
 
+// RegistryRepoVisibility is a per-repository public/private setting (ADR-013 S4).
+// A repo with Public = true is anonymously pullable; absence of a record means
+// private. Repo is the project-relative name.
+type RegistryRepoVisibility struct {
+	ProjectID string    `json:"project_id"`
+	Repo      string    `json:"repo"`
+	Public    bool      `json:"public"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// SetRegistryVisibilityRequest upserts a repository's visibility for (project, repo).
+type SetRegistryVisibilityRequest struct {
+	Repo   string `json:"repo"`
+	Public bool   `json:"public"`
+}
+
 // RetentionPreviewItem is one tag a retention policy would delete.
 type RetentionPreviewItem struct {
 	Repo     string     `json:"repo"`
@@ -215,27 +244,132 @@ type RetentionPreview struct {
 	Items []RetentionPreviewItem `json:"items"`
 }
 
-// RegistryCredentials is a project-scoped registry credential for a tenant's CI.
-type RegistryCredentials struct {
-	Server     string `json:"server"`
-	Username   string `json:"username"`
-	Password   string `json:"password"`
-	Repository string `json:"repository"`
-}
-
-// GetRegistryCredentials fetches the caller's project-scoped registry credential
-// (a Zot user limited to <org_short_id>/<project>/**). The caller authenticates with a
-// service-account API key — e.g. one minted by OIDC federation.
-func (c *Client) GetRegistryCredentials(ctx context.Context) (*RegistryCredentials, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/registry/credentials", nil)
+// ListRegistryRepositories lists a project's registry repositories.
+func (c *Client) ListRegistryRepositories(ctx context.Context, projectID string) ([]RegistryRepository, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/projects/"+projectID+"/repositories", nil)
 	if err != nil {
 		return nil, err
 	}
-	var resp RegistryCredentials
-	if err := c.do(httpReq, &resp); err != nil {
+	var repos []RegistryRepository
+	if err := c.do(httpReq, &repos); err != nil {
 		return nil, err
 	}
-	return &resp, nil
+	return repos, nil
+}
+
+// ListRegistryTags lists the tags of one repository (project-relative name).
+func (c *Client) ListRegistryTags(ctx context.Context, projectID, repo string) (*RegistryTagList, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet,
+		"/api/v1/projects/"+projectID+"/repositories/tags?repo="+url.QueryEscape(repo), nil)
+	if err != nil {
+		return nil, err
+	}
+	var tags RegistryTagList
+	if err := c.do(httpReq, &tags); err != nil {
+		return nil, err
+	}
+	return &tags, nil
+}
+
+// DeleteRegistryTag deletes one tag from a repository (project-relative name).
+func (c *Client) DeleteRegistryTag(ctx context.Context, projectID, repo, tag string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete,
+		"/api/v1/projects/"+projectID+"/repositories/tags?repo="+url.QueryEscape(repo)+"&tag="+url.QueryEscape(tag), nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
+// ListRetentionPolicies lists a project's registry retention policies.
+func (c *Client) ListRetentionPolicies(ctx context.Context, projectID string) ([]*RegistryRetentionPolicy, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/projects/"+projectID+"/repositories/retention", nil)
+	if err != nil {
+		return nil, err
+	}
+	var policies []*RegistryRetentionPolicy
+	if err := c.do(httpReq, &policies); err != nil {
+		return nil, err
+	}
+	return policies, nil
+}
+
+// SetRetentionPolicy upserts a retention policy (empty Repo = project default).
+func (c *Client) SetRetentionPolicy(ctx context.Context, projectID string, req SetRetentionPolicyRequest) (*RegistryRetentionPolicy, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/projects/"+projectID+"/repositories/retention", req)
+	if err != nil {
+		return nil, err
+	}
+	var policy RegistryRetentionPolicy
+	if err := c.do(httpReq, &policy); err != nil {
+		return nil, err
+	}
+	return &policy, nil
+}
+
+// DeleteRetentionPolicy removes a retention policy (empty repo = project default).
+func (c *Client) DeleteRetentionPolicy(ctx context.Context, projectID, repo string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete,
+		"/api/v1/projects/"+projectID+"/repositories/retention?repo="+url.QueryEscape(repo), nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
+// PreviewRetention dry-runs the project's retention policies, returning the
+// tags they would delete right now.
+func (c *Client) PreviewRetention(ctx context.Context, projectID string) (*RetentionPreview, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/projects/"+projectID+"/repositories/retention/preview", nil)
+	if err != nil {
+		return nil, err
+	}
+	var preview RetentionPreview
+	if err := c.do(httpReq, &preview); err != nil {
+		return nil, err
+	}
+	return &preview, nil
+}
+
+// ApplyRetention enforces the project's retention policies now, deleting the
+// selected tags and returning them.
+func (c *Client) ApplyRetention(ctx context.Context, projectID string) (*RetentionPreview, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/projects/"+projectID+"/repositories/retention/apply", nil)
+	if err != nil {
+		return nil, err
+	}
+	var preview RetentionPreview
+	if err := c.do(httpReq, &preview); err != nil {
+		return nil, err
+	}
+	return &preview, nil
+}
+
+// ListRegistryVisibility lists a project's per-repo visibility records. A repo
+// with no record is private (the default).
+func (c *Client) ListRegistryVisibility(ctx context.Context, projectID string) ([]*RegistryRepoVisibility, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/projects/"+projectID+"/repositories/visibility", nil)
+	if err != nil {
+		return nil, err
+	}
+	var records []*RegistryRepoVisibility
+	if err := c.do(httpReq, &records); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+// SetRegistryVisibility sets one repository's public/private visibility.
+func (c *Client) SetRegistryVisibility(ctx context.Context, projectID string, req SetRegistryVisibilityRequest) (*RegistryRepoVisibility, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/projects/"+projectID+"/repositories/visibility", req)
+	if err != nil {
+		return nil, err
+	}
+	var record RegistryRepoVisibility
+	if err := c.do(httpReq, &record); err != nil {
+		return nil, err
+	}
+	return &record, nil
 }
 
 // CreateProject creates a new project.
@@ -650,6 +784,20 @@ func (c *Client) GetDatabase(ctx context.Context, id string) (*Database, error) 
 	return &db, nil
 }
 
+// GetDatabaseConnection retrieves a database's live connection info (incl. the
+// real CNPG password) for the `db connect` tunnel path.
+func (c *Client) GetDatabaseConnection(ctx context.Context, id string) (*DatabaseConnection, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/databases/"+id+"/connection", nil)
+	if err != nil {
+		return nil, err
+	}
+	var conn DatabaseConnection
+	if err := c.do(httpReq, &conn); err != nil {
+		return nil, err
+	}
+	return &conn, nil
+}
+
 // UpdateDatabase reconciles a database's spec (cpu/memory/storage/instances/version/pooler).
 func (c *Client) UpdateDatabase(ctx context.Context, id string, req UpdateDatabaseRequest) (*Database, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/databases/"+id, req)
@@ -749,6 +897,18 @@ func (c *Client) GetBucketCredentials(ctx context.Context, id string) (*BucketCr
 }
 
 // SetBucketQuota updates a bucket's quotas (bytes / object count; 0 = unlimited).
+func (c *Client) SetBucketQuota(ctx context.Context, id string, maxSize, maxObjects int64) (*Bucket, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/buckets/"+id+"/quota", SetBucketQuotaRequest{QuotaMaxSize: maxSize, QuotaMaxObjects: maxObjects})
+	if err != nil {
+		return nil, err
+	}
+	var b Bucket
+	if err := c.do(httpReq, &b); err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
 // SetBucketWebsite toggles static-website serving on a bucket (#342). Enabling
 // serves the bucket anonymously over HTTP at the returned WebsiteURL.
 func (c *Client) SetBucketWebsite(ctx context.Context, id string, req SetBucketWebsiteRequest) (*Bucket, error) {
@@ -767,66 +927,6 @@ func (c *Client) SetBucketWebsite(ctx context.Context, id string, req SetBucketW
 // label; the site moves to <slug>.web.<platform domain>.
 func (c *Client) SetBucketURLSlug(ctx context.Context, id, slug string) (*Bucket, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/buckets/"+id+"/url-slug", SetBucketURLSlugRequest{URLSlug: slug})
-	if err != nil {
-		return nil, err
-	}
-	var b Bucket
-	if err := c.do(httpReq, &b); err != nil {
-		return nil, err
-	}
-	return &b, nil
-}
-
-// AddBucketDomain claims a custom domain for a website bucket (#342).
-func (c *Client) AddBucketDomain(ctx context.Context, bucketID, domain string) (*Domain, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/buckets/"+bucketID+"/domains", DomainRequest{Domain: domain})
-	if err != nil {
-		return nil, err
-	}
-	var d Domain
-	if err := c.do(httpReq, &d); err != nil {
-		return nil, err
-	}
-	return &d, nil
-}
-
-// ListBucketDomains lists a website bucket's custom domains.
-func (c *Client) ListBucketDomains(ctx context.Context, bucketID string) ([]*Domain, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/buckets/"+bucketID+"/domains", nil)
-	if err != nil {
-		return nil, err
-	}
-	var domains []*Domain
-	if err := c.do(httpReq, &domains); err != nil {
-		return nil, err
-	}
-	return domains, nil
-}
-
-// VerifyBucketDomain re-checks a website bucket domain's ownership/pointing/cert.
-func (c *Client) VerifyBucketDomain(ctx context.Context, bucketID, domain string) (*DomainVerification, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/buckets/"+bucketID+"/domains/"+domain+"/verify", nil)
-	if err != nil {
-		return nil, err
-	}
-	var vr DomainVerification
-	if err := c.do(httpReq, &vr); err != nil {
-		return nil, err
-	}
-	return &vr, nil
-}
-
-// RemoveBucketDomain removes a custom domain from a website bucket.
-func (c *Client) RemoveBucketDomain(ctx context.Context, bucketID, domain string) error {
-	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/buckets/"+bucketID+"/domains/"+domain, nil)
-	if err != nil {
-		return err
-	}
-	return c.do(httpReq, nil)
-}
-
-func (c *Client) SetBucketQuota(ctx context.Context, id string, maxSize, maxObjects int64) (*Bucket, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/buckets/"+id+"/quota", SetBucketQuotaRequest{QuotaMaxSize: maxSize, QuotaMaxObjects: maxObjects})
 	if err != nil {
 		return nil, err
 	}
@@ -1098,9 +1198,10 @@ func (c *Client) RestoreDatabase(ctx context.Context, dbID string, req RestoreRe
 	return &db, nil
 }
 
-// AddDomain adds a custom domain to an app.
-func (c *Client) AddDomain(ctx context.Context, appID string, domain string) (*Domain, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/apps/"+appID+"/domains", DomainRequest{Domain: domain})
+// AddDomain adds a custom domain to an app. mode selects the attachment behavior
+// (ADR-044); an empty mode defaults to "verified".
+func (c *Client) AddDomain(ctx context.Context, appID, domain, mode string) (*Domain, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/apps/"+appID+"/domains", DomainRequest{Domain: domain, Mode: mode})
 	if err != nil {
 		return nil, err
 	}
@@ -1139,6 +1240,54 @@ func (c *Client) VerifyDomain(ctx context.Context, appID string, domain string) 
 }
 
 // RemoveDomain removes a custom domain from an app.
+// AddBucketDomain claims a custom domain for a website bucket (#342).
+func (c *Client) AddBucketDomain(ctx context.Context, bucketID, domain string) (*Domain, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/buckets/"+bucketID+"/domains", DomainRequest{Domain: domain})
+	if err != nil {
+		return nil, err
+	}
+	var d Domain
+	if err := c.do(httpReq, &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+// ListBucketDomains lists a website bucket's custom domains.
+func (c *Client) ListBucketDomains(ctx context.Context, bucketID string) ([]*Domain, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/buckets/"+bucketID+"/domains", nil)
+	if err != nil {
+		return nil, err
+	}
+	var domains []*Domain
+	if err := c.do(httpReq, &domains); err != nil {
+		return nil, err
+	}
+	return domains, nil
+}
+
+// VerifyBucketDomain re-checks a website bucket domain's ownership/pointing/cert.
+func (c *Client) VerifyBucketDomain(ctx context.Context, bucketID, domain string) (*DomainVerification, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/buckets/"+bucketID+"/domains/"+domain+"/verify", nil)
+	if err != nil {
+		return nil, err
+	}
+	var vr DomainVerification
+	if err := c.do(httpReq, &vr); err != nil {
+		return nil, err
+	}
+	return &vr, nil
+}
+
+// RemoveBucketDomain removes a custom domain from a website bucket.
+func (c *Client) RemoveBucketDomain(ctx context.Context, bucketID, domain string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/buckets/"+bucketID+"/domains/"+domain, nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
 func (c *Client) RemoveDomain(ctx context.Context, appID string, domain string) error {
 	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/apps/"+appID+"/domains/"+domain, nil)
 	if err != nil {
@@ -1310,6 +1459,20 @@ func (c *Client) UpdateOrgFKE(ctx context.Context, id string, enabled bool) (*Or
 	return &org, nil
 }
 
+// UpdateOrgDisplayName changes an organization's mutable, cosmetic display name.
+// The frozen name and short_id are untouched. Gated on org-admin server-side.
+func (c *Client) UpdateOrgDisplayName(ctx context.Context, id, displayName string) (*Organization, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/orgs/"+id, UpdateOrgRequest{DisplayName: displayName})
+	if err != nil {
+		return nil, err
+	}
+	var org Organization
+	if err := c.do(httpReq, &org); err != nil {
+		return nil, err
+	}
+	return &org, nil
+}
+
 // ListOrgMembers lists all members of an organization.
 func (c *Client) ListOrgMembers(ctx context.Context, orgID string) ([]*OrgMember, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/orgs/"+orgID+"/members", nil)
@@ -1418,6 +1581,20 @@ func (c *Client) DeleteTrustBinding(ctx context.Context, projectID, bindingID st
 
 func (c *Client) CreateServiceAccount(ctx context.Context, projectID string, req CreateServiceAccountRequest) (*ServiceAccount, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/projects/"+projectID+"/service-accounts", req)
+	if err != nil {
+		return nil, err
+	}
+	var sa ServiceAccount
+	if err := c.do(httpReq, &sa); err != nil {
+		return nil, err
+	}
+	return &sa, nil
+}
+
+// UpdateServiceAccountDisplayName changes a service account's mutable, cosmetic
+// display name. The frozen name and email are untouched.
+func (c *Client) UpdateServiceAccountDisplayName(ctx context.Context, id, displayName string) (*ServiceAccount, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/service-accounts/"+id, UpdateServiceAccountRequest{DisplayName: displayName})
 	if err != nil {
 		return nil, err
 	}

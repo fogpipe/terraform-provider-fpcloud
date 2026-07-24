@@ -2,7 +2,9 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"time"
 )
 
@@ -80,6 +82,9 @@ type App struct {
 	DisplayName         string    `json:"display_name"`
 	URLSlug             string    `json:"url_slug"` // optional vanity host override (ADR-040); empty = derived host
 	Image               string    `json:"image"`
+	Command             []string  `json:"command,omitempty"`         // container entrypoint override (empty = image ENTRYPOINT)
+	Args                []string  `json:"args,omitempty"`            // container arguments (empty = image CMD)
+	ReleaseCommand      []string  `json:"release_command,omitempty"` // run once per deploy, before the new version goes live
 	Status              string    `json:"status"`
 	URL                 string    `json:"url"`
 	Domains             []string  `json:"domains"`
@@ -226,6 +231,22 @@ type Database struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
+// DatabaseConnection is a database's live connection info (GET
+// /databases/{id}/connection): the real CNPG credentials plus the
+// cluster-internal host, reachable through a port-forward tunnel
+// (`fpcloud db connect`).
+type DatabaseConnection struct {
+	ProjectID string `json:"project_id"`
+	Namespace string `json:"namespace"`
+	Cluster   string `json:"cluster"`
+	Host      string `json:"host"`
+	Port      int32  `json:"port"`
+	Database  string `json:"database"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+	URL       string `json:"url"`
+}
+
 // CreateDatabaseRequest is the request body for creating a database.
 type CreateDatabaseRequest struct {
 	Name        string `json:"name"`
@@ -268,13 +289,19 @@ type Bucket struct {
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 
-	// Static-website serving (#342). When enabled the bucket is served
-	// anonymously over HTTP (public read) at WebsiteURL.
+	// Static-website serving on Garage's s3_web plane (#342). When enabled the
+	// bucket is served anonymously over HTTP (public read) at WebsiteURL.
 	WebsiteEnabled       bool   `json:"website_enabled"`
 	WebsiteIndexDocument string `json:"website_index_document,omitempty"`
 	WebsiteErrorDocument string `json:"website_error_document,omitempty"`
 	URLSlug              string `json:"url_slug"`
 	WebsiteURL           string `json:"website_url,omitempty"`
+}
+
+// SetBucketURLSlugRequest is the request body for setting (or clearing, with
+// "") a bucket website's vanity host label.
+type SetBucketURLSlugRequest struct {
+	URLSlug string `json:"url_slug"`
 }
 
 // CreateBucketRequest is the request body for creating a bucket.
@@ -297,12 +324,6 @@ type SetBucketWebsiteRequest struct {
 	Enabled       bool   `json:"enabled"`
 	IndexDocument string `json:"index_document,omitempty"`
 	ErrorDocument string `json:"error_document,omitempty"`
-}
-
-// SetBucketURLSlugRequest is the request body for setting (or clearing, with
-// "") a bucket website's vanity host label.
-type SetBucketURLSlugRequest struct {
-	URLSlug string `json:"url_slug"`
 }
 
 // BucketKey is a scoped S3 access key for a bucket. SecretAccessKey is only
@@ -402,6 +423,7 @@ type Domain struct {
 	AppID             string     `json:"app_id,omitempty"`
 	BucketID          string     `json:"bucket_id,omitempty"`
 	Domain            string     `json:"domain"`
+	Mode              string     `json:"mode"`
 	Status            string     `json:"status"`
 	TLSStatus         string     `json:"tls_status"`
 	VerificationToken string     `json:"verification_token,omitempty"`
@@ -413,7 +435,17 @@ type Domain struct {
 // DomainRequest is the request body for adding or removing a domain.
 type DomainRequest struct {
 	Domain string `json:"domain"`
+	// Mode selects the attachment behavior (ADR-044); empty defaults to "verified".
+	Mode string `json:"mode,omitempty"`
 }
+
+// Domain attachment modes (ADR-044).
+const (
+	DomainModeVerified = "verified"
+	DomainModeEdge     = "edge"
+	DomainModeOnDemand = "on_demand"
+	DomainModeWildcard = "wildcard"
+)
 
 // DomainVerification is the ownership/pointing/cert breakdown for a custom
 // domain plus the exact DNS records the tenant still needs to configure.
@@ -478,9 +510,11 @@ type Organization struct {
 }
 
 // UpdateOrgRequest is the request body for updating an organization. FKEEnabled is
-// a pointer so an omitted field is distinguishable from an explicit false.
+// a pointer so an omitted field is distinguishable from an explicit false;
+// DisplayName changes the mutable cosmetic label.
 type UpdateOrgRequest struct {
-	FKEEnabled *bool `json:"fke_enabled,omitempty"`
+	FKEEnabled  *bool  `json:"fke_enabled,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
 }
 
 // OrgSecret is a Fogpipe Secrets Manager bundle (ADR-028): an org-scoped named
@@ -561,6 +595,12 @@ type ServiceAccount struct {
 // CreateServiceAccountRequest is the request body for creating a service account.
 type CreateServiceAccountRequest struct {
 	Name        string `json:"name"`
+	DisplayName string `json:"display_name,omitempty"`
+}
+
+// UpdateServiceAccountRequest is the request body for updating a service account's
+// mutable cosmetic display name.
+type UpdateServiceAccountRequest struct {
 	DisplayName string `json:"display_name,omitempty"`
 }
 
@@ -670,18 +710,19 @@ type RestoreRequest struct {
 
 // Deployment represents a single deployment event for an application.
 type Deployment struct {
-	ID         string  `json:"id"`
-	AppID      string  `json:"app_id"`
-	Image      string  `json:"image"`
-	Status     string  `json:"status"`
-	Trigger    string  `json:"trigger"`
-	CommitSHA  string  `json:"commit_sha,omitempty"`
-	Message    string  `json:"message,omitempty"`
-	StartedAt  string  `json:"started_at"`
-	FinishedAt *string `json:"finished_at,omitempty"`
-	DurationMs *int    `json:"duration_ms,omitempty"`
-	CreatedBy  string  `json:"created_by,omitempty"`
-	CreatedAt  string  `json:"created_at"`
+	ID          string  `json:"id"`
+	AppID       string  `json:"app_id"`
+	Image       string  `json:"image"`
+	Status      string  `json:"status"`
+	Trigger     string  `json:"trigger"`
+	CommitSHA   string  `json:"commit_sha,omitempty"`
+	Message     string  `json:"message,omitempty"`
+	ReleaseLogs string  `json:"release_logs,omitempty"` // output of the release-command Job for this deploy
+	StartedAt   string  `json:"started_at"`
+	FinishedAt  *string `json:"finished_at,omitempty"`
+	DurationMs  *int    `json:"duration_ms,omitempty"`
+	CreatedBy   string  `json:"created_by,omitempty"`
+	CreatedAt   string  `json:"created_at"`
 }
 
 // SetIAMBindingRequest is the request body for setting an IAM binding.
@@ -745,4 +786,43 @@ func (e *APIError) Error() string {
 		return e.Code
 	}
 	return fmt.Sprintf("HTTP %d", e.StatusCode)
+}
+
+// ErrNotFound is a sentinel matched via errors.Is against an *APIError with a 404
+// status. It lets callers branch on "the API doesn't know this route/resource"
+// — e.g. the CLI falling back to embedded cluster constants against an older API
+// that lacks the FKE credentials endpoint.
+var ErrNotFound = errors.New("not found")
+
+// Is reports whether target is ErrNotFound and this error carries HTTP 404, so
+// errors.Is(err, client.ErrNotFound) works on responses from do().
+func (e *APIError) Is(target error) bool {
+	return target == ErrNotFound && e.StatusCode == http.StatusNotFound
+}
+
+// ClusterCredentials is the cluster connection facts for assembling a kubeconfig
+// context (GET /projects/{id}/fke/credentials). Server + CertificateAuthorityData
+// are cluster-global; Context/Namespace are per-project. The bearer token is
+// minted separately by the exec plugin (FKEToken).
+type ClusterCredentials struct {
+	Server                   string `json:"server"`
+	CertificateAuthorityData string `json:"certificate_authority_data"`
+	Context                  string `json:"context"`
+	Namespace                string `json:"namespace"`
+}
+
+// ClusterToken is a short-lived, namespace-scoped Kubernetes token bound to the
+// project's ServiceAccount (POST /projects/{id}/fke/token).
+type ClusterToken struct {
+	Token               string `json:"token"`
+	ExpirationTimestamp string `json:"expiration_timestamp"`
+}
+
+// ClusterInfo is the project-independent cluster connection facts (GET
+// /cluster-info): the apiserver URL and CA bundle, both public information (they
+// appear in every kubeconfig). Used by the staff cluster-admin path, which is not
+// project-scoped, so the CLI binary carries no baked-in cluster endpoint/CA.
+type ClusterInfo struct {
+	Server                   string `json:"server"`
+	CertificateAuthorityData string `json:"certificate_authority_data"`
 }

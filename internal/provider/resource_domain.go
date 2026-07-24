@@ -104,7 +104,10 @@ func (r *DomainResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	d, err := r.client.AddDomain(ctx, plan.AppID.ValueString(), plan.Domain.ValueString())
+	// mode is left empty — the API defaults it to "verified" (ADR-044). Exposing
+	// the other modes (edge/on_demand/wildcard) as a TF attribute is a separate
+	// follow-up, not part of this client sync.
+	d, err := r.client.AddDomain(ctx, plan.AppID.ValueString(), plan.Domain.ValueString(), "")
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating domain", err.Error())
 		return

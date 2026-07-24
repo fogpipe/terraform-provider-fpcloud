@@ -22,7 +22,7 @@ Manages a Fogpipe service account.
 
 ### Optional
 
-- `display_name` (String) Human-readable display name.
+- `display_name` (String) Human-readable display name. Mutable in place.
 
 ### Read-Only
 

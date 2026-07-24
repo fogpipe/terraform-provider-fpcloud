@@ -3,12 +3,12 @@
 page_title: "fpcloud_org Resource - fpcloud"
 subcategory: ""
 description: |-
-  Manages a Fogpipe organization. The API supports create and read only: changing any field forces a new organization, and the org is not deleted on destroy (it is only removed from state).
+  Manages a Fogpipe organization. name is immutable (changing it forces a new organization); display_name is mutable in place. The org is not deleted on destroy (it is only removed from state) — the API exposes no deletion endpoint.
 ---
 
 # fpcloud_org (Resource)
 
-Manages a Fogpipe organization. The API supports create and read only: changing any field forces a new organization, and the org is not deleted on destroy (it is only removed from state).
+Manages a Fogpipe organization. name is immutable (changing it forces a new organization); display_name is mutable in place. The org is not deleted on destroy (it is only removed from state) — the API exposes no deletion endpoint.
 
 ## Example Usage
 
@@ -29,7 +29,8 @@ resource "fpcloud_org" "acme" {
 ### Optional
 
 - `adopt_existing` (Boolean) When true, if an organization with this name already exists, adopt it into Terraform state on create instead of failing with a 409 conflict. Defaults to false, so create never silently takes ownership of an organization it did not create.
-- `display_name` (String) Human-readable display name. Defaults to the name. Changing it forces a new organization.
+- `display_name` (String) Human-readable display name. Defaults to the name. Mutable in place.
+- `fke_enabled` (Boolean) Whether this org is entitled to FKE (tenant kubeconfig) access. Mutable in place, but the API only lets a caller with administrate rights on the platform operator org set this — an ordinary org owner setting it themselves gets a 403; have an operator apply it, or set it via a provider configured with operator credentials.
 
 ### Read-Only
 

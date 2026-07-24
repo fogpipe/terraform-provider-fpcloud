@@ -3,12 +3,12 @@
 page_title: "fpcloud_database_backup_destination Resource - fpcloud"
 subcategory: ""
 description: |-
-  Manages a database's external (bring-your-own-bucket) backup destination. Keyless via OIDC federation for AWS (role_arn) and GCP (wif_provider + service_account), or a static key for any S3-compatible store (provider_type "s3": endpoint + access_key_id + secret_access_key) — Cloudflare R2, Backblaze B2, Hetzner Object Storage, Garage.
+  Manages a database's external (bring-your-own-bucket) backup destination. Keyless via OIDC federation for AWS (role_arn) and GCP (wif_provider + service_account), or a static key for any S3-compatible store (provider "s3": endpoint + access_key_id + secret_access_key) — Cloudflare R2, Backblaze B2, Hetzner Object Storage, Garage.
 ---
 
 # fpcloud_database_backup_destination (Resource)
 
-Manages a database's external (bring-your-own-bucket) backup destination. Keyless via OIDC federation for AWS (`role_arn`) and GCP (`wif_provider` + `service_account`), or a static key for any S3-compatible store (`provider_type = "s3"`: `endpoint` + `access_key_id` + `secret_access_key`) — Cloudflare R2, Backblaze B2, Hetzner Object Storage, Garage.
+Manages a database's external (bring-your-own-bucket) backup destination. Keyless via OIDC federation for AWS (role_arn) and GCP (wif_provider + service_account), or a static key for any S3-compatible store (provider "s3": endpoint + access_key_id + secret_access_key) — Cloudflare R2, Backblaze B2, Hetzner Object Storage, Garage.
 
 ## Example Usage
 

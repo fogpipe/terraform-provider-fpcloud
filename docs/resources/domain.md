@@ -27,6 +27,10 @@ resource "fpcloud_domain" "main" {
 - `app_id` (String) The application ID to attach this domain to.
 - `domain` (String) The custom domain name (e.g. app.example.com).
 
+### Optional
+
+- `mode` (String) Attachment mode: "verified" (default — TXT ownership + DNS pointing + HTTP-01 cert), "edge" (any Host accepted, no verification/cert — TLS terminated upstream), "on_demand" (DNS pointing only, HTTP-01 cert on attach — meant for an app's own backend attaching its end users' domains), or "wildcard" (a leading "*." label, DNS-01 cert, requires a DNS-01 issuer configured on the platform). The API has no update path for this field, so changing it replaces the domain.
+
 ### Read-Only
 
 - `created_at` (String) The time the domain was created.

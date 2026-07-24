@@ -8,7 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 // Client is the Fogpipe API client.
@@ -796,6 +799,34 @@ func (c *Client) GetDatabaseConnection(ctx context.Context, id string) (*Databas
 		return nil, err
 	}
 	return &conn, nil
+}
+
+// DialTunnel opens the server-side db-connect tunnel (ADR-045): a WebSocket
+// carrying raw Postgres wire-protocol bytes, relayed by the API to the
+// database's CNPG -rw Service. No k8s/FKE credentials involved — this rides
+// the same Authorization header as every other API call. Call once per local
+// TCP connection to relay (so e.g. `pg_dump -j N` gets N independent tunnels).
+func (c *Client) DialTunnel(ctx context.Context, databaseID string) (*websocket.Conn, error) {
+	wsURL := strings.Replace(strings.Replace(c.BaseURL, "https://", "wss://", 1), "http://", "ws://", 1)
+	wsURL += "/api/v1/databases/" + databaseID + "/tunnel"
+
+	header := http.Header{}
+	if c.APIKey != "" {
+		header.Set("Authorization", "Bearer "+c.APIKey)
+	}
+	ws, resp, err := websocket.DefaultDialer.DialContext(ctx, wsURL, header)
+	if err != nil {
+		if resp != nil {
+			defer resp.Body.Close()
+			apiErr := &APIError{StatusCode: resp.StatusCode}
+			if jerr := json.NewDecoder(resp.Body).Decode(apiErr); jerr != nil {
+				return nil, &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("HTTP %d", resp.StatusCode)}
+			}
+			return nil, apiErr
+		}
+		return nil, fmt.Errorf("dial tunnel: %w", err)
+	}
+	return ws, nil
 }
 
 // UpdateDatabase reconciles a database's spec (cpu/memory/storage/instances/version/pooler).

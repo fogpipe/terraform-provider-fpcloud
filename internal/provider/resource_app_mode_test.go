@@ -11,9 +11,9 @@ import (
 // TestAccAppResource_mode is a regression test for the app tier→mode rename that
 // shipped a "Provider produced inconsistent result after apply" bug. Step 1
 // creates an app with `mode` OMITTED and asserts it defaults to always-on with
-// no inconsistency; step 2 flips it to serverless (a replace, RequiresReplace on
-// mode). The app is kept minimal (public image, internal ingress) so it needs no
-// DNS.
+// no inconsistency; step 2 flips it to serverless (mutable in place via
+// SwitchMode — no replace). The app is kept minimal (public image, internal
+// ingress) so it needs no DNS.
 func TestAccAppResource_mode(t *testing.T) {
 	projectName := acctest.RandomWithPrefix("tf-acc-mode-proj")
 	appName := acctest.RandomWithPrefix("tf-acc-mode-app")
@@ -32,7 +32,7 @@ func TestAccAppResource_mode(t *testing.T) {
 					resource.TestCheckResourceAttr("fpcloud_app.test", "mode", "always-on"),
 				),
 			},
-			// Step 2: explicit serverless (replaces the app — RequiresReplace).
+			// Step 2: explicit serverless (switches the app in place, no replace).
 			{
 				Config: testAccAppConfigMode(projectName, appName, "serverless"),
 				Check: resource.ComposeAggregateTestCheckFunc(

@@ -32,6 +32,7 @@ type DomainResourceModel struct {
 	ID        types.String `tfsdk:"id"`
 	AppID     types.String `tfsdk:"app_id"`
 	Domain    types.String `tfsdk:"domain"`
+	Mode      types.String `tfsdk:"mode"`
 	Status    types.String `tfsdk:"status"`
 	TLSStatus types.String `tfsdk:"tls_status"`
 	CreatedAt types.String `tfsdk:"created_at"`
@@ -62,6 +63,19 @@ func (r *DomainResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"domain": schema.StringAttribute{
 				Description: "The custom domain name (e.g. app.example.com).",
 				Required:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"mode": schema.StringAttribute{
+				Description: "Attachment mode: \"verified\" (default — TXT ownership + DNS pointing + " +
+					"HTTP-01 cert), \"edge\" (any Host accepted, no verification/cert — TLS terminated " +
+					"upstream), \"on_demand\" (DNS pointing only, HTTP-01 cert on attach — meant for an " +
+					"app's own backend attaching its end users' domains), or \"wildcard\" (a leading " +
+					"\"*.\" label, DNS-01 cert, requires a DNS-01 issuer configured on the platform). The " +
+					"API has no update path for this field, so changing it replaces the domain.",
+				Optional: true,
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -104,10 +118,7 @@ func (r *DomainResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	// mode is left empty — the API defaults it to "verified" (ADR-044). Exposing
-	// the other modes (edge/on_demand/wildcard) as a TF attribute is a separate
-	// follow-up, not part of this client sync.
-	d, err := r.client.AddDomain(ctx, plan.AppID.ValueString(), plan.Domain.ValueString(), "")
+	d, err := r.client.AddDomain(ctx, plan.AppID.ValueString(), plan.Domain.ValueString(), plan.Mode.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating domain", err.Error())
 		return
@@ -182,6 +193,7 @@ func mapDomainToState(d *client.Domain, state *DomainResourceModel) {
 	state.ID = types.StringValue(d.ID)
 	state.AppID = types.StringValue(d.AppID)
 	state.Domain = types.StringValue(d.Domain)
+	state.Mode = types.StringValue(d.Mode)
 	state.Status = types.StringValue(d.Status)
 	state.TLSStatus = types.StringValue(d.TLSStatus)
 	state.CreatedAt = types.StringValue(d.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))

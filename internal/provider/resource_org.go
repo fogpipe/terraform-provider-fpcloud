@@ -28,6 +28,7 @@ type OrgResourceModel struct {
 	ID            types.String `tfsdk:"id"`
 	Name          types.String `tfsdk:"name"`
 	DisplayName   types.String `tfsdk:"display_name"`
+	FKEEnabled    types.Bool   `tfsdk:"fke_enabled"`
 	AdoptExisting types.Bool   `tfsdk:"adopt_existing"`
 	CreatedAt     types.String `tfsdk:"created_at"`
 }
@@ -43,9 +44,9 @@ func (r *OrgResource) Metadata(_ context.Context, req resource.MetadataRequest, 
 
 func (r *OrgResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a Fogpipe organization. The API supports create and read only: " +
-			"changing any field forces a new organization, and the org is not deleted on destroy " +
-			"(it is only removed from state).",
+		Description: "Manages a Fogpipe organization. name is immutable (changing it forces a new " +
+			"organization); display_name is mutable in place. The org is not deleted on destroy " +
+			"(it is only removed from state) — the API exposes no deletion endpoint.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Organization ID.",
@@ -62,13 +63,20 @@ func (r *OrgResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"display_name": schema.StringAttribute{
-				Description: "Human-readable display name. Defaults to the name. Changing it forces a new organization.",
+				Description: "Human-readable display name. Defaults to the name. Mutable in place.",
 				Optional:    true,
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
 				},
+			},
+			"fke_enabled": schema.BoolAttribute{
+				Description: "Whether this org is entitled to FKE (tenant kubeconfig) access. Mutable in " +
+					"place, but the API only lets a caller with administrate rights on the platform " +
+					"operator org set this — an ordinary org owner setting it themselves gets a 403; have " +
+					"an operator apply it, or set it via a provider configured with operator credentials.",
+				Optional: true,
+				Computed: true,
 			},
 			"adopt_existing": schema.BoolAttribute{
 				Description: "When true, if an organization with this name already exists, adopt it into " +
@@ -124,6 +132,19 @@ func (r *OrgResource) Create(ctx context.Context, req resource.CreateRequest, re
 		}
 	}
 
+	// fke_enabled has no create-time API param — it's set via a follow-up PATCH,
+	// which typically 403s for a non-operator caller (see the attribute's
+	// description). Only make the call when the plan actually asks for it, so a
+	// caller who never touches fke_enabled never hits that permission wall.
+	if plan.FKEEnabled.ValueBool() {
+		updated, err := r.client.UpdateOrgFKE(ctx, org.ID, true)
+		if err != nil {
+			resp.Diagnostics.AddError("Error enabling FKE on organization", err.Error())
+			return
+		}
+		org = updated
+	}
+
 	r.apply(&plan, org)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -163,13 +184,47 @@ func (r *OrgResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *OrgResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
-	// All configurable fields are RequiresReplace, so Terraform replaces rather
-	// than updates. This guard only fires if that invariant is ever broken.
-	resp.Diagnostics.AddError(
-		"Update not supported",
-		"The Fogpipe API does not support updating organizations. Delete and recreate instead.",
-	)
+func (r *OrgResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan, state OrgResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	var org *client.Organization
+
+	if plan.DisplayName.ValueString() != state.DisplayName.ValueString() {
+		renamed, err := r.client.UpdateOrgDisplayName(ctx, state.ID.ValueString(), plan.DisplayName.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Error updating organization display name", err.Error())
+			return
+		}
+		org = renamed
+	}
+
+	if plan.FKEEnabled.ValueBool() != state.FKEEnabled.ValueBool() {
+		switched, err := r.client.UpdateOrgFKE(ctx, state.ID.ValueString(), plan.FKEEnabled.ValueBool())
+		if err != nil {
+			resp.Diagnostics.AddError("Error updating organization FKE entitlement", err.Error())
+			return
+		}
+		org = switched
+	}
+
+	if org == nil {
+		// Nothing changed API-side (e.g. only adopt_existing changed, which is
+		// provider-local); re-read to keep state accurate.
+		current, err := r.client.GetOrg(ctx, state.ID.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Error reading organization", err.Error())
+			return
+		}
+		org = current
+	}
+
+	r.apply(&plan, org)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *OrgResource) Delete(_ context.Context, _ resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -210,5 +265,6 @@ func (r *OrgResource) apply(m *OrgResourceModel, org *client.Organization) {
 	m.ID = types.StringValue(org.ID)
 	m.Name = types.StringValue(org.Name)
 	m.DisplayName = types.StringValue(org.DisplayName)
+	m.FKEEnabled = types.BoolValue(org.FKEEnabled)
 	m.CreatedAt = types.StringValue(org.CreatedAt.String())
 }

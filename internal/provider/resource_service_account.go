@@ -68,7 +68,7 @@ func (r *ServiceAccountResource) Schema(_ context.Context, _ resource.SchemaRequ
 				},
 			},
 			"display_name": schema.StringAttribute{
-				Description: "Human-readable display name.",
+				Description: "Human-readable display name. Mutable in place.",
 				Optional:    true,
 				Computed:    true,
 			},
@@ -172,11 +172,29 @@ func (r *ServiceAccountResource) Read(ctx context.Context, req resource.ReadRequ
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *ServiceAccountResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
-	resp.Diagnostics.AddError(
-		"Update not supported",
-		"Service account resources are immutable. Changes require replacement.",
-	)
+func (r *ServiceAccountResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan, state ServiceAccountResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	sa, err := r.client.UpdateServiceAccountDisplayName(ctx, state.ID.ValueString(), plan.DisplayName.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Error updating service account display name", err.Error())
+		return
+	}
+
+	plan.ID = types.StringValue(sa.ID)
+	plan.ProjectID = types.StringValue(sa.ProjectID)
+	plan.Name = types.StringValue(sa.Name)
+	plan.DisplayName = types.StringValue(sa.DisplayName)
+	plan.Email = types.StringValue(sa.Email)
+	plan.Status = types.StringValue(sa.Status)
+	plan.CreatedAt = types.StringValue(sa.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *ServiceAccountResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {

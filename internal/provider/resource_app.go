@@ -249,10 +249,7 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Optional:    true,
 				Computed:    true,
 				Default:     stringdefault.StaticString("always-on"),
-				Description: "Hosting mode: 'always-on' (plain Deployment, default) or 'serverless' (scale-to-zero Knative). Changing the mode replaces the app.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
+				Description: "Hosting mode: 'always-on' (plain Deployment, default) or 'serverless' (scale-to-zero Knative). Mutable in place — switches the running app over without recreating it.",
 			},
 			"storage": schema.StringAttribute{
 				Optional:    true,
@@ -684,6 +681,17 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			return
 		}
 		app = updated
+	}
+
+	// Switch hosting mode if it changed, before scaling — replicas is only valid
+	// on an always-on app, so scaling below needs the post-switch mode.
+	if plan.Mode.ValueString() != state.Mode.ValueString() {
+		switched, err := r.client.SwitchMode(ctx, appID, plan.Mode.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Error switching app mode", err.Error())
+			return
+		}
+		app = switched
 	}
 
 	// Update scaling if any scaling attributes changed.

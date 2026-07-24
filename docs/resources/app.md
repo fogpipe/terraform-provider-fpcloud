@@ -64,7 +64,7 @@ resource "fpcloud_app" "web" {
 - `max_scale` (Number) Maximum number of instances. Server-computed when unset.
 - `memory_limit` (String) Memory limit (e.g. 512Mi). Defaults to 512Mi.
 - `min_scale` (Number) Minimum number of instances. Server-computed when unset.
-- `mode` (String) Hosting mode: 'always-on' (plain Deployment, default) or 'serverless' (scale-to-zero Knative). Changing the mode replaces the app.
+- `mode` (String) Hosting mode: 'always-on' (plain Deployment, default) or 'serverless' (scale-to-zero Knative). Mutable in place — switches the running app over without recreating it.
 - `port` (Number) Container port. Defaults to 8080.
 - `release_command` (List of String) Command run once per deploy — from the exact image being deployed, with the app's env/secrets — before the new version goes live; a failure aborts the deploy (e.g. DB migrations). A single element containing spaces runs via 'sh -c'; use multiple elements for exec form. Write-only from Terraform's perspective.
 - `replicas` (Number) Fixed replica count for always-on apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.

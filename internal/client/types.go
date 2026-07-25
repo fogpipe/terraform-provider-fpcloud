@@ -126,21 +126,24 @@ type SecurityContext struct {
 
 // CreateAppRequest is the request body for creating an app.
 type CreateAppRequest struct {
-	Name                string            `json:"name"`
-	DisplayName         string            `json:"display_name,omitempty"` // mutable cosmetic label; defaults to Name
-	URLSlug             string            `json:"url_slug,omitempty"`     // optional vanity host override (ADR-040)
-	Image               string            `json:"image"`
-	Command             []string          `json:"command,omitempty"`
-	Args                []string          `json:"args,omitempty"`
-	ReleaseCommand      []string          `json:"release_command,omitempty"` // run once per deploy, before the new version goes live
-	VolumeMounts        []VolumeMount     `json:"volume_mounts,omitempty"`
-	SecurityContext     *SecurityContext  `json:"security_context,omitempty"`
-	Port                int               `json:"port,omitempty"`
-	Replicas            int               `json:"replicas,omitempty"`
-	Ingress             string            `json:"ingress,omitempty"`
-	Mode                string            `json:"mode,omitempty"`         // "always-on" (default) or "serverless"
-	Storage             string            `json:"storage,omitempty"`      // persistent volume size (e.g. "50Gi")
-	StoragePath         string            `json:"storage_path,omitempty"` // mount path (defaults to /data)
+	Name            string           `json:"name"`
+	DisplayName     string           `json:"display_name,omitempty"` // mutable cosmetic label; defaults to Name
+	URLSlug         string           `json:"url_slug,omitempty"`     // optional vanity host override (ADR-040)
+	Image           string           `json:"image"`
+	Command         []string         `json:"command,omitempty"`
+	Args            []string         `json:"args,omitempty"`
+	ReleaseCommand  []string         `json:"release_command,omitempty"` // run once per deploy, before the new version goes live
+	VolumeMounts    []VolumeMount    `json:"volume_mounts,omitempty"`
+	SecurityContext *SecurityContext `json:"security_context,omitempty"`
+	Port            int              `json:"port,omitempty"`
+	Replicas        int              `json:"replicas,omitempty"`
+	Ingress         string           `json:"ingress,omitempty"`
+	Mode            string           `json:"mode,omitempty"`         // "always-on" (default) or "serverless"
+	Storage         string           `json:"storage,omitempty"`      // persistent volume size (e.g. "50Gi")
+	StoragePath     string           `json:"storage_path,omitempty"` // mount path (defaults to /data)
+	// EnvVars seeds the app's config store with plain (non-secret) values —
+	// shorthand for a SetConfig per key. Use SetConfig to change them afterwards;
+	// there is no second env layer on the app itself.
 	EnvVars             map[string]string `json:"env_vars,omitempty"`
 	ServiceAccount      string            `json:"service_account,omitempty"` // SA email or ID
 	HealthCheckPath     string            `json:"health_check_path,omitempty"`

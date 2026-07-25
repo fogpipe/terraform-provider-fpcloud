@@ -415,8 +415,9 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		return
 	}
 
-	// Build merged env vars from env + secret maps for the create request.
-	envVars := make(map[string]string)
+	// env and secret are both written through the config API below — never as the
+	// create request's env_vars. Sending them there too would store secrets in
+	// plaintext and leave a second copy that later updates can't reach.
 	var envMap, secretMap map[string]string
 
 	if !plan.Env.IsNull() && !plan.Env.IsUnknown() {
@@ -424,17 +425,11 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		for k, v := range envMap {
-			envVars[k] = v
-		}
 	}
 	if !plan.Secret.IsNull() && !plan.Secret.IsUnknown() {
 		resp.Diagnostics.Append(plan.Secret.ElementsAs(ctx, &secretMap, false)...)
 		if resp.Diagnostics.HasError() {
 			return
-		}
-		for k, v := range secretMap {
-			envVars[k] = v
 		}
 	}
 
@@ -462,7 +457,6 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		Mode:                plan.Mode.ValueString(),
 		Storage:             plan.Storage.ValueString(),
 		StoragePath:         plan.StoragePath.ValueString(),
-		EnvVars:             envVars,
 		HealthCheckPath:     plan.HealthCheckPath.ValueString(),
 		HealthCheckTimeout:  int(plan.HealthCheckTimeout.ValueInt64()),
 		HealthCheckInterval: int(plan.HealthCheckInterval.ValueInt64()),

@@ -584,6 +584,21 @@ func (c *Client) DeployApp(ctx context.Context, id string, req DeployRequest) (*
 	return &app, nil
 }
 
+// ReconcileApp re-applies an app's runtime from control-plane state, repairing
+// drifted cluster objects. Unlike DeployApp it changes no image, writes no
+// deployment record, and does not run the release command.
+func (c *Client) ReconcileApp(ctx context.Context, id string) (*App, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/apps/"+id+"/reconcile", nil)
+	if err != nil {
+		return nil, err
+	}
+	var app App
+	if err := c.do(httpReq, &app); err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
 // ScaleApp updates the scaling configuration for an app.
 func (c *Client) ScaleApp(ctx context.Context, id string, req ScaleRequest) (*App, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/scale", req)

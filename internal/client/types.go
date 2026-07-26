@@ -834,3 +834,100 @@ type ClusterInfo struct {
 	Server                   string `json:"server"`
 	CertificateAuthorityData string `json:"certificate_authority_data"`
 }
+
+// Job is a scheduled task within a project (#166): the recipe plus when to run
+// it. Either it runs a container image or it sends an HTTP request; referencing
+// an app makes it inherit that app's image, config and identity.
+type Job struct {
+	ID          string `json:"id"`
+	ProjectID   string `json:"project_id"`
+	AppID       string `json:"app_id,omitempty"`
+	AppName     string `json:"app_name,omitempty"`
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+
+	Schedule    string `json:"schedule"`
+	Timezone    string `json:"timezone"`
+	Concurrency string `json:"concurrency"`
+	MaxRetries  int    `json:"max_retries"`
+	Timeout     int    `json:"timeout_seconds"`
+	KeepRuns    int    `json:"keep_runs"`
+	Suspended   bool   `json:"suspended"`
+
+	Target      string            `json:"target"`
+	Image       string            `json:"image,omitempty"`
+	Command     []string          `json:"command,omitempty"`
+	Args        []string          `json:"args,omitempty"`
+	HTTPURL     string            `json:"http_url,omitempty"`
+	HTTPMethod  string            `json:"http_method,omitempty"`
+	HTTPHeaders map[string]string `json:"http_headers,omitempty"`
+	HTTPBody    string            `json:"http_body,omitempty"`
+
+	LastRun *JobRun `json:"last_run,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// JobRun is one execution of a job — a record, not a declarable resource.
+type JobRun struct {
+	ID         string     `json:"id"`
+	JobID      string     `json:"job_id"`
+	RunName    string     `json:"run_name"`
+	Trigger    string     `json:"trigger"`
+	Status     string     `json:"status"`
+	ExitCode   *int       `json:"exit_code,omitempty"`
+	Logs       string     `json:"logs,omitempty"`
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	DurationMs *int       `json:"duration_ms,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// Job target types.
+const (
+	JobTargetContainer = "container"
+	JobTargetHTTP      = "http"
+)
+
+// CreateJobRequest is the request body for creating a scheduled job.
+type CreateJobRequest struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name,omitempty"`
+	App         string `json:"app,omitempty"`
+	Schedule    string `json:"schedule"`
+	Timezone    string `json:"timezone,omitempty"`
+	Concurrency string `json:"concurrency,omitempty"`
+	MaxRetries  *int   `json:"max_retries,omitempty"`
+	Timeout     *int   `json:"timeout_seconds,omitempty"`
+	KeepRuns    *int   `json:"keep_runs,omitempty"`
+	Suspended   bool   `json:"suspended,omitempty"`
+
+	Image       string            `json:"image,omitempty"`
+	Command     []string          `json:"command,omitempty"`
+	Args        []string          `json:"args,omitempty"`
+	HTTPURL     string            `json:"http_url,omitempty"`
+	HTTPMethod  string            `json:"http_method,omitempty"`
+	HTTPHeaders map[string]string `json:"http_headers,omitempty"`
+	HTTPBody    string            `json:"http_body,omitempty"`
+}
+
+// UpdateJobRequest patches a job; a nil field is left unchanged. Identity
+// (project, name, app) is immutable.
+type UpdateJobRequest struct {
+	DisplayName *string            `json:"display_name,omitempty"`
+	Schedule    *string            `json:"schedule,omitempty"`
+	Timezone    *string            `json:"timezone,omitempty"`
+	Concurrency *string            `json:"concurrency,omitempty"`
+	MaxRetries  *int               `json:"max_retries,omitempty"`
+	Timeout     *int               `json:"timeout_seconds,omitempty"`
+	KeepRuns    *int               `json:"keep_runs,omitempty"`
+	Suspended   *bool              `json:"suspended,omitempty"`
+	Image       *string            `json:"image,omitempty"`
+	Command     *[]string          `json:"command,omitempty"`
+	Args        *[]string          `json:"args,omitempty"`
+	HTTPURL     *string            `json:"http_url,omitempty"`
+	HTTPMethod  *string            `json:"http_method,omitempty"`
+	HTTPHeaders *map[string]string `json:"http_headers,omitempty"`
+	HTTPBody    *string            `json:"http_body,omitempty"`
+}

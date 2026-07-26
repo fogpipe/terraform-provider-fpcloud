@@ -1814,3 +1814,112 @@ func (c *Client) DeleteOrgSecret(ctx context.Context, orgID, name string) error 
 	}
 	return c.do(httpReq, nil)
 }
+
+// --- Scheduled jobs (#166) ---
+
+// CreateJob registers a scheduled job in a project.
+func (c *Client) CreateJob(ctx context.Context, projectID string, req CreateJobRequest) (*Job, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/projects/"+projectID+"/jobs", req)
+	if err != nil {
+		return nil, err
+	}
+	var job Job
+	if err := c.do(httpReq, &job); err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
+// ListJobs lists a project's scheduled jobs, each with its most recent run.
+func (c *Client) ListJobs(ctx context.Context, projectID string) ([]*Job, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/projects/"+projectID+"/jobs", nil)
+	if err != nil {
+		return nil, err
+	}
+	var jobs []*Job
+	if err := c.do(httpReq, &jobs); err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
+// GetJob retrieves a scheduled job by ID.
+func (c *Client) GetJob(ctx context.Context, id string) (*Job, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/jobs/"+id, nil)
+	if err != nil {
+		return nil, err
+	}
+	var job Job
+	if err := c.do(httpReq, &job); err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
+// UpdateJob patches a scheduled job.
+func (c *Client) UpdateJob(ctx context.Context, id string, req UpdateJobRequest) (*Job, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/jobs/"+id, req)
+	if err != nil {
+		return nil, err
+	}
+	var job Job
+	if err := c.do(httpReq, &job); err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
+// DeleteJob removes a scheduled job and its run history.
+func (c *Client) DeleteJob(ctx context.Context, id string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/jobs/"+id, nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
+// RunJob fires a job now, outside its schedule, and returns the run record.
+func (c *Client) RunJob(ctx context.Context, id string) (*JobRun, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/jobs/"+id+"/run", nil)
+	if err != nil {
+		return nil, err
+	}
+	var run JobRun
+	if err := c.do(httpReq, &run); err != nil {
+		return nil, err
+	}
+	return &run, nil
+}
+
+// ListJobRuns returns a job's run history, newest first.
+func (c *Client) ListJobRuns(ctx context.Context, id string) ([]*JobRun, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/jobs/"+id+"/runs", nil)
+	if err != nil {
+		return nil, err
+	}
+	var runs []*JobRun
+	if err := c.do(httpReq, &runs); err != nil {
+		return nil, err
+	}
+	return runs, nil
+}
+
+// GetJobLogs returns the output of one run, defaulting to the most recent when
+// runName is empty.
+func (c *Client) GetJobLogs(ctx context.Context, id, runName string) (string, error) {
+	path := "/api/v1/jobs/" + id + "/logs"
+	if runName != "" {
+		path += "?run=" + url.QueryEscape(runName)
+	}
+	httpReq, err := c.newRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		Logs string `json:"logs"`
+	}
+	if err := c.do(httpReq, &out); err != nil {
+		return "", err
+	}
+	return out.Logs, nil
+}

@@ -150,6 +150,12 @@ fpcloud job delete sweep
 The name is fixed at creation; everything else can be changed in place. Deleting
 a job removes its schedule and its run history.
 
+## In the console
+
+Everything above is on the **Jobs** page of the web console: create a job, run
+one on demand, pause or resume a schedule, and open a job's run history to read
+the captured output of any run.
+
 ## Terraform
 
 ```hcl

@@ -969,6 +969,21 @@ func (c *Client) SetBucketWebsite(ctx context.Context, id string, req SetBucketW
 	return &b, nil
 }
 
+// PublishWebsiteVersion atomically flips a website bucket to serve an
+// already-uploaded version v<version>/ (#439). The same call with a retained
+// prior version is a rollback. Upload the build to the version prefix first.
+func (c *Client) PublishWebsiteVersion(ctx context.Context, id string, version int) (*Bucket, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/buckets/"+id+"/website/publish", PublishBucketWebsiteRequest{Version: version})
+	if err != nil {
+		return nil, err
+	}
+	var b Bucket
+	if err := c.do(httpReq, &b); err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
 // SetBucketURLSlug sets (or clears, with "") a bucket website's vanity host
 // label; the site moves to <slug>.web.<platform domain>.
 func (c *Client) SetBucketURLSlug(ctx context.Context, id, slug string) (*Bucket, error) {

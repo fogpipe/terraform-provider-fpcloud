@@ -299,6 +299,7 @@ type Bucket struct {
 	WebsiteErrorDocument string `json:"website_error_document,omitempty"`
 	URLSlug              string `json:"url_slug"`
 	WebsiteURL           string `json:"website_url,omitempty"`
+	WebsiteVersion       int    `json:"website_version"`
 }
 
 // SetBucketURLSlugRequest is the request body for setting (or clearing, with
@@ -327,6 +328,12 @@ type SetBucketWebsiteRequest struct {
 	Enabled       bool   `json:"enabled"`
 	IndexDocument string `json:"index_document,omitempty"`
 	ErrorDocument string `json:"error_document,omitempty"`
+}
+
+// PublishBucketWebsiteRequest is the request body for atomically flipping a
+// website bucket to an already-uploaded version (#439).
+type PublishBucketWebsiteRequest struct {
+	Version int `json:"version"`
 }
 
 // BucketKey is a scoped S3 access key for a bucket. SecretAccessKey is only

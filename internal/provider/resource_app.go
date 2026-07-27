@@ -235,9 +235,9 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			"adopt_existing": schema.BoolAttribute{
 				Description: "When true, if an app with this name already exists in the project, adopt it " +
 					"into Terraform state on create instead of failing with a 409 conflict. Defaults to " +
-					"false, so create never silently takes ownership of an app it did not create. Note: " +
-					"adoption records the existing app in state but does not push the configured image/env/" +
-					"secret — run a subsequent apply to reconcile them.",
+					"false, so create never silently takes ownership of an app it did not create. The " +
+					"adopted app is then converged on this configuration — image, env, secret, scaling " +
+					"and storage are pushed as they would be on any other apply.",
 				Optional: true,
 			},
 			"traffic": schema.ListNestedAttribute{
@@ -368,11 +368,21 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 				)
 				return
 			}
-			// Record the existing app in state as-is. Image/env/secret/scaling are
-			// not pushed here; a subsequent apply reconciles them against the config.
-			r.setModelFromApp(&plan, existing)
-			if targets, terr := r.client.GetTraffic(ctx, existing.ID); terr == nil {
-				r.setTrafficOnModel(ctx, &plan, targets, &resp.Diagnostics)
+			// Adoption takes ownership, so the adopted app converges on the
+			// configuration here rather than being recorded as-is: the model built
+			// from the API response is the "before", and the same diff Update
+			// applies drives it to the configured image/env/secret/scaling.
+			var adopted AppResourceModel
+			r.setModelFromApp(&adopted, existing)
+			app := r.converge(ctx, &plan, adopted, existing.ID, &resp.Diagnostics)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			r.setModelFromAppAfterApply(&plan, app)
+			if plan.Traffic.IsNull() || plan.Traffic.IsUnknown() {
+				if targets, terr := r.client.GetTraffic(ctx, app.ID); terr == nil {
+					r.setTrafficOnModel(ctx, &plan, targets, &resp.Diagnostics)
+				}
 			}
 			resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 			return
@@ -448,7 +458,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		}
 	}
 
-	r.setModelFromApp(&plan, app)
+	r.setModelFromAppAfterApply(&plan, app)
 	if plan.Traffic.IsNull() || plan.Traffic.IsUnknown() {
 		// Read current traffic from API.
 		targets, err := r.client.GetTraffic(ctx, app.ID)
@@ -495,27 +505,53 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
+	app := r.converge(ctx, &plan, state, state.ID.ValueString(), &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	r.setModelFromAppAfterApply(&plan, app)
+
+	// Read current traffic if not already set by the update above.
+	if plan.Traffic.IsNull() || plan.Traffic.IsUnknown() {
+		targets, err := r.client.GetTraffic(ctx, app.ID)
+		if err == nil {
+			r.setTrafficOnModel(ctx, &plan, targets, &resp.Diagnostics)
+		}
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// converge drives an existing app from `current` to `plan`, issuing only the API
+// calls the differences require, and returns the app as the API last reported
+// it. It backs both Update (where current is prior Terraform state) and
+// adoption (where current is what the API reports about the app being adopted),
+// so an adopted app converges on the configuration exactly like a managed one.
+// It writes traffic onto plan when the configuration sets it.
+func (r *AppResource) converge(ctx context.Context, plan *AppResourceModel, current AppResourceModel, appID string, diags *diag.Diagnostics) *client.App {
 	var app *client.App
-	appID := state.ID.ValueString()
 
 	// Deploy new image if it changed.
-	if plan.Image.ValueString() != state.Image.ValueString() {
+	if plan.Image.ValueString() != current.Image.ValueString() {
 		deployed, err := r.client.DeployApp(ctx, appID, client.DeployRequest{
 			Image: plan.Image.ValueString(),
 		})
 		if err != nil {
-			resp.Diagnostics.AddError("Error deploying app", err.Error())
-			return
+			diags.AddError("Error deploying app", err.Error())
+			return nil
 		}
 		app = deployed
 	}
 
-	// Update the cosmetic display name if it changed.
-	if plan.DisplayName.ValueString() != state.DisplayName.ValueString() {
+	// Update the cosmetic display name if it changed. An unknown planned value
+	// means the configuration leaves it to the API (adoption keeps the adopted
+	// app's label rather than blanking it).
+	if !plan.DisplayName.IsUnknown() && plan.DisplayName.ValueString() != current.DisplayName.ValueString() {
 		renamed, err := r.client.UpdateAppDisplayName(ctx, appID, plan.DisplayName.ValueString())
 		if err != nil {
-			resp.Diagnostics.AddError("Error updating app display name", err.Error())
-			return
+			diags.AddError("Error updating app display name", err.Error())
+			return nil
 		}
 		app = renamed
 	}
@@ -523,26 +559,26 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	// Update the container command/args if either changed. A non-nil pointer
 	// (including an empty slice) replaces the value; an empty slice clears the
 	// override back to the image defaults.
-	if !plan.Command.Equal(state.Command) || !plan.Args.Equal(state.Args) {
-		command := stringListToSlice(ctx, plan.Command, &resp.Diagnostics)
-		args := stringListToSlice(ctx, plan.Args, &resp.Diagnostics)
-		if resp.Diagnostics.HasError() {
-			return
+	if listDiffers(plan.Command, current.Command) || listDiffers(plan.Args, current.Args) {
+		command := stringListToSlice(ctx, plan.Command, diags)
+		args := stringListToSlice(ctx, plan.Args, diags)
+		if diags.HasError() {
+			return nil
 		}
 		updated, err := r.client.UpdateAppCommand(ctx, appID, &command, &args)
 		if err != nil {
-			resp.Diagnostics.AddError("Error updating app command", err.Error())
-			return
+			diags.AddError("Error updating app command", err.Error())
+			return nil
 		}
 		app = updated
 	}
 
 	// Update scaling if any scaling attributes changed.
-	if plan.MinScale.ValueInt64() != state.MinScale.ValueInt64() ||
-		plan.MaxScale.ValueInt64() != state.MaxScale.ValueInt64() ||
-		plan.Replicas.ValueInt64() != state.Replicas.ValueInt64() ||
-		plan.CPULimit.ValueString() != state.CPULimit.ValueString() ||
-		plan.MemoryLimit.ValueString() != state.MemoryLimit.ValueString() {
+	if plan.MinScale.ValueInt64() != current.MinScale.ValueInt64() ||
+		plan.MaxScale.ValueInt64() != current.MaxScale.ValueInt64() ||
+		plan.Replicas.ValueInt64() != current.Replicas.ValueInt64() ||
+		plan.CPULimit.ValueString() != current.CPULimit.ValueString() ||
+		plan.MemoryLimit.ValueString() != current.MemoryLimit.ValueString() {
 
 		minScale := int32(plan.MinScale.ValueInt64())
 		maxScale := int32(plan.MaxScale.ValueInt64())
@@ -559,73 +595,75 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 		scaled, err := r.client.ScaleApp(ctx, appID, scaleReq)
 		if err != nil {
-			resp.Diagnostics.AddError("Error scaling app", err.Error())
-			return
+			diags.AddError("Error scaling app", err.Error())
+			return nil
 		}
 		app = scaled
 	}
 
 	// Grow persistent storage if the requested size changed (grow-only, enforced server-side).
-	if plan.Storage.ValueString() != state.Storage.ValueString() && plan.Storage.ValueString() != "" {
+	if plan.Storage.ValueString() != current.Storage.ValueString() && plan.Storage.ValueString() != "" {
 		grown, err := r.client.UpdateAppStorage(ctx, appID, plan.Storage.ValueString())
 		if err != nil {
-			resp.Diagnostics.AddError("Error updating app storage", err.Error())
-			return
+			diags.AddError("Error updating app storage", err.Error())
+			return nil
 		}
 		app = grown
 	}
 
-	// Sync env vars: compute diff between old and new env/secret maps and update configs.
-	var planEnv, stateEnv, planSecret, stateSecret map[string]string
+	// Sync env vars: compute diff between old and new env/secret maps and update
+	// configs. The API never returns config values, so on adoption both current
+	// maps are null and every configured key is pushed, unsetting nothing.
+	var planEnv, currentEnv, planSecret, currentSecret map[string]string
 	if !plan.Env.IsNull() && !plan.Env.IsUnknown() {
-		resp.Diagnostics.Append(plan.Env.ElementsAs(ctx, &planEnv, false)...)
+		diags.Append(plan.Env.ElementsAs(ctx, &planEnv, false)...)
 	}
-	if !state.Env.IsNull() && !state.Env.IsUnknown() {
-		resp.Diagnostics.Append(state.Env.ElementsAs(ctx, &stateEnv, false)...)
+	if !current.Env.IsNull() && !current.Env.IsUnknown() {
+		diags.Append(current.Env.ElementsAs(ctx, &currentEnv, false)...)
 	}
 	if !plan.Secret.IsNull() && !plan.Secret.IsUnknown() {
-		resp.Diagnostics.Append(plan.Secret.ElementsAs(ctx, &planSecret, false)...)
+		diags.Append(plan.Secret.ElementsAs(ctx, &planSecret, false)...)
 	}
-	if !state.Secret.IsNull() && !state.Secret.IsUnknown() {
-		resp.Diagnostics.Append(state.Secret.ElementsAs(ctx, &stateSecret, false)...)
+	if !current.Secret.IsNull() && !current.Secret.IsUnknown() {
+		diags.Append(current.Secret.ElementsAs(ctx, &currentSecret, false)...)
 	}
-	if resp.Diagnostics.HasError() {
-		return
+	if diags.HasError() {
+		return nil
 	}
 
 	// Remove old env keys no longer present.
-	for k := range stateEnv {
+	for k := range currentEnv {
 		if _, exists := planEnv[k]; !exists {
 			if err := r.client.UnsetConfig(ctx, appID, k); err != nil {
-				resp.Diagnostics.AddError("Error unsetting env config", fmt.Sprintf("key %q: %s", k, err.Error()))
-				return
+				diags.AddError("Error unsetting env config", fmt.Sprintf("key %q: %s", k, err.Error()))
+				return nil
 			}
 		}
 	}
 	// Set new/changed env keys.
 	for k, v := range planEnv {
-		if oldVal, exists := stateEnv[k]; !exists || oldVal != v {
+		if oldVal, exists := currentEnv[k]; !exists || oldVal != v {
 			if _, err := r.client.SetConfig(ctx, appID, k, v, false); err != nil {
-				resp.Diagnostics.AddError("Error setting env config", fmt.Sprintf("key %q: %s", k, err.Error()))
-				return
+				diags.AddError("Error setting env config", fmt.Sprintf("key %q: %s", k, err.Error()))
+				return nil
 			}
 		}
 	}
 	// Remove old secret keys no longer present.
-	for k := range stateSecret {
+	for k := range currentSecret {
 		if _, exists := planSecret[k]; !exists {
 			if err := r.client.UnsetConfig(ctx, appID, k); err != nil {
-				resp.Diagnostics.AddError("Error unsetting secret config", fmt.Sprintf("key %q: %s", k, err.Error()))
-				return
+				diags.AddError("Error unsetting secret config", fmt.Sprintf("key %q: %s", k, err.Error()))
+				return nil
 			}
 		}
 	}
 	// Set new/changed secret keys.
 	for k, v := range planSecret {
-		if oldVal, exists := stateSecret[k]; !exists || oldVal != v {
+		if oldVal, exists := currentSecret[k]; !exists || oldVal != v {
 			if _, err := r.client.SetConfig(ctx, appID, k, v, true); err != nil {
-				resp.Diagnostics.AddError("Error setting secret config", fmt.Sprintf("key %q: %s", k, err.Error()))
-				return
+				diags.AddError("Error setting secret config", fmt.Sprintf("key %q: %s", k, err.Error()))
+				return nil
 			}
 		}
 	}
@@ -633,8 +671,8 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	// Update traffic if changed.
 	if !plan.Traffic.IsNull() && !plan.Traffic.IsUnknown() {
 		var trafficModels []TrafficTargetModel
-		resp.Diagnostics.Append(plan.Traffic.ElementsAs(ctx, &trafficModels, false)...)
-		if !resp.Diagnostics.HasError() && len(trafficModels) > 0 {
+		diags.Append(plan.Traffic.ElementsAs(ctx, &trafficModels, false)...)
+		if !diags.HasError() && len(trafficModels) > 0 {
 			targets := make([]client.TrafficTarget, len(trafficModels))
 			for i, tm := range trafficModels {
 				targets[i] = client.TrafficTarget{
@@ -645,34 +683,23 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 
 			result, err := r.client.SetTraffic(ctx, appID, targets)
 			if err != nil {
-				resp.Diagnostics.AddError("Error setting traffic", err.Error())
-				return
+				diags.AddError("Error setting traffic", err.Error())
+				return nil
 			}
-			r.setTrafficOnModel(ctx, &plan, result, &resp.Diagnostics)
+			r.setTrafficOnModel(ctx, plan, result, diags)
 		}
 	}
 
-	// If neither deploy nor scale happened, re-read to get current state.
+	// If nothing above called the API, re-read to get current state.
 	if app == nil {
 		fetched, err := r.client.GetApp(ctx, appID)
 		if err != nil {
-			resp.Diagnostics.AddError("Error reading app", err.Error())
-			return
+			diags.AddError("Error reading app", err.Error())
+			return nil
 		}
 		app = fetched
 	}
-
-	r.setModelFromApp(&plan, app)
-
-	// Read current traffic if not already set by the update above.
-	if plan.Traffic.IsNull() || plan.Traffic.IsUnknown() {
-		targets, err := r.client.GetTraffic(ctx, appID)
-		if err == nil {
-			r.setTrafficOnModel(ctx, &plan, targets, &resp.Diagnostics)
-		}
-	}
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	return app
 }
 
 func (r *AppResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -791,6 +818,60 @@ func (r *AppResource) setTrafficOnModel(_ context.Context, model *AppResourceMod
 	model.Traffic = list
 }
 
+// setModelFromAppAfterApply maps an API App response onto the model the way the
+// plugin protocol requires at the end of a create or update: every attribute the
+// plan already knew keeps its planned value, and only the ones left unknown are
+// filled in from the response. Terraform fails an apply with "Provider produced
+// inconsistent result after apply" when a known planned value comes back
+// different — an image tag answered with the resolved digest, or a replica count
+// answered with a rollout-transient one — even though the operation itself
+// succeeded. Reporting drift between config and reality is Read's job, not this
+// one's: a mismatch here shows up as a diff on the next plan instead of as a
+// failed apply.
+func (r *AppResource) setModelFromAppAfterApply(model *AppResourceModel, app *client.App) {
+	planned := *model
+	r.setModelFromApp(model, app)
+
+	keepKnownString(&model.ID, planned.ID)
+	keepKnownString(&model.ProjectID, planned.ProjectID)
+	keepKnownString(&model.Name, planned.Name)
+	keepKnownString(&model.DisplayName, planned.DisplayName)
+	keepKnownString(&model.Image, planned.Image)
+	keepKnownString(&model.Ingress, planned.Ingress)
+	keepKnownString(&model.Mode, planned.Mode)
+	keepKnownString(&model.Storage, planned.Storage)
+	keepKnownString(&model.StoragePath, planned.StoragePath)
+	keepKnownString(&model.CPULimit, planned.CPULimit)
+	keepKnownString(&model.MemoryLimit, planned.MemoryLimit)
+	keepKnownString(&model.HealthCheckPath, planned.HealthCheckPath)
+	keepKnownString(&model.Status, planned.Status)
+	keepKnownString(&model.URL, planned.URL)
+	keepKnownString(&model.CreatedAt, planned.CreatedAt)
+	keepKnownString(&model.UpdatedAt, planned.UpdatedAt)
+
+	keepKnownInt64(&model.Replicas, planned.Replicas)
+	keepKnownInt64(&model.MinScale, planned.MinScale)
+	keepKnownInt64(&model.MaxScale, planned.MaxScale)
+	keepKnownInt64(&model.HealthCheckTimeout, planned.HealthCheckTimeout)
+	keepKnownInt64(&model.HealthCheckInterval, planned.HealthCheckInterval)
+	keepKnownInt64(&model.HealthCheckRetries, planned.HealthCheckRetries)
+}
+
+// keepKnownString restores a planned string unless the plan left it unknown, in
+// which case the value already mapped from the API stands.
+func keepKnownString(dst *types.String, planned types.String) {
+	if !planned.IsUnknown() {
+		*dst = planned
+	}
+}
+
+// keepKnownInt64 is keepKnownString for int64 attributes.
+func keepKnownInt64(dst *types.Int64, planned types.Int64) {
+	if !planned.IsUnknown() {
+		*dst = planned
+	}
+}
+
 // setModelFromApp maps an API App response to the Terraform resource model.
 // It preserves the plan's env/secret maps since they are not returned by the API.
 func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App) {
@@ -819,6 +900,19 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App) 
 	// Note: env and secret maps are preserved from the plan/state — not returned by API.
 	// Note: command and args are preserved from the plan/state — not returned by API.
 	// Note: service_account is preserved from the plan/state — the API returns service_account_id.
+}
+
+// listDiffers reports whether a planned list differs from the current one. Two
+// null lists never differ, whatever their element type: the API does not return
+// command/args, so the model adoption builds from a response carries an untyped
+// null whose Equal against a typed null list is false — comparing those directly
+// would make every adoption issue a command reset that wipes the adopted app's
+// entrypoint override.
+func listDiffers(plan, current types.List) bool {
+	if plan.IsNull() && current.IsNull() {
+		return false
+	}
+	return !plan.Equal(current)
 }
 
 // stringListToSlice converts a Terraform string list to a Go slice. A null or

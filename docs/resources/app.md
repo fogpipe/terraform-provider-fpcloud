@@ -50,7 +50,7 @@ resource "fpcloud_app" "web" {
 
 ### Optional
 
-- `adopt_existing` (Boolean) When true, if an app with this name already exists in the project, adopt it into Terraform state on create instead of failing with a 409 conflict. Defaults to false, so create never silently takes ownership of an app it did not create. Note: adoption records the existing app in state but does not push the configured image/env/secret — run a subsequent apply to reconcile them.
+- `adopt_existing` (Boolean) When true, if an app with this name already exists in the project, adopt it into Terraform state on create instead of failing with a 409 conflict. Defaults to false, so create never silently takes ownership of an app it did not create. The adopted app is then converged on this configuration — image, env, secret, scaling and storage are pushed as they would be on any other apply.
 - `args` (List of String) Container arguments (CMD/args). Write-only from Terraform's perspective — the API does not echo it back, so out-of-band changes are not detected.
 - `command` (List of String) Container entrypoint override (ENTRYPOINT). Write-only from Terraform's perspective — the API does not echo it back, so out-of-band changes are not detected.
 - `cpu_limit` (String) CPU limit (e.g. 500m). Defaults to 500m.

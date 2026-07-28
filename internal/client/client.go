@@ -970,6 +970,54 @@ func (c *Client) SetBucketQuota(ctx context.Context, id string, maxSize, maxObje
 	return &b, nil
 }
 
+// ListBucketLifecycleRules lists a bucket's object-expiry rules (#498).
+func (c *Client) ListBucketLifecycleRules(ctx context.Context, id string) ([]*BucketLifecycleRule, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/buckets/"+id+"/lifecycle", nil)
+	if err != nil {
+		return nil, err
+	}
+	var rules []*BucketLifecycleRule
+	if err := c.do(httpReq, &rules); err != nil {
+		return nil, err
+	}
+	return rules, nil
+}
+
+// SetBucketLifecycleRule upserts the expiry rule for one prefix, leaving every
+// other prefix's rule alone.
+func (c *Client) SetBucketLifecycleRule(ctx context.Context, id string, req SetBucketLifecycleRuleRequest) (*BucketLifecycleRule, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/buckets/"+id+"/lifecycle", req)
+	if err != nil {
+		return nil, err
+	}
+	var rule BucketLifecycleRule
+	if err := c.do(httpReq, &rule); err != nil {
+		return nil, err
+	}
+	return &rule, nil
+}
+
+// DeleteBucketLifecycleRule removes the rule for one prefix (the empty prefix is
+// the whole-bucket rule). Dropping every rule is ClearBucketLifecycleRules.
+func (c *Client) DeleteBucketLifecycleRule(ctx context.Context, id, prefix string) error {
+	q := url.Values{"prefix": {prefix}}
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/buckets/"+id+"/lifecycle?"+q.Encode(), nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
+// ClearBucketLifecycleRules removes every expiry rule on a bucket; nothing on it
+// expires afterwards.
+func (c *Client) ClearBucketLifecycleRules(ctx context.Context, id string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/buckets/"+id+"/lifecycle?all=true", nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
 // SetBucketWebsite toggles static-website serving on a bucket (#342). Enabling
 // serves the bucket anonymously over HTTP at the returned WebsiteURL.
 func (c *Client) SetBucketWebsite(ctx context.Context, id string, req SetBucketWebsiteRequest) (*Bucket, error) {

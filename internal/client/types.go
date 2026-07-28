@@ -361,6 +361,29 @@ type PublishBucketWebsiteRequest struct {
 	Version int `json:"version"`
 }
 
+// BucketLifecycleRule expires objects on a bucket by age (#498). It is keyed by
+// the prefix it applies to (empty = the whole bucket), so one bucket can expire
+// derived artefacts under one prefix while everything else is kept forever.
+// ExpireDays deletes objects older than N days; AbortIncompleteUploadDays
+// reclaims the parts of multipart uploads that were never completed. 0 = not set.
+type BucketLifecycleRule struct {
+	ID                        string    `json:"id"`
+	BucketID                  string    `json:"bucket_id"`
+	Prefix                    string    `json:"prefix"`
+	ExpireDays                int       `json:"expire_days"`
+	AbortIncompleteUploadDays int       `json:"abort_incomplete_upload_days"`
+	CreatedAt                 time.Time `json:"created_at"`
+	UpdatedAt                 time.Time `json:"updated_at"`
+}
+
+// SetBucketLifecycleRuleRequest upserts the expiry rule for one prefix; other
+// prefixes' rules are untouched.
+type SetBucketLifecycleRuleRequest struct {
+	Prefix                    string `json:"prefix"`
+	ExpireDays                int    `json:"expire_days,omitempty"`
+	AbortIncompleteUploadDays int    `json:"abort_incomplete_upload_days,omitempty"`
+}
+
 // BucketKey is a scoped S3 access key for a bucket. SecretAccessKey is only
 // populated when the key is created.
 type BucketKey struct {

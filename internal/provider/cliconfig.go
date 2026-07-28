@@ -17,18 +17,15 @@ type cliConfig struct {
 	APIKey string `yaml:"api_key"`
 }
 
-// loadCLIConfig reads the fpcloud CLI config, honouring FPCLOUD_CONFIG_DIR the
-// same way the CLI does (so a direnv-scoped per-project config is picked up too),
-// and falling back to ~/.fpcloud. A missing/unreadable file yields a zero config,
-// never an error — it is a best-effort last resort behind the block and env var.
+// loadCLIConfig reads the fpcloud CLI config, resolving its directory exactly the
+// way the CLI does — FPCLOUD_CONFIG_DIR (config only), else FPCLOUD_STATE_DIR (the
+// whole state dir), else ~/.fpcloud — so a direnv-scoped per-project config is
+// picked up either way. A missing/unreadable file yields a zero config, never an
+// error — it is a best-effort last resort behind the block and env var.
 func loadCLIConfig() cliConfig {
-	dir := os.Getenv("FPCLOUD_CONFIG_DIR")
+	dir := cliConfigDir()
 	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return cliConfig{}
-		}
-		dir = filepath.Join(home, ".fpcloud")
+		return cliConfig{}
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
 	if err != nil {
@@ -39,6 +36,22 @@ func loadCLIConfig() cliConfig {
 		return cliConfig{}
 	}
 	return cfg
+}
+
+// cliConfigDir mirrors the CLI's configDir()/stateDir() precedence. Returns "" if
+// the home directory can't be determined and neither variable is set.
+func cliConfigDir() string {
+	if dir := os.Getenv("FPCLOUD_CONFIG_DIR"); dir != "" {
+		return dir
+	}
+	if dir := os.Getenv("FPCLOUD_STATE_DIR"); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".fpcloud")
 }
 
 // cliOIDCToken shells out to `fpcloud get-token` and returns the Google OIDC

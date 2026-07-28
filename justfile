@@ -14,7 +14,9 @@ test:
 testacc:
     TF_ACC=1 go test ./internal/provider/ -v -count=1 -timeout 30m
 
-# Regenerate docs/ from schema + examples/. Run before tagging a release.
+# Regenerate docs/ from schema + examples/ + templates/. Run before tagging a
+# release. Everything under docs/ is output — this rewrites the tree from
+# scratch, so hand-written pages go in templates/ (see templates/guides).
 docs:
     tfplugindocs generate --provider-name fpcloud
 

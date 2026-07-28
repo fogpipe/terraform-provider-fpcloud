@@ -262,18 +262,25 @@ type AppVersion struct {
 
 // Database represents a managed database instance.
 type Database struct {
-	ID               string    `json:"id"`
-	ProjectID        string    `json:"project_id"`
-	Name             string    `json:"name"`
-	DisplayName      string    `json:"display_name"`
-	Engine           string    `json:"engine"`
-	Version          string    `json:"version"`
-	Plan             string    `json:"plan"`
-	Status           string    `json:"status"`
-	ConnectionString string    `json:"connection_string"`
-	Pooler           bool      `json:"pooler"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID          string `json:"id"`
+	ProjectID   string `json:"project_id"`
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+	Engine      string `json:"engine"`
+	Version     string `json:"version"`
+	Plan        string `json:"plan"`
+	Status      string `json:"status"`
+	// Host/Port/Username are the database's address on the cluster network, as
+	// recorded at provisioning. Password is returned ONLY on create — CNPG owns
+	// the app role and rotates it out of band, so the live credential comes from
+	// the injected DATABASE_URL or `fpcloud db connect`, never from this record.
+	Host      string    `json:"host"`
+	Port      int32     `json:"port"`
+	Username  string    `json:"username"`
+	Password  string    `json:"password,omitempty"`
+	Pooler    bool      `json:"pooler"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // DatabaseConnection is a database's live connection info (GET
@@ -999,22 +1006,22 @@ type CreateJobRequest struct {
 // UpdateJobRequest patches a job; a nil field is left unchanged. Identity
 // (project, name, app) is immutable.
 type UpdateJobRequest struct {
-	DisplayName *string            `json:"display_name,omitempty"`
-	Schedule    *string            `json:"schedule,omitempty"`
-	Timezone    *string            `json:"timezone,omitempty"`
-	Concurrency *string            `json:"concurrency,omitempty"`
-	MaxRetries  *int               `json:"max_retries,omitempty"`
-	Timeout     *int               `json:"timeout_seconds,omitempty"`
-	KeepRuns    *int               `json:"keep_runs,omitempty"`
+	DisplayName *string `json:"display_name,omitempty"`
+	Schedule    *string `json:"schedule,omitempty"`
+	Timezone    *string `json:"timezone,omitempty"`
+	Concurrency *string `json:"concurrency,omitempty"`
+	MaxRetries  *int    `json:"max_retries,omitempty"`
+	Timeout     *int    `json:"timeout_seconds,omitempty"`
+	KeepRuns    *int    `json:"keep_runs,omitempty"`
 
-	RetainSucceeded *int  `json:"retain_succeeded_seconds,omitempty"`
-	RetainFailed    *int  `json:"retain_failed_seconds,omitempty"`
-	Suspended       *bool `json:"suspended,omitempty"`
-	Image       *string            `json:"image,omitempty"`
-	Command     *[]string          `json:"command,omitempty"`
-	Args        *[]string          `json:"args,omitempty"`
-	HTTPURL     *string            `json:"http_url,omitempty"`
-	HTTPMethod  *string            `json:"http_method,omitempty"`
-	HTTPHeaders *map[string]string `json:"http_headers,omitempty"`
-	HTTPBody    *string            `json:"http_body,omitempty"`
+	RetainSucceeded *int               `json:"retain_succeeded_seconds,omitempty"`
+	RetainFailed    *int               `json:"retain_failed_seconds,omitempty"`
+	Suspended       *bool              `json:"suspended,omitempty"`
+	Image           *string            `json:"image,omitempty"`
+	Command         *[]string          `json:"command,omitempty"`
+	Args            *[]string          `json:"args,omitempty"`
+	HTTPURL         *string            `json:"http_url,omitempty"`
+	HTTPMethod      *string            `json:"http_method,omitempty"`
+	HTTPHeaders     *map[string]string `json:"http_headers,omitempty"`
+	HTTPBody        *string            `json:"http_body,omitempty"`
 }

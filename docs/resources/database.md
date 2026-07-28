@@ -51,11 +51,10 @@ resource "fpcloud_database" "main" {
 
 ### Read-Only
 
-- `connection_string` (String, Sensitive) The full connection string for the database.
 - `created_at` (String) The time the database was created.
-- `host` (String) The database host address.
+- `host` (String) Cluster-internal hostname of the database's primary. Not reachable from outside the cluster — an app in the same project gets DATABASE_URL injected, and `fpcloud db connect` tunnels in from a workstation.
 - `id` (String) The unique identifier of the database.
-- `password` (String, Sensitive) The database password.
+- `password` (String, Sensitive) Password for `username`, available only at creation. CloudNativePG owns the role and rotates it out of band, so this is a snapshot that will go stale — treat the injected DATABASE_URL or `fpcloud db connect` as the live credential.
 - `plan` (String) Legacy size tier, derived by the server from cpu/memory (e.g. "starter", "custom"). Read-only — size the database with cpu/memory/storage/instances instead.
 - `port` (Number) The database port.
 - `status` (String) The current status of the database.

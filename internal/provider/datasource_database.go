@@ -19,19 +19,18 @@ type DatabaseDataSource struct {
 
 // DatabaseDataSourceModel describes the data source data model.
 type DatabaseDataSourceModel struct {
-	ID               types.String `tfsdk:"id"`
-	ProjectID        types.String `tfsdk:"project_id"`
-	Name             types.String `tfsdk:"name"`
-	DisplayName      types.String `tfsdk:"display_name"`
-	Engine           types.String `tfsdk:"engine"`
-	Version          types.String `tfsdk:"version"`
-	Plan             types.String `tfsdk:"plan"`
-	Status           types.String `tfsdk:"status"`
-	Host             types.String `tfsdk:"host"`
-	Port             types.Int64  `tfsdk:"port"`
-	Username         types.String `tfsdk:"username"`
-	ConnectionString types.String `tfsdk:"connection_string"`
-	CreatedAt        types.String `tfsdk:"created_at"`
+	ID          types.String `tfsdk:"id"`
+	ProjectID   types.String `tfsdk:"project_id"`
+	Name        types.String `tfsdk:"name"`
+	DisplayName types.String `tfsdk:"display_name"`
+	Engine      types.String `tfsdk:"engine"`
+	Version     types.String `tfsdk:"version"`
+	Plan        types.String `tfsdk:"plan"`
+	Status      types.String `tfsdk:"status"`
+	Host        types.String `tfsdk:"host"`
+	Port        types.Int64  `tfsdk:"port"`
+	Username    types.String `tfsdk:"username"`
+	CreatedAt   types.String `tfsdk:"created_at"`
 }
 
 // NewDatabaseDataSource returns a new DatabaseDataSource.
@@ -80,8 +79,9 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Computed:    true,
 			},
 			"host": schema.StringAttribute{
-				Description: "The database host address.",
-				Computed:    true,
+				Description: "Cluster-internal hostname of the database's primary. Not reachable from " +
+					"outside the cluster.",
+				Computed: true,
 			},
 			"port": schema.Int64Attribute{
 				Description: "The database port.",
@@ -90,11 +90,6 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 			"username": schema.StringAttribute{
 				Description: "The database username.",
 				Computed:    true,
-			},
-			"connection_string": schema.StringAttribute{
-				Description: "The full connection string for the database.",
-				Computed:    true,
-				Sensitive:   true,
 			},
 			"created_at": schema.StringAttribute{
 				Description: "The creation timestamp of the database.",
@@ -146,10 +141,11 @@ func (d *DatabaseDataSource) Read(ctx context.Context, req datasource.ReadReques
 	data.Version = types.StringValue(db.Version)
 	data.Plan = types.StringValue(db.Plan)
 	data.Status = types.StringValue(db.Status)
-	data.Host = types.StringValue("")     // Host is not directly exposed; parsed from connection string if needed.
-	data.Port = types.Int64Value(5432)    // Default PostgreSQL port.
-	data.Username = types.StringValue("") // Username is not directly exposed in the API response.
-	data.ConnectionString = types.StringValue(db.ConnectionString)
+	// These are on the API response and always were; they used to be hardcoded
+	// empty here, with a comment asserting the API did not expose them.
+	data.Host = types.StringValue(db.Host)
+	data.Port = types.Int64Value(int64(db.Port))
+	data.Username = types.StringValue(db.Username)
 	data.CreatedAt = types.StringValue(db.CreatedAt.Format("2006-01-02T15:04:05Z"))
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

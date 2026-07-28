@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"net/url"
 
 	"github.com/fogpipe/terraform-provider-fpcloud/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -39,26 +38,25 @@ type DatabaseBackupModel struct {
 
 // DatabaseResourceModel describes the resource data model.
 type DatabaseResourceModel struct {
-	ID               types.String         `tfsdk:"id"`
-	ProjectID        types.String         `tfsdk:"project_id"`
-	Name             types.String         `tfsdk:"name"`
-	DisplayName      types.String         `tfsdk:"display_name"`
-	Engine           types.String         `tfsdk:"engine"`
-	Version          types.String         `tfsdk:"version"`
-	Plan             types.String         `tfsdk:"plan"`
-	CPU              types.String         `tfsdk:"cpu"`
-	Memory           types.String         `tfsdk:"memory"`
-	Storage          types.String         `tfsdk:"storage"`
-	Instances        types.Int64          `tfsdk:"instances"`
-	Pooler           types.Bool           `tfsdk:"pooler"`
-	Status           types.String         `tfsdk:"status"`
-	Host             types.String         `tfsdk:"host"`
-	Port             types.Int64          `tfsdk:"port"`
-	Username         types.String         `tfsdk:"username"`
-	Password         types.String         `tfsdk:"password"`
-	ConnectionString types.String         `tfsdk:"connection_string"`
-	CreatedAt        types.String         `tfsdk:"created_at"`
-	Backup           *DatabaseBackupModel `tfsdk:"backup"`
+	ID          types.String         `tfsdk:"id"`
+	ProjectID   types.String         `tfsdk:"project_id"`
+	Name        types.String         `tfsdk:"name"`
+	DisplayName types.String         `tfsdk:"display_name"`
+	Engine      types.String         `tfsdk:"engine"`
+	Version     types.String         `tfsdk:"version"`
+	Plan        types.String         `tfsdk:"plan"`
+	CPU         types.String         `tfsdk:"cpu"`
+	Memory      types.String         `tfsdk:"memory"`
+	Storage     types.String         `tfsdk:"storage"`
+	Instances   types.Int64          `tfsdk:"instances"`
+	Pooler      types.Bool           `tfsdk:"pooler"`
+	Status      types.String         `tfsdk:"status"`
+	Host        types.String         `tfsdk:"host"`
+	Port        types.Int64          `tfsdk:"port"`
+	Username    types.String         `tfsdk:"username"`
+	Password    types.String         `tfsdk:"password"`
+	CreatedAt   types.String         `tfsdk:"created_at"`
+	Backup      *DatabaseBackupModel `tfsdk:"backup"`
 }
 
 func (r *DatabaseResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -165,8 +163,10 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Computed:    true,
 			},
 			"host": schema.StringAttribute{
-				Description: "The database host address.",
-				Computed:    true,
+				Description: "Cluster-internal hostname of the database's primary. Not reachable from " +
+					"outside the cluster — an app in the same project gets DATABASE_URL injected, and " +
+					"`fpcloud db connect` tunnels in from a workstation.",
+				Computed: true,
 			},
 			"port": schema.Int64Attribute{
 				Description: "The database port.",
@@ -177,14 +177,11 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Computed:    true,
 			},
 			"password": schema.StringAttribute{
-				Description: "The database password.",
-				Computed:    true,
-				Sensitive:   true,
-			},
-			"connection_string": schema.StringAttribute{
-				Description: "The full connection string for the database.",
-				Computed:    true,
-				Sensitive:   true,
+				Description: "Password for `username`, available only at creation. CloudNativePG owns the " +
+					"role and rotates it out of band, so this is a snapshot that will go stale — treat the " +
+					"injected DATABASE_URL or `fpcloud db connect` as the live credential.",
+				Computed:  true,
+				Sensitive: true,
 			},
 			"created_at": schema.StringAttribute{
 				Description: "The time the database was created.",
@@ -416,44 +413,18 @@ func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 	// API Database response does not echo them, so they are preserved from the
 	// plan/state (write-only from Terraform's point of view).
 
-	// Parse connection string to extract host/port/username/password.
-	connStr := db.ConnectionString
-	state.ConnectionString = types.StringValue(connStr)
-
-	if connStr != "" {
-		if parsed, err := url.Parse(connStr); err == nil {
-			state.Host = types.StringValue(parsed.Hostname())
-			if port := parsed.Port(); port != "" {
-				// Convert string port to int64.
-				var portNum int64
-				for _, c := range port {
-					portNum = portNum*10 + int64(c-'0')
-				}
-				state.Port = types.Int64Value(portNum)
-			} else {
-				state.Port = types.Int64Value(5432)
-			}
-			if parsed.User != nil {
-				state.Username = types.StringValue(parsed.User.Username())
-				if pw, ok := parsed.User.Password(); ok {
-					state.Password = types.StringValue(pw)
-				} else {
-					state.Password = types.StringValue("")
-				}
-			} else {
-				state.Username = types.StringValue("")
-				state.Password = types.StringValue("")
-			}
-		} else {
-			state.Host = types.StringValue("")
-			state.Port = types.Int64Value(0)
-			state.Username = types.StringValue("")
-			state.Password = types.StringValue("")
-		}
-	} else {
-		state.Host = types.StringValue("")
-		state.Port = types.Int64Value(0)
-		state.Username = types.StringValue("")
+	// Read the address straight off the API response. This used to parse a
+	// `connection_string` field that the API has never emitted, so host, port and
+	// username silently resolved to "" on every read.
+	state.Host = types.StringValue(db.Host)
+	state.Port = types.Int64Value(int64(db.Port))
+	state.Username = types.StringValue(db.Username)
+	// Password is returned only on create; CNPG rotates the app role out of band,
+	// so on any later read there is nothing to refresh it from and the last known
+	// value is kept rather than being blanked.
+	if db.Password != "" {
+		state.Password = types.StringValue(db.Password)
+	} else if state.Password.IsNull() || state.Password.IsUnknown() {
 		state.Password = types.StringValue("")
 	}
 }

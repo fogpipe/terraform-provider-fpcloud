@@ -44,7 +44,10 @@ type JobResourceModel struct {
 	MaxRetries  types.Int64  `tfsdk:"max_retries"`
 	Timeout     types.Int64  `tfsdk:"timeout_seconds"`
 	KeepRuns    types.Int64  `tfsdk:"keep_runs"`
-	Suspended   types.Bool   `tfsdk:"suspended"`
+
+	RetainSucceeded types.Int64 `tfsdk:"retain_succeeded_seconds"`
+	RetainFailed    types.Int64 `tfsdk:"retain_failed_seconds"`
+	Suspended       types.Bool  `tfsdk:"suspended"`
 
 	Image       types.String `tfsdk:"image"`
 	Command     types.List   `tfsdk:"command"`
@@ -133,9 +136,24 @@ func (r *JobResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Computed: true,
 			},
 			"keep_runs": schema.Int64Attribute{
-				Description: "How many runs are retained in the history (default 10).",
-				Optional:    true,
-				Computed:    true,
+				Description: "How many runs are retained in the history, newest first (default 10). " +
+					"Applies to both outcomes; combined with the retention windows below, a run is " +
+					"dropped once either bound is exceeded.",
+				Optional: true,
+				Computed: true,
+			},
+			"retain_succeeded_seconds": schema.Int64Attribute{
+				Description: "How long a completed run is kept, in seconds (default 604800 = 7 days). " +
+					"0 removes the age limit, leaving `keep_runs` the only bound.",
+				Optional: true,
+				Computed: true,
+			},
+			"retain_failed_seconds": schema.Int64Attribute{
+				Description: "How long an errored run is kept, in seconds (default 2592000 = 30 days). " +
+					"Kept separately from completed runs because a failure stays worth reading long " +
+					"after a success is noise. 0 removes the age limit.",
+				Optional: true,
+				Computed: true,
 			},
 			"suspended": schema.BoolAttribute{
 				Description: "Pause the schedule. A suspended job keeps its history and can still be " +
@@ -240,6 +258,14 @@ func (r *JobResource) Create(ctx context.Context, req resource.CreateRequest, re
 		v := int(plan.KeepRuns.ValueInt64())
 		createReq.KeepRuns = &v
 	}
+	if !plan.RetainSucceeded.IsNull() && !plan.RetainSucceeded.IsUnknown() {
+		v := int(plan.RetainSucceeded.ValueInt64())
+		createReq.RetainSucceeded = &v
+	}
+	if !plan.RetainFailed.IsNull() && !plan.RetainFailed.IsUnknown() {
+		v := int(plan.RetainFailed.ValueInt64())
+		createReq.RetainFailed = &v
+	}
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -301,6 +327,8 @@ func (r *JobResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	maxRetries := int(plan.MaxRetries.ValueInt64())
 	timeout := int(plan.Timeout.ValueInt64())
 	keepRuns := int(plan.KeepRuns.ValueInt64())
+	retainSucceeded := int(plan.RetainSucceeded.ValueInt64())
+	retainFailed := int(plan.RetainFailed.ValueInt64())
 	suspended := plan.Suspended.ValueBool()
 	command := stringListValues(ctx, plan.Command, &resp.Diagnostics)
 	args := stringListValues(ctx, plan.Args, &resp.Diagnostics)
@@ -317,14 +345,17 @@ func (r *JobResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		MaxRetries:  &maxRetries,
 		Timeout:     &timeout,
 		KeepRuns:    &keepRuns,
-		Suspended:   &suspended,
-		Image:       &image,
-		Command:     &command,
-		Args:        &args,
-		HTTPURL:     &httpURL,
-		HTTPMethod:  &httpMethod,
-		HTTPHeaders: &headers,
-		HTTPBody:    &httpBody,
+
+		RetainSucceeded: &retainSucceeded,
+		RetainFailed:    &retainFailed,
+		Suspended:       &suspended,
+		Image:           &image,
+		Command:         &command,
+		Args:            &args,
+		HTTPURL:         &httpURL,
+		HTTPMethod:      &httpMethod,
+		HTTPHeaders:     &headers,
+		HTTPBody:        &httpBody,
 	}
 
 	job, err := r.client.UpdateJob(ctx, state.ID.ValueString(), updateReq)
@@ -376,6 +407,8 @@ func (r *JobResource) apply(m *JobResourceModel, job *client.Job) {
 	m.MaxRetries = types.Int64Value(int64(job.MaxRetries))
 	m.Timeout = types.Int64Value(int64(job.Timeout))
 	m.KeepRuns = types.Int64Value(int64(job.KeepRuns))
+	m.RetainSucceeded = types.Int64Value(int64(job.RetainSucceeded))
+	m.RetainFailed = types.Int64Value(int64(job.RetainFailed))
 	m.Suspended = types.BoolValue(job.Suspended)
 	m.Target = types.StringValue(job.Target)
 	m.Image = types.StringValue(job.Image)

@@ -51,12 +51,20 @@ nix develop        # or: direnv allow
 just build         # compile
 just test          # unit tests
 just testacc       # acceptance tests (needs FPCLOUD_API_KEY against a live API)
-just docs          # regenerate docs/ from schema + examples
+just docs          # regenerate docs/ from schema + examples + templates
 just snapshot      # local GoReleaser dry-run (no publish)
 ```
 
 To run a local build against a config, use a `dev_overrides` block in
 `~/.terraformrc` pointing `fogpipe/fpcloud` at your `$GOBIN`.
+
+**`docs/` is entirely generated.** `just docs` rewrites the tree from the schema,
+`examples/`, and `templates/`, deleting anything it didn't produce. Hand-written
+pages therefore live in `templates/` — files there without a `.tmpl` extension are
+copied through verbatim, so markdown containing `{{ ... }}` survives intact.
+`templates/guides/` holds the conceptual guides, synced from the `fp-cloud` docs
+pool by `just sync-tf-docs <path-to-this-checkout>` over there; edit them at the
+source, not here.
 
 ## Acceptance tests
 

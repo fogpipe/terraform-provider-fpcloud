@@ -64,8 +64,10 @@ resource "fpcloud_job" "nightly_cleanup" {
 - `http_method` (String) HTTP method for `http_url` (default POST).
 - `http_url` (String) Request an endpoint instead of running an image: an absolute URL, or a path like "/internal/sweep" resolved against the job's `app`. Setting this makes the job an HTTP job.
 - `image` (String) Container image to run. Defaults to the `app` image when an app is set; leave both unset only for an HTTP job.
-- `keep_runs` (Number) How many runs are retained in the history (default 10).
+- `keep_runs` (Number) How many runs are retained in the history, newest first (default 10). Applies to both outcomes; combined with the retention windows below, a run is dropped once either bound is exceeded.
 - `max_retries` (Number) Retries after a failed run (default 3). The delay between attempts is an exponential backoff from 10s, capped at 6 minutes.
+- `retain_failed_seconds` (Number) How long an errored run is kept, in seconds (default 2592000 = 30 days). Kept separately from completed runs because a failure stays worth reading long after a success is noise. 0 removes the age limit.
+- `retain_succeeded_seconds` (Number) How long a completed run is kept, in seconds (default 604800 = 7 days). 0 removes the age limit, leaving `keep_runs` the only bound.
 - `suspended` (Boolean) Pause the schedule. A suspended job keeps its history and can still be triggered manually.
 - `timeout_seconds` (Number) Seconds a single run may take before it is killed and counted as failed (default 300, max 43200).
 - `timezone` (String) tz database name the schedule is read in, e.g. "Europe/Stockholm". Defaults to UTC — set it for wall-clock schedules that must survive daylight saving.

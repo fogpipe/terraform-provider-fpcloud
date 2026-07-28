@@ -6,9 +6,10 @@ page_title: "Scheduled Jobs"
 # Scheduled Jobs
 
 A **job** is one schedule plus what to run. Each time it fires you get a **run**,
-and the last ten runs are kept with their status, exit code and output — so a
-cron that quietly started failing is visible instead of being noticed weeks later
-through missing side effects.
+kept with its status, exit code and output — so a cron that quietly started
+failing is visible instead of being noticed weeks later through missing side
+effects. How much history is kept is [configurable](#how-long-runs-are-kept),
+by count and by age.
 
 Two kinds of target:
 
@@ -177,6 +178,30 @@ fpcloud job logs sweep --run sweep-manual-1753500000
 `fpcloud job list` shows the last run's status inline, so a failing schedule is
 visible from the top-level list.
 
+## How long runs are kept
+
+History is bounded two ways at once, and a run is dropped when either bound is
+exceeded:
+
+```sh
+fpcloud job update sweep --keep-runs 20            # newest N, both outcomes
+fpcloud job update sweep --retain-succeeded 24h    # completed runs age out fast
+fpcloud job update sweep --retain-failed 30d       # errored runs linger
+```
+
+The two windows are separate because a failure stays worth reading long after a
+success is noise — the run you want weeks later is the one that broke. Accepted
+units are `h`, `m`, `s`, plus `d` and `w`; `never` turns the age limit off and
+leaves `--keep-runs` as the only bound.
+
+Defaults are `--keep-runs 10`, `--retain-succeeded 7d`, `--retain-failed 30d`.
+
+This governs both the stored run history and how long the run's pod lingers in
+your project, so a job that fires rarely no longer leaves finished pods sitting
+around for months. Note that a *completed* run may outlive its window slightly:
+its pod is created before the outcome exists, so it starts on the longer of the
+two windows and is narrowed once the run has finished.
+
 ## Pause a schedule
 
 ```sh
@@ -201,7 +226,8 @@ a job removes its schedule and its run history.
 
 Everything above is on the **Jobs** page of the web console: create a job, run
 one on demand, pause or resume a schedule, and open a job's run history to read
-the captured output of any run.
+the captured output of any run. Retention is edited from the run history itself,
+next to the list it governs.
 
 ## Terraform
 
@@ -219,6 +245,10 @@ resource "fpcloud_job" "sweep" {
   }
   concurrency = "forbid"
   max_retries = 3
+
+  keep_runs                = 10
+  retain_succeeded_seconds = 86400   # 1d
+  retain_failed_seconds    = 2592000 # 30d
 }
 ```
 
@@ -231,6 +261,7 @@ place both are defined.
   last run" unambiguous.
 - A run's output is captured when it finishes and kept with the run record, so
   history survives longer than the underlying pod.
-- `--keep-runs` (default 10) bounds how much history is retained per job.
+- `--keep-runs` (default 10) bounds history by count; `--retain-succeeded` and
+  `--retain-failed` bound it by age, per outcome.
 - Runs count against the project's pod quota while they execute; a job firing
   every minute is possible but wasteful.

@@ -929,7 +929,11 @@ type Job struct {
 	MaxRetries  int    `json:"max_retries"`
 	Timeout     int    `json:"timeout_seconds"`
 	KeepRuns    int    `json:"keep_runs"`
-	Suspended   bool   `json:"suspended"`
+	// RetainSucceeded and RetainFailed age out run history per outcome, on top
+	// of KeepRuns; 0 means that outcome has no age bound.
+	RetainSucceeded int  `json:"retain_succeeded_seconds"`
+	RetainFailed    int  `json:"retain_failed_seconds"`
+	Suspended       bool `json:"suspended"`
 
 	Target      string            `json:"target"`
 	Image       string            `json:"image,omitempty"`
@@ -978,7 +982,10 @@ type CreateJobRequest struct {
 	MaxRetries  *int   `json:"max_retries,omitempty"`
 	Timeout     *int   `json:"timeout_seconds,omitempty"`
 	KeepRuns    *int   `json:"keep_runs,omitempty"`
-	Suspended   bool   `json:"suspended,omitempty"`
+
+	RetainSucceeded *int `json:"retain_succeeded_seconds,omitempty"`
+	RetainFailed    *int `json:"retain_failed_seconds,omitempty"`
+	Suspended       bool `json:"suspended,omitempty"`
 
 	Image       string            `json:"image,omitempty"`
 	Command     []string          `json:"command,omitempty"`
@@ -999,7 +1006,10 @@ type UpdateJobRequest struct {
 	MaxRetries  *int               `json:"max_retries,omitempty"`
 	Timeout     *int               `json:"timeout_seconds,omitempty"`
 	KeepRuns    *int               `json:"keep_runs,omitempty"`
-	Suspended   *bool              `json:"suspended,omitempty"`
+
+	RetainSucceeded *int  `json:"retain_succeeded_seconds,omitempty"`
+	RetainFailed    *int  `json:"retain_failed_seconds,omitempty"`
+	Suspended       *bool `json:"suspended,omitempty"`
 	Image       *string            `json:"image,omitempty"`
 	Command     *[]string          `json:"command,omitempty"`
 	Args        *[]string          `json:"args,omitempty"`

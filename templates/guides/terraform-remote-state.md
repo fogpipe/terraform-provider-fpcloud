@@ -17,18 +17,26 @@ fpcloud storage keys create tfstate --name terraform --read --write
 ```
 
 `keys create` prints the `access_key_id` and (once) the `secret_access_key`.
-The bucket's global S3 name is `<project>-<name>` — check it with:
+The bucket's S3 name is **not** the name you just typed: buckets share one
+global namespace, so the store-level name is a **global alias** derived as
+`<name>-<project>-<org>` (`tfstate-myproject-abc`). Don't assemble it by hand —
+buckets created before that scheme kept their older alias, so the only reliable
+answer is to ask:
 
 ```bash
-fpcloud storage bucket get-credentials tfstate   # shows bucket name, endpoint, region
+fpcloud storage bucket get-credentials tfstate                      # name, endpoint, region
+fpcloud storage bucket get-credentials tfstate --format json | jq -r .bucket
 ```
+
+From Terraform, read it off the resource instead — `fpcloud_bucket` exposes it as
+the computed `global_alias`.
 
 ## 2. Configure the backend
 
 ```hcl
 terraform {
   backend "s3" {
-    bucket = "myproject-tfstate"                  # <project>-<name>
+    bucket = "tfstate-myproject-abc"              # the global_alias, NOT "<project>-<name>"
     key    = "env/prod/terraform.tfstate"
     region = "garage"                             # must be "garage" (Garage's SigV4 region)
 

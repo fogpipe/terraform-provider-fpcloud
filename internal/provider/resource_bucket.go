@@ -41,6 +41,7 @@ type BucketResourceModel struct {
 	WebsiteErrorDocument types.String `tfsdk:"website_error_document"`
 	URLSlug              types.String `tfsdk:"url_slug"`
 	WebsiteURL           types.String `tfsdk:"website_url"`
+	GlobalAlias          types.String `tfsdk:"global_alias"`
 }
 
 // NewBucketResource returns a new bucket resource.
@@ -143,6 +144,13 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"website_url": schema.StringAttribute{
 				Description: "The URL the website is served at (present when the website is enabled).",
 				Computed:    true,
+			},
+			"global_alias": schema.StringAttribute{
+				Description: "The bucket's name in the object store's global namespace — the value S3 " +
+					"itself uses, and the website host label. Derived as <name>-<project>-<org>, but " +
+					"read it from here rather than composing it: buckets created before that scheme " +
+					"kept an older alias. This is what an `aws s3` command or a `backend \"s3\"` block needs.",
+				Computed: true,
 			},
 		},
 	}
@@ -348,4 +356,5 @@ func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 	m.WebsiteErrorDocument = types.StringValue(bucket.WebsiteErrorDocument)
 	m.URLSlug = types.StringValue(bucket.URLSlug)
 	m.WebsiteURL = types.StringValue(bucket.WebsiteURL)
+	m.GlobalAlias = types.StringValue(bucket.GlobalAlias)
 }

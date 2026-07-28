@@ -137,5 +137,6 @@ func (p *FogpipeProvider) DataSources(_ context.Context) []func() datasource.Dat
 		NewProjectDataSource,
 		NewAppDataSource,
 		NewDatabaseDataSource,
+		NewSecretDataSource,
 	}
 }

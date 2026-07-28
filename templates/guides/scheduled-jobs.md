@@ -106,6 +106,41 @@ If a run is still going when the next fire is due, `--concurrency` decides:
 | `replace` | Kill the running one and start fresh. |
 | `allow` | Run them in parallel. |
 
+## Assume some fires will be missed
+
+A scheduled job is not a guarantee that every fire happens. A run can be skipped
+because the previous one is still going (`--concurrency forbid`), because the
+platform itself was unable to start it, or because it started and failed every
+retry. If a fire is more than five minutes late, it is dropped rather than
+started — a job that fires every 15 minutes and is unreachable for two hours
+loses those eight fires; it does not run them all at once when service returns.
+
+That five-minute window is a **boundary, not a tuning knob**: it is not
+configurable, and there is no queue behind it. Design for "this fire may never
+happen", not for "it will start eventually".
+
+A dropped fire is also **invisible from both ends**. A run that never started
+leaves no run record, so nothing in `job runs` or the console marks the gap — the
+history shows the fires that happened, not the ones that should have. And a job
+that reconciles from current state looks identical whether it ran on time or not.
+So the first time anyone notices is when a delta-based job has quietly lost work,
+which is already too late to recover it.
+
+That makes the design of the work the thing that matters:
+
+- **Derive the work from current state** and a missed fire costs latency only.
+  "Send to everyone unnotified", "retry everything still marked failed", "delete
+  everything past its expiry" all pick up whatever accumulated while the job was
+  not running, so the next successful fire is a full recovery.
+- **Derive it from "what changed since I last ran"** and a missed fire loses that
+  work permanently. A job that reads a cursor, processes the delta, and advances
+  the cursor only when it succeeds is fine; one that assumes it runs on every
+  tick is not.
+
+Write the first kind whenever you can. When you can't, make the job record its
+own progress so a later run can tell what was skipped — the platform's run
+history tells you a fire did not happen, not what it would have done.
+
 ## Retries and timeouts
 
 ```sh

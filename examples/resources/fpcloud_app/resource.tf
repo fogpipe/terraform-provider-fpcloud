@@ -16,6 +16,16 @@ resource "fpcloud_app" "web" {
     SESSION_SECRET = var.session_secret
   }
 
+  # Serve /api/* publicly but keep /internal/* off the external ingress. It stays
+  # reachable in-cluster, so an fpcloud_job calling it with a relative http_url
+  # keeps working while outside requests are refused at the edge.
+  routes = [
+    {
+      path       = "/internal/"
+      visibility = "internal"
+    },
+  ]
+
   replicas     = 2 # fixed replica count (always-on mode)
   min_scale    = 1
   max_scale    = 5

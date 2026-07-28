@@ -63,11 +63,18 @@ type AppResourceModel struct {
 	HealthCheckInterval types.Int64  `tfsdk:"health_check_interval"`
 	HealthCheckRetries  types.Int64  `tfsdk:"health_check_retries"`
 	AdoptExisting       types.Bool   `tfsdk:"adopt_existing"`
+	Routes              types.List   `tfsdk:"routes"`
 	Traffic             types.List   `tfsdk:"traffic"`
 	Status              types.String `tfsdk:"status"`
 	URL                 types.String `tfsdk:"url"`
 	CreatedAt           types.String `tfsdk:"created_at"`
 	UpdatedAt           types.String `tfsdk:"updated_at"`
+}
+
+// RouteModel describes a per-path visibility carve-out in Terraform state.
+type RouteModel struct {
+	Path       types.String `tfsdk:"path"`
+	Visibility types.String `tfsdk:"visibility"`
 }
 
 // TrafficTargetModel describes a traffic target in Terraform state.
@@ -352,6 +359,29 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					"secret — run a subsequent apply to reconcile them.",
 				Optional: true,
 			},
+			"routes": schema.ListNestedAttribute{
+				Description: "Per-path visibility carve-outs. A route marked internal is withheld from the " +
+					"external ingress — on the app's own URL and on every custom domain attached to it — " +
+					"while staying reachable at the app's in-cluster address, so a scheduled job calling it " +
+					"keeps working. External requests are refused at the edge. Matching is by path prefix on " +
+					"segment boundaries ('/internal/' covers '/internal/sync' but not '/internalx'). " +
+					"Always-on apps with ingress = \"all\" only.",
+				Optional: true,
+				Computed: true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"path": schema.StringAttribute{
+							Description: "Path prefix to carve out, e.g. '/internal/'. Must start with '/'; '/' alone is rejected (use ingress = \"internal\" to make every path cluster-only).",
+							Required:    true,
+						},
+						"visibility": schema.StringAttribute{
+							Description: "'internal' (not externally routable) or 'public'. Defaults to 'internal'.",
+							Optional:    true,
+							Computed:    true,
+						},
+					},
+				},
+			},
 			"traffic": schema.ListNestedAttribute{
 				Description: "Traffic routing configuration. Each block specifies a revision and its traffic percentage. Use '@latest' to route to the latest revision.",
 				Optional:    true,
@@ -438,6 +468,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	releaseCommand := stringListToSlice(ctx, plan.ReleaseCommand, &resp.Diagnostics)
 	volumeMounts := volumeMountsFromModel(ctx, plan.VolumeMounts, &resp.Diagnostics)
 	securityContext := securityContextFromModel(ctx, plan.SecurityContext, &resp.Diagnostics)
+	routes := routesFromModel(ctx, plan.Routes, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -454,6 +485,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		SecurityContext:     securityContext,
 		Port:                int(plan.Port.ValueInt64()),
 		Ingress:             plan.Ingress.ValueString(),
+		Routes:              routes,
 		Mode:                plan.Mode.ValueString(),
 		Storage:             plan.Storage.ValueString(),
 		StoragePath:         plan.StoragePath.ValueString(),
@@ -483,7 +515,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 			}
 			// Record the existing app in state as-is. Image/env/secret/scaling are
 			// not pushed here; a subsequent apply reconciles them against the config.
-			r.setModelFromApp(&plan, existing)
+			r.setModelFromApp(&plan, existing, &resp.Diagnostics)
 			if targets, terr := r.client.GetTraffic(ctx, existing.ID); terr == nil {
 				r.setTrafficOnModel(ctx, &plan, targets, &resp.Diagnostics)
 			}
@@ -571,7 +603,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		}
 	}
 
-	r.setModelFromApp(&plan, app)
+	r.setModelFromApp(&plan, app, &resp.Diagnostics)
 	if plan.Traffic.IsNull() || plan.Traffic.IsUnknown() {
 		// Read current traffic from the API. On error (e.g. a freshly-created
 		// serverless app with no ready revision yet) fall back to an empty set so
@@ -603,7 +635,7 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 		return
 	}
 
-	r.setModelFromApp(&state, app)
+	r.setModelFromApp(&state, app, &resp.Diagnostics)
 
 	// Read current traffic.
 	targets, err := r.client.GetTraffic(ctx, state.ID.ValueString())
@@ -686,6 +718,23 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			return
 		}
 		app = switched
+	}
+
+	// Route carve-outs are validated against the app's mode and ingress, so this
+	// runs after the mode switch above — a serverless→always-on move plus new
+	// routes has to be applied in that order or the server rejects the routes.
+	// An unknown plan value is not a request to change anything — sending it would
+	// serialize to no routes and silently clear the carve-outs the app already has.
+	if !plan.Routes.IsUnknown() && !plan.Routes.Equal(state.Routes) {
+		rerouted, err := r.client.UpdateAppRoutes(ctx, appID, routesFromModel(ctx, plan.Routes, &resp.Diagnostics))
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if err != nil {
+			resp.Diagnostics.AddError("Error updating app routes", err.Error())
+			return
+		}
+		app = rerouted
 	}
 
 	// Update scaling if any scaling attributes changed.
@@ -813,7 +862,7 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		app = fetched
 	}
 
-	r.setModelFromApp(&plan, app)
+	r.setModelFromApp(&plan, app, &resp.Diagnostics)
 
 	// Read current traffic if not already set by the update above.
 	if plan.Traffic.IsNull() || plan.Traffic.IsUnknown() {
@@ -942,9 +991,63 @@ func (r *AppResource) setTrafficOnModel(_ context.Context, model *AppResourceMod
 	model.Traffic = list
 }
 
+// routeAttrTypes returns the attribute types for the route object.
+func routeAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"path":       types.StringType,
+		"visibility": types.StringType,
+	}
+}
+
+// setRoutesOnModel converts the API's route carve-outs to the Terraform model.
+func setRoutesOnModel(model *AppResourceModel, routes []client.Route, diags *diag.Diagnostics) {
+	if len(routes) == 0 {
+		model.Routes = types.ListNull(types.ObjectType{AttrTypes: routeAttrTypes()})
+		return
+	}
+	elems := make([]attr.Value, len(routes))
+	for i, rt := range routes {
+		obj, d := types.ObjectValue(routeAttrTypes(), map[string]attr.Value{
+			"path":       types.StringValue(rt.Path),
+			"visibility": types.StringValue(rt.Visibility),
+		})
+		diags.Append(d...)
+		elems[i] = obj
+	}
+	list, d := types.ListValue(types.ObjectType{AttrTypes: routeAttrTypes()}, elems)
+	diags.Append(d...)
+	model.Routes = list
+}
+
+// routesFromModel converts the configured route list into client routes. An unset
+// list yields nil (no carve-outs); an empty one yields an empty slice, which the
+// update endpoint reads as "clear them all".
+func routesFromModel(ctx context.Context, l types.List, diags *diag.Diagnostics) []client.Route {
+	if l.IsNull() || l.IsUnknown() {
+		return nil
+	}
+	var models []RouteModel
+	diags.Append(l.ElementsAs(ctx, &models, false)...)
+	routes := make([]client.Route, 0, len(models))
+	for _, m := range models {
+		// Visibility is Optional+Computed, so an omitted one arrives unknown on
+		// create; internal is the server's default and the only reason to name a
+		// route at all.
+		visibility := "internal"
+		if !m.Visibility.IsNull() && !m.Visibility.IsUnknown() && m.Visibility.ValueString() != "" {
+			visibility = m.Visibility.ValueString()
+		}
+		routes = append(routes, client.Route{Path: m.Path.ValueString(), Visibility: visibility})
+	}
+	return routes
+}
+
 // setModelFromApp maps an API App response to the Terraform resource model.
 // It preserves the plan's env/secret maps since they are not returned by the API.
-func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App) {
+func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, diags *diag.Diagnostics) {
+	// Unlike volume_mounts/security_context, routes ARE echoed by the API, so they
+	// are read back rather than preserved from the plan — drift is detectable.
+	setRoutesOnModel(model, app.Routes, diags)
 	model.ID = types.StringValue(app.ID)
 	model.ProjectID = types.StringValue(app.ProjectID)
 	model.Name = types.StringValue(app.Name)

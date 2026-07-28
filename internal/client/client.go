@@ -685,6 +685,21 @@ func (c *Client) UpdateAppCommand(ctx context.Context, id string, command, args,
 	return &app, nil
 }
 
+// UpdateAppRoutes replaces an app's per-route visibility carve-outs (#501). The
+// list is replace-in-full: an empty one clears every carve-out and puts all
+// paths back under the app-wide ingress.
+func (c *Client) UpdateAppRoutes(ctx context.Context, id string, routes []Route) (*App, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/routes", UpdateRoutesRequest{Routes: routes})
+	if err != nil {
+		return nil, err
+	}
+	var app App
+	if err := c.do(httpReq, &app); err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
 // RollbackApp returns an app to a previous release. A rollback that would cross
 // a release command fails with a 409 APIError (code
 // MIGRATION_CONFIRMATION_REQUIRED) until req.ConfirmMigrations is set.

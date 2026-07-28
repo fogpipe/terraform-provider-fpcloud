@@ -44,6 +44,18 @@ Quote it so your shell doesn't expand it: `$CRON_TOKEN` is resolved at fire time
 from the job's environment, which is the app's config. The token stays in one
 place.
 
+The job reaches `/internal/sweep` from inside the cluster, but on a public app
+(`--ingress all`) that path is also served on your public hostname. Keep it off
+the edge:
+
+```sh
+fpcloud app set-routes api --route /internal/
+```
+
+The job keeps working — it never goes through the ingress — while an outside
+request to `/internal/sweep` is refused before it reaches your app. See
+[Route visibility](cli-and-terraform.md#route-visibility-keeping-a-path-off-the-public-ingress).
+
 An absolute URL works too, for calling something outside your app:
 
 ```sh

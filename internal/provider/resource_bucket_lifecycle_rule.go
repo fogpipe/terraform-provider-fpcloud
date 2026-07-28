@@ -70,7 +70,14 @@ func (r *BucketLifecycleRuleResource) Schema(_ context.Context, _ resource.Schem
 			},
 			"prefix": schema.StringAttribute{
 				Description: "Key prefix the rule covers (e.g. `renders/`). Empty (the default) covers " +
-					"the whole bucket. The prefix is the rule's key, so changing it forces a new rule.",
+					"the whole bucket.\n\n" +
+					"The prefix is the rule's blast radius, not a label on it. It is the rule's key, " +
+					"so editing it does not adjust the existing rule — it destroys that rule and " +
+					"creates a different one over whatever the new prefix matches. Widening " +
+					"`renders/` to `\"\"` expires the entire bucket at that age, not renders plus a " +
+					"little more. The plan will say `forces replacement`; it cannot say what the new " +
+					"prefix now covers, so check that yourself when the bucket also holds data you " +
+					"cannot rebuild.",
 				Optional: true,
 				Computed: true,
 				Default:  stringdefault.StaticString(""),

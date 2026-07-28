@@ -25,6 +25,11 @@ resource "fpcloud_bucket_lifecycle_rule" "renders" {
   expire_days = 30
 }
 
+# Widening a prefix is not an edit: it destroys this rule and creates one over
+# whatever the new prefix matches. Setting prefix = "" here would expire the
+# uploads below at the same age. Terraform will say "forces replacement", not
+# "now also deletes your users' files".
+
 # User uploads in the same bucket are never expired — they only reclaim the
 # parts of multipart uploads that were abandoned. Rules are keyed by prefix, so
 # this one and the rule above coexist on one bucket.
@@ -46,7 +51,9 @@ resource "fpcloud_bucket_lifecycle_rule" "uploads" {
 
 - `abort_incomplete_upload_days` (Number) Abort multipart uploads left incomplete for N days, reclaiming their parts. 0 = never abort.
 - `expire_days` (Number) Delete objects older than N days. 0 = no expiry.
-- `prefix` (String) Key prefix the rule covers (e.g. `renders/`). Empty (the default) covers the whole bucket. The prefix is the rule's key, so changing it forces a new rule.
+- `prefix` (String) Key prefix the rule covers (e.g. `renders/`). Empty (the default) covers the whole bucket.
+
+The prefix is the rule's blast radius, not a label on it. It is the rule's key, so editing it does not adjust the existing rule — it destroys that rule and creates a different one over whatever the new prefix matches. Widening `renders/` to `""` expires the entire bucket at that age, not renders plus a little more. The plan will say `forces replacement`; it cannot say what the new prefix now covers, so check that yourself when the bucket also holds data you cannot rebuild.
 
 ### Read-Only
 

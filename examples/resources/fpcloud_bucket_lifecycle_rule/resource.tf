@@ -7,6 +7,11 @@ resource "fpcloud_bucket_lifecycle_rule" "renders" {
   expire_days = 30
 }
 
+# Widening a prefix is not an edit: it destroys this rule and creates one over
+# whatever the new prefix matches. Setting prefix = "" here would expire the
+# uploads below at the same age. Terraform will say "forces replacement", not
+# "now also deletes your users' files".
+
 # User uploads in the same bucket are never expired — they only reclaim the
 # parts of multipart uploads that were abandoned. Rules are keyed by prefix, so
 # this one and the rule above coexist on one bucket.

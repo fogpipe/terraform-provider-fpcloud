@@ -685,9 +685,11 @@ func (c *Client) UpdateAppCommand(ctx context.Context, id string, command, args,
 	return &app, nil
 }
 
-// RollbackApp rolls back an app to a previous revision.
-func (c *Client) RollbackApp(ctx context.Context, id string, revision string) (*App, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/apps/"+id+"/rollback", RollbackRequest{Revision: revision})
+// RollbackApp returns an app to a previous release. A rollback that would cross
+// a release command fails with a 409 APIError (code
+// MIGRATION_CONFIRMATION_REQUIRED) until req.ConfirmMigrations is set.
+func (c *Client) RollbackApp(ctx context.Context, id string, req RollbackRequest) (*App, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/apps/"+id+"/rollback", req)
 	if err != nil {
 		return nil, err
 	}
@@ -696,6 +698,19 @@ func (c *Client) RollbackApp(ctx context.Context, id string, revision string) (*
 		return nil, err
 	}
 	return &app, nil
+}
+
+// GetAppVersion reports what an app is currently running.
+func (c *Client) GetAppVersion(ctx context.Context, id string) (*AppVersion, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/apps/"+id+"/version", nil)
+	if err != nil {
+		return nil, err
+	}
+	var v AppVersion
+	if err := c.do(httpReq, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
 }
 
 // DeleteApp deletes an app by ID.

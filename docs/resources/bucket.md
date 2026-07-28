@@ -72,6 +72,7 @@ resource "fpcloud_app" "uploader" {
 
 - `access_key_id` (String) S3 access key ID for the bucket's initial access key.
 - `endpoint` (String) S3 endpoint URL for the bucket.
+- `global_alias` (String) The bucket's name in the object store's global namespace — the value S3 itself uses, and the website host label. Derived as <name>-<project>-<org>, but read it from here rather than composing it: buckets created before that scheme kept an older alias. This is what an `aws s3` command or a `backend "s3"` block needs.
 - `id` (String) Bucket ID.
 - `region` (String) S3 region for the bucket.
 - `secret_access_key` (String, Sensitive) S3 secret access key for the bucket's initial access key. Returned only on creation — an imported bucket leaves this empty.

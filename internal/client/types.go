@@ -95,6 +95,7 @@ type App struct {
 	CPULimit            string    `json:"cpu_limit"`
 	MemoryLimit         string    `json:"memory_limit"`
 	Ingress             string    `json:"ingress"`
+	Routes              []Route   `json:"routes,omitempty"` // per-path visibility carve-outs (#501)
 	Mode                string    `json:"mode"`
 	Storage             string    `json:"storage"`
 	StoragePath         string    `json:"storage_path"`
@@ -114,6 +115,15 @@ type VolumeMount struct {
 	Name      string `json:"name"`               // ConfigMap/Secret name (ignored for emptydir)
 	MountPath string `json:"mount_path"`         // container path to mount at
 	SubPath   string `json:"sub_path,omitempty"` // mount a single key instead of the whole dir
+}
+
+// Route carves a path prefix out of an app's app-wide ingress visibility (#501).
+// A route marked internal is withheld from the external ingress while staying
+// reachable on the app's in-cluster address — where a scheduled job's self-call
+// or an admin endpoint wants to live. Always-on mode, ingress=all only.
+type Route struct {
+	Path       string `json:"path"`       // path prefix, e.g. "/internal/"
+	Visibility string `json:"visibility"` // "internal" or "public"
 }
 
 // SecurityContext hardens an app's pod/container (nil = image default).
@@ -139,6 +149,7 @@ type CreateAppRequest struct {
 	Port            int              `json:"port,omitempty"`
 	Replicas        int              `json:"replicas,omitempty"`
 	Ingress         string           `json:"ingress,omitempty"`
+	Routes          []Route          `json:"routes,omitempty"`       // per-path visibility carve-outs (#501)
 	Mode            string           `json:"mode,omitempty"`         // "always-on" (default) or "serverless"
 	Storage         string           `json:"storage,omitempty"`      // persistent volume size (e.g. "50Gi")
 	StoragePath     string           `json:"storage_path,omitempty"` // mount path (defaults to /data)
@@ -214,6 +225,12 @@ type UpdateCommandRequest struct {
 	Command        *[]string `json:"command,omitempty"`
 	Args           *[]string `json:"args,omitempty"`
 	ReleaseCommand *[]string `json:"release_command,omitempty"`
+}
+
+// UpdateRoutesRequest replaces an app's per-route visibility carve-outs (#501).
+// Replace-in-full: an empty list clears every carve-out.
+type UpdateRoutesRequest struct {
+	Routes []Route `json:"routes"`
 }
 
 // RollbackRequest is the request body for rolling back an app to a previous

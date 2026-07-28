@@ -31,6 +31,16 @@ resource "fpcloud_app" "web" {
     SESSION_SECRET = var.session_secret
   }
 
+  # Serve /api/* publicly but keep /internal/* off the external ingress. It stays
+  # reachable in-cluster, so an fpcloud_job calling it with a relative http_url
+  # keeps working while outside requests are refused at the edge.
+  routes = [
+    {
+      path       = "/internal/"
+      visibility = "internal"
+    },
+  ]
+
   replicas     = 2 # fixed replica count (always-on mode)
   min_scale    = 1
   max_scale    = 5
@@ -68,6 +78,7 @@ resource "fpcloud_app" "web" {
 - `port` (Number) Container port. Defaults to 8080.
 - `release_command` (List of String) Command run once per deploy — from the exact image being deployed, with the app's env/secrets — before the new version goes live; a failure aborts the deploy (e.g. DB migrations). A single element containing spaces runs via 'sh -c'; use multiple elements for exec form. Write-only from Terraform's perspective.
 - `replicas` (Number) Fixed replica count for always-on apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.
+- `routes` (Attributes List) Per-path visibility carve-outs. A route marked internal is withheld from the external ingress — on the app's own URL and on every custom domain attached to it — while staying reachable at the app's in-cluster address, so a scheduled job calling it keeps working. External requests are refused at the edge. Matching is by path prefix on segment boundaries ('/internal/' covers '/internal/sync' but not '/internalx'). Always-on apps with ingress = "all" only. (see [below for nested schema](#nestedatt--routes))
 - `secret` (Map of String, Sensitive) Secret environment variables (encrypted at rest)
 - `security_context` (Attributes) Opt-in pod/container hardening. When set, the container is locked to the PSS-restricted baseline (drop ALL capabilities, no privilege escalation, RuntimeDefault seccomp) plus the run-as identity below. Create-only — the API has no update path and does not echo it back, so any change forces the app to be replaced. (see [below for nested schema](#nestedatt--security_context))
 - `service_account` (String) Service account email to attach as workload identity. The app will receive credentials to call the Fogpipe API as this service account.
@@ -84,6 +95,18 @@ resource "fpcloud_app" "web" {
 - `status` (String) Current status of the app.
 - `updated_at` (String) Timestamp when the app was last updated.
 - `url` (String) URL where the app is accessible.
+
+<a id="nestedatt--routes"></a>
+### Nested Schema for `routes`
+
+Required:
+
+- `path` (String) Path prefix to carve out, e.g. '/internal/'. Must start with '/'; '/' alone is rejected (use ingress = "internal" to make every path cluster-only).
+
+Optional:
+
+- `visibility` (String) 'internal' (not externally routable) or 'public'. Defaults to 'internal'.
+
 
 <a id="nestedatt--security_context"></a>
 ### Nested Schema for `security_context`

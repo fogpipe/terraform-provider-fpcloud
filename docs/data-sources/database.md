@@ -21,11 +21,10 @@ Use this data source to read a Fogpipe managed database by ID.
 
 ### Read-Only
 
-- `connection_string` (String, Sensitive) The full connection string for the database.
 - `created_at` (String) The creation timestamp of the database.
 - `display_name` (String) The human-readable display name.
 - `engine` (String) The database engine (e.g. postgres).
-- `host` (String) The database host address.
+- `host` (String) Cluster-internal hostname of the database's primary. Not reachable from outside the cluster.
 - `name` (String) The database name.
 - `plan` (String) The database plan (e.g. starter, standard, premium).
 - `port` (Number) The database port.

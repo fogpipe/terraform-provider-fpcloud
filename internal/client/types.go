@@ -82,6 +82,7 @@ type App struct {
 	DisplayName         string    `json:"display_name"`
 	URLSlug             string    `json:"url_slug"` // optional vanity host override (ADR-040); empty = derived host
 	Image               string    `json:"image"`
+	Release             string    `json:"release,omitempty"`         // user-named release currently live (#471)
 	Command             []string  `json:"command,omitempty"`         // container entrypoint override (empty = image ENTRYPOINT)
 	Args                []string  `json:"args,omitempty"`            // container arguments (empty = image CMD)
 	ReleaseCommand      []string  `json:"release_command,omitempty"` // run once per deploy, before the new version goes live
@@ -154,7 +155,9 @@ type CreateAppRequest struct {
 
 // DeployRequest is the request body for deploying a new app revision.
 type DeployRequest struct {
-	Image     string `json:"image"`
+	Image string `json:"image"`
+	// Release names the version this deploy publishes (#471). Optional.
+	Release   string `json:"release,omitempty"`
 	NoTraffic bool   `json:"no_traffic,omitempty"`
 }
 
@@ -213,9 +216,31 @@ type UpdateCommandRequest struct {
 	ReleaseCommand *[]string `json:"release_command,omitempty"`
 }
 
-// RollbackRequest is the request body for rolling back an app.
+// RollbackRequest is the request body for rolling back an app to a previous
+// release (#471).
 type RollbackRequest struct {
-	Revision string `json:"revision,omitempty"`
+	// Release is the release to return to; empty or "prev" means the one before
+	// the current version.
+	Release string `json:"release,omitempty"`
+	// ConfirmMigrations proceeds past the warning that the rollback crosses
+	// release commands, which are not reversed.
+	ConfirmMigrations bool `json:"confirm_migrations,omitempty"`
+}
+
+// AppVersion is what an app is currently running (#471).
+type AppVersion struct {
+	AppID          string   `json:"app_id"`
+	AppName        string   `json:"app_name"`
+	Release        string   `json:"release,omitempty"`
+	Image          string   `json:"image"`
+	ResolvedImage  string   `json:"resolved_image,omitempty"`
+	DeploymentID   string   `json:"deployment_id,omitempty"`
+	Status         string   `json:"status"`
+	Trigger        string   `json:"trigger,omitempty"`
+	CommitSHA      string   `json:"commit_sha,omitempty"`
+	ReleaseCommand []string `json:"release_command,omitempty"`
+	DeployedAt     *string  `json:"deployed_at,omitempty"`
+	DeployedBy     string   `json:"deployed_by,omitempty"`
 }
 
 // Database represents a managed database instance.
@@ -725,19 +750,24 @@ type RestoreRequest struct {
 
 // Deployment represents a single deployment event for an application.
 type Deployment struct {
-	ID          string  `json:"id"`
-	AppID       string  `json:"app_id"`
-	Image       string  `json:"image"`
-	Status      string  `json:"status"`
-	Trigger     string  `json:"trigger"`
-	CommitSHA   string  `json:"commit_sha,omitempty"`
-	Message     string  `json:"message,omitempty"`
-	ReleaseLogs string  `json:"release_logs,omitempty"` // output of the release-command Job for this deploy
-	StartedAt   string  `json:"started_at"`
-	FinishedAt  *string `json:"finished_at,omitempty"`
-	DurationMs  *int    `json:"duration_ms,omitempty"`
-	CreatedBy   string  `json:"created_by,omitempty"`
-	CreatedAt   string  `json:"created_at"`
+	ID    string `json:"id"`
+	AppID string `json:"app_id"`
+	Image string `json:"image"`
+	// Release is the user-named release this deploy published (#471);
+	// ResolvedImage the digest-pinned reference it actually ran.
+	Release        string   `json:"release,omitempty"`
+	ResolvedImage  string   `json:"resolved_image,omitempty"`
+	ReleaseCommand []string `json:"release_command,omitempty"`
+	Status         string   `json:"status"`
+	Trigger        string   `json:"trigger"`
+	CommitSHA      string   `json:"commit_sha,omitempty"`
+	Message        string   `json:"message,omitempty"`
+	ReleaseLogs    string   `json:"release_logs,omitempty"` // output of the release-command Job for this deploy
+	StartedAt      string   `json:"started_at"`
+	FinishedAt     *string  `json:"finished_at,omitempty"`
+	DurationMs     *int     `json:"duration_ms,omitempty"`
+	CreatedBy      string   `json:"created_by,omitempty"`
+	CreatedAt      string   `json:"created_at"`
 }
 
 // SetIAMBindingRequest is the request body for setting an IAM binding.

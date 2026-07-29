@@ -510,8 +510,20 @@ type Domain struct {
 	TLSStatus         string     `json:"tls_status"`
 	VerificationToken string     `json:"verification_token,omitempty"`
 	VerifiedAt        *time.Time `json:"verified_at,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	// Routes fan the host out to other apps by path prefix (#581, ADR-056);
+	// AppID above is the catch-all "/" backend.
+	Routes    []DomainRoute `json:"routes,omitempty"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
+}
+
+// DomainRoute sends one path prefix of a hostname to a backend app (#581,
+// ADR-056) — the cross-app counterpart to Route, which selects a path's
+// visibility within one app. The request path reaches the backend unmodified.
+type DomainRoute struct {
+	Path    string `json:"path"`               // path prefix, e.g. "/api/"
+	AppID   string `json:"app_id"`             // backend app; always-on, same project as the domain
+	AppName string `json:"app_name,omitempty"` // joined for display; ignored on write
 }
 
 // DomainRequest is the request body for adding or removing a domain.
@@ -519,6 +531,12 @@ type DomainRequest struct {
 	Domain string `json:"domain"`
 	// Mode selects the attachment behavior (ADR-044); empty defaults to "verified".
 	Mode string `json:"mode,omitempty"`
+}
+
+// SetDomainRoutesRequest replaces a domain's path->app route table (#581).
+// Replace-in-full: an empty list clears the fan-out.
+type SetDomainRoutesRequest struct {
+	Routes []DomainRoute `json:"routes"`
 }
 
 // Domain attachment modes (ADR-044).

@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/fogpipe/terraform-provider-fpcloud/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -33,9 +35,17 @@ type DomainResourceModel struct {
 	AppID     types.String `tfsdk:"app_id"`
 	Domain    types.String `tfsdk:"domain"`
 	Mode      types.String `tfsdk:"mode"`
+	Routes    types.List   `tfsdk:"routes"`
 	Status    types.String `tfsdk:"status"`
 	TLSStatus types.String `tfsdk:"tls_status"`
 	CreatedAt types.String `tfsdk:"created_at"`
+}
+
+// DomainRouteModel describes one path->app route in Terraform state.
+type DomainRouteModel struct {
+	Path    types.String `tfsdk:"path"`
+	AppID   types.String `tfsdk:"app_id"`
+	AppName types.String `tfsdk:"app_name"`
 }
 
 func (r *DomainResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -78,6 +88,33 @@ func (r *DomainResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"routes": schema.ListNestedAttribute{
+				Description: "Path prefixes of this hostname served by a DIFFERENT app, so one origin can " +
+					"be split across several apps (a frontend and an API deploy independently without " +
+					"CORS or cross-site cookies). The app named by app_id above stays the catch-all: it " +
+					"serves \"/\" and every path no route claims. The longest matching prefix wins, and " +
+					"the request path is NOT rewritten — an app at '/api/' receives '/api/orders'. One " +
+					"certificate covers the host however many apps sit behind it. Backends must be " +
+					"always-on apps in the same project as the domain.",
+				Optional: true,
+				Computed: true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"path": schema.StringAttribute{
+							Description: "Path prefix served by this backend, e.g. '/api/'. Must start with '/'; '/' alone is rejected (the domain's own app already serves it).",
+							Required:    true,
+						},
+						"app_id": schema.StringAttribute{
+							Description: "The app serving this prefix. Must be always-on and in the domain's project, and cannot be the domain's own app.",
+							Required:    true,
+						},
+						"app_name": schema.StringAttribute{
+							Description: "The backend app's name, resolved by the API for display.",
+							Computed:    true,
+						},
+					},
 				},
 			},
 			"status": schema.StringAttribute{
@@ -124,7 +161,24 @@ func (r *DomainResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	mapDomainToState(d, &plan)
+	// The create endpoint takes no route table, so a configured fan-out is a
+	// second call. Applying it here rather than on the next apply matters: the
+	// domain is routed as soon as its ownership checks pass, and until the table
+	// lands every prefix is served by the catch-all app.
+	routes := domainRoutesFromModel(ctx, plan.Routes, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if len(routes) > 0 {
+		routed, err := r.client.SetDomainRoutes(ctx, plan.AppID.ValueString(), plan.Domain.ValueString(), routes)
+		if err != nil {
+			resp.Diagnostics.AddError("Error setting domain routes", err.Error())
+			return
+		}
+		d = routed
+	}
+
+	mapDomainToState(d, &plan, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -160,16 +214,33 @@ func (r *DomainResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
-	mapDomainToState(found, &state)
+	mapDomainToState(found, &state, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *DomainResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
-	// All fields are immutable (RequiresReplace), so Update should never be called.
-	resp.Diagnostics.AddError(
-		"Update not supported",
-		"Domain resources are immutable. Changes require replacement.",
-	)
+// Update handles the one mutable field: the path->app route table. Every other
+// attribute is RequiresReplace, so a change to any of them never reaches here.
+func (r *DomainResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan DomainResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Replace-in-full, so an emptied list has to reach the API as an empty list
+	// and not be skipped — that is how a fan-out is cleared.
+	routes := domainRoutesFromModel(ctx, plan.Routes, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	d, err := r.client.SetDomainRoutes(ctx, plan.AppID.ValueString(), plan.Domain.ValueString(), routes)
+	if err != nil {
+		resp.Diagnostics.AddError("Error updating domain routes", err.Error())
+		return
+	}
+
+	mapDomainToState(d, &plan, &resp.Diagnostics)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *DomainResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -189,7 +260,7 @@ func (r *DomainResource) Delete(ctx context.Context, req resource.DeleteRequest,
 }
 
 // mapDomainToState maps an API Domain response to the Terraform state model.
-func mapDomainToState(d *client.Domain, state *DomainResourceModel) {
+func mapDomainToState(d *client.Domain, state *DomainResourceModel, diags *diag.Diagnostics) {
 	state.ID = types.StringValue(d.ID)
 	state.AppID = types.StringValue(d.AppID)
 	state.Domain = types.StringValue(d.Domain)
@@ -197,4 +268,53 @@ func mapDomainToState(d *client.Domain, state *DomainResourceModel) {
 	state.Status = types.StringValue(d.Status)
 	state.TLSStatus = types.StringValue(d.TLSStatus)
 	state.CreatedAt = types.StringValue(d.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
+	setDomainRoutesOnModel(state, d.Routes, diags)
+}
+
+// domainRouteAttrTypes returns the attribute types for the domain route object.
+func domainRouteAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"path":     types.StringType,
+		"app_id":   types.StringType,
+		"app_name": types.StringType,
+	}
+}
+
+// setDomainRoutesOnModel converts the API's route table to the Terraform model.
+// Routes are echoed by the API, so they are read back rather than preserved from
+// the plan — a fan-out changed outside Terraform shows as drift.
+func setDomainRoutesOnModel(model *DomainResourceModel, routes []client.DomainRoute, diags *diag.Diagnostics) {
+	if len(routes) == 0 {
+		model.Routes = types.ListNull(types.ObjectType{AttrTypes: domainRouteAttrTypes()})
+		return
+	}
+	elems := make([]attr.Value, len(routes))
+	for i, rt := range routes {
+		obj, d := types.ObjectValue(domainRouteAttrTypes(), map[string]attr.Value{
+			"path":     types.StringValue(rt.Path),
+			"app_id":   types.StringValue(rt.AppID),
+			"app_name": types.StringValue(rt.AppName),
+		})
+		diags.Append(d...)
+		elems[i] = obj
+	}
+	list, d := types.ListValue(types.ObjectType{AttrTypes: domainRouteAttrTypes()}, elems)
+	diags.Append(d...)
+	model.Routes = list
+}
+
+// domainRoutesFromModel converts the configured route list into client routes.
+// An unset list yields nil (no fan-out); an empty one yields an empty slice,
+// which the endpoint reads as "clear the table".
+func domainRoutesFromModel(ctx context.Context, l types.List, diags *diag.Diagnostics) []client.DomainRoute {
+	if l.IsNull() || l.IsUnknown() {
+		return nil
+	}
+	var models []DomainRouteModel
+	diags.Append(l.ElementsAs(ctx, &models, false)...)
+	routes := make([]client.DomainRoute, 0, len(models))
+	for _, m := range models {
+		routes = append(routes, client.DomainRoute{Path: m.Path.ValueString(), AppID: m.AppID.ValueString()})
+	}
+	return routes
 }

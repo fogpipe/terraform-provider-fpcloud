@@ -642,6 +642,22 @@ func (c *Client) UpdateAppURLSlug(ctx context.Context, id, slug string) (*App, e
 	return &app, nil
 }
 
+// SetAppDatabase binds the app's unprefixed DATABASE_URL to one of its project's
+// databases by name or id (#544). An empty ref clears the binding: DATABASE_URL
+// then falls back to the project's sole database, or is omitted entirely when the
+// project has several.
+func (c *Client) SetAppDatabase(ctx context.Context, id, databaseRef string) (*App, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/apps/"+id, UpdateAppRequest{Database: &databaseRef})
+	if err != nil {
+		return nil, err
+	}
+	var app App
+	if err := c.do(httpReq, &app); err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
 // SwitchMode migrates an app between hosting modes ("always-on"/"serverless").
 func (c *Client) SwitchMode(ctx context.Context, id, mode string) (*App, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/mode", SwitchModeRequest{Mode: mode})

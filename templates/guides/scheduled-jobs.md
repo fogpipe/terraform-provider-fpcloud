@@ -38,12 +38,14 @@ Authenticate it with a value your app already has:
 fpcloud config set CRON_TOKEN=s3cr3t --app api
 fpcloud job create sweep --app api --schedule "*/15 * * * *" \
   --http-target /internal/sweep \
-  --header "Authorization: Bearer $CRON_TOKEN"
+  --header 'Authorization: Bearer $CRON_TOKEN'
 ```
 
-Quote it so your shell doesn't expand it: `$CRON_TOKEN` is resolved at fire time
-from the job's environment, which is the app's config. The token stays in one
-place.
+**Single quotes.** `$CRON_TOKEN` has to reach the platform literally: it is
+resolved at fire time from the job's environment, which is the app's config, not
+from your shell. Double quotes would expand it locally to an empty string and
+store the header as `Bearer `, and the self-call would 401 on every fire. The
+token stays in one place.
 
 The job reaches `/internal/sweep` from inside the cluster, but on a public app
 (`--ingress all`) that path is also served on your public hostname. Keep it off

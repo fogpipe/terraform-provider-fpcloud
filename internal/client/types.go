@@ -80,7 +80,8 @@ type App struct {
 	ProjectID           string    `json:"project_id"`
 	Name                string    `json:"name"`
 	DisplayName         string    `json:"display_name"`
-	URLSlug             string    `json:"url_slug"` // optional vanity host override (ADR-040); empty = derived host
+	URLSlug             string    `json:"url_slug"`              // optional vanity host override (ADR-040); empty = derived host
+	DatabaseID          string    `json:"database_id,omitempty"` // database DATABASE_URL points at (#544); empty = the project's sole database, or none when it has several
 	Image               string    `json:"image"`
 	Release             string    `json:"release,omitempty"`         // user-named release currently live (#471)
 	Command             []string  `json:"command,omitempty"`         // container entrypoint override (empty = image ENTRYPOINT)
@@ -215,6 +216,9 @@ type UpdateStorageRequest struct {
 type UpdateAppRequest struct {
 	DisplayName string  `json:"display_name,omitempty"`
 	URLSlug     *string `json:"url_slug,omitempty"`
+	// Database binds the unprefixed DATABASE_URL to one of the project's
+	// databases (#544); a pointer to "" clears it back to the default.
+	Database *string `json:"database,omitempty"`
 }
 
 // UpdateCommandRequest is the request body for changing an app's container

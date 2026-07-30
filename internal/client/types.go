@@ -747,12 +747,28 @@ type DatabaseBackup struct {
 	StoppedAt string `json:"stopped_at,omitempty"`
 }
 
-// BackupConfig represents the backup configuration for a database.
+// BackupConfig represents the backup configuration for a database, plus what the
+// cluster has actually done with it (Problems).
 type BackupConfig struct {
 	Enabled                  bool   `json:"enabled"`
 	Schedule                 string `json:"schedule"`
 	Retention                string `json:"retention"`
 	FirstRecoverabilityPoint string `json:"first_recoverability_point,omitempty"`
+	// Problems are the reasons this database's backups are not producing restore
+	// points, derived from live cluster state on every read. Empty means the
+	// pipeline is working.
+	Problems []BackupProblem `json:"problems,omitempty"`
+}
+
+// BackupProblem is one reason a database's backups are not producing restore
+// points: a backup wedged mid-run ("backup-stuck"), a newest attempt that failed
+// ("backup-failing"), a schedule the operator stopped firing
+// ("schedule-overdue"), or one whose cluster is gone ("schedule-orphaned").
+type BackupProblem struct {
+	Object string `json:"object"`
+	Reason string `json:"reason"`
+	Detail string `json:"detail"`
+	Since  string `json:"since,omitempty"`
 }
 
 // BackupDestination is an opt-in, per-database external backup target (issue #130,

@@ -39,6 +39,7 @@ type AppResourceModel struct {
 	Name                types.String `tfsdk:"name"`
 	DisplayName         types.String `tfsdk:"display_name"`
 	URLSlug             types.String `tfsdk:"url_slug"`
+	Database            types.String `tfsdk:"database"`
 	Image               types.String `tfsdk:"image"`
 	Command             types.List   `tfsdk:"command"`
 	Args                types.List   `tfsdk:"args"`
@@ -149,6 +150,17 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					"'<url_slug>.app.<platform_domain>'. When empty, the host is derived from the app/" +
 					"project/org names. Globally unique, a DNS-1123 label, always-on mode only. Set to an " +
 					"empty string to clear it back to the derived host.",
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"database": schema.StringAttribute{
+				Description: "Database (name or id) this app's unprefixed DATABASE_URL points at (#544). " +
+					"Leave unset when the project has a single database — that one is used. With several, " +
+					"DATABASE_URL is omitted unless this names one; each database is always injected as " +
+					"'<NAME>_DATABASE_URL' regardless. Set to an empty string to clear the binding.",
 				Optional: true,
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
@@ -526,6 +538,18 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		return
 	}
 
+	// The database binding is a separate call: the create request has no field
+	// for it (the API takes it on PATCH), and an unset value means "the project's
+	// sole database", which is already the default.
+	if !plan.Database.IsNull() && !plan.Database.IsUnknown() && plan.Database.ValueString() != "" {
+		bound, err := r.client.SetAppDatabase(ctx, app.ID, plan.Database.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Error setting app database binding", err.Error())
+			return
+		}
+		app = bound
+	}
+
 	// Store env and secret values as app configs via the API.
 	for k, v := range envMap {
 		if _, err := r.client.SetConfig(ctx, app.ID, k, v, false); err != nil {
@@ -688,6 +712,17 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			return
 		}
 		app = reslugged
+	}
+
+	// Update the database binding if it changed. An empty string clears it back
+	// to the default (the project's sole database, or none when it has several).
+	if plan.Database.ValueString() != state.Database.ValueString() {
+		rebound, err := r.client.SetAppDatabase(ctx, appID, plan.Database.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Error updating app database binding", err.Error())
+			return
+		}
+		app = rebound
 	}
 
 	// Update the container command/args/release command if any changed. A
@@ -1053,6 +1088,7 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	model.Name = types.StringValue(app.Name)
 	model.DisplayName = types.StringValue(app.DisplayName)
 	model.URLSlug = types.StringValue(app.URLSlug)
+	model.Database = types.StringValue(app.DatabaseID)
 	model.Image = types.StringValue(app.Image)
 	model.Ingress = types.StringValue(app.Ingress)
 	model.Mode = types.StringValue(app.Mode)

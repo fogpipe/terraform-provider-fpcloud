@@ -99,6 +99,7 @@ type App struct {
 	Routes              []Route   `json:"routes,omitempty"` // per-path visibility carve-outs (#501)
 	Mode                string    `json:"mode"`
 	Storage             string    `json:"storage"`
+	KubeServiceAccount  string    `json:"kube_service_account,omitempty"`
 	StoragePath         string    `json:"storage_path"`
 	ServiceAccountID    string    `json:"service_account_id,omitempty"`
 	HealthCheckPath     string    `json:"health_check_path"`
@@ -207,6 +208,13 @@ type SwitchModeRequest struct {
 // UpdateStorageRequest is the request body for growing an app's persistent storage.
 type UpdateStorageRequest struct {
 	Storage string `json:"storage"`
+}
+
+// SetKubeServiceAccountRequest is the request body for naming the Kubernetes
+// ServiceAccount an app's pods run as. Empty clears it back to the hardened
+// default (default ServiceAccount, no token mounted).
+type SetKubeServiceAccountRequest struct {
+	KubeServiceAccount string `json:"kube_service_account"`
 }
 
 // UpdateAppRequest is the request body for PATCH /api/v1/apps/{appID}. Both fields

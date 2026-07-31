@@ -684,6 +684,22 @@ func (c *Client) UpdateAppStorage(ctx context.Context, id, storage string) (*App
 	return &app, nil
 }
 
+// SetAppKubeServiceAccount names the Kubernetes ServiceAccount an app's pods run
+// as, mounting its token so the workload can call the apiserver; "" restores the
+// hardened default. The ServiceAccount must already exist in the app's namespace.
+// Operator-only — 403 for anyone else.
+func (c *Client) SetAppKubeServiceAccount(ctx context.Context, id, serviceAccount string) (*App, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/kube-service-account", SetKubeServiceAccountRequest{KubeServiceAccount: serviceAccount})
+	if err != nil {
+		return nil, err
+	}
+	var app App
+	if err := c.do(httpReq, &app); err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
 // UpdateAppCommand changes an app's container entrypoint override (command),
 // arguments (args), and/or release command. Each is optional: a nil pointer
 // leaves the value untouched, a non-nil pointer (including an empty slice)

@@ -64,6 +64,7 @@ resource "fpcloud_app" "web" {
 - `args` (List of String) Container arguments (CMD/args). Write-only from Terraform's perspective — the API does not echo it back, so out-of-band changes are not detected.
 - `command` (List of String) Container entrypoint override (ENTRYPOINT). Write-only from Terraform's perspective — the API does not echo it back, so out-of-band changes are not detected.
 - `cpu_limit` (String) CPU limit (e.g. 500m). Defaults to 500m.
+- `database` (String) Database (name or id) this app's unprefixed DATABASE_URL points at. Leave unset when the project has a single database — that one is used. With several, DATABASE_URL is omitted unless this names one; each database is always injected as '<NAME>_DATABASE_URL' regardless. Set to an empty string to clear the binding.
 - `display_name` (String) Human-readable display name (mutable cosmetic label). Defaults to the name.
 - `env` (Map of String) Environment variables (plaintext)
 - `health_check_interval` (Number) Health check interval in seconds. Defaults to 10.

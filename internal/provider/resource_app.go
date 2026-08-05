@@ -157,7 +157,7 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"database": schema.StringAttribute{
-				Description: "Database (name or id) this app's unprefixed DATABASE_URL points at (#544). " +
+				Description: "Database (name or id) this app's unprefixed DATABASE_URL points at. " +
 					"Leave unset when the project has a single database — that one is used. With several, " +
 					"DATABASE_URL is omitted unless this names one; each database is always injected as " +
 					"'<NAME>_DATABASE_URL' regardless. Set to an empty string to clear the binding.",

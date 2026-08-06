@@ -486,6 +486,42 @@ func (c *Client) ListAudit(ctx context.Context, query string) ([]*AuditEntry, er
 	return entries, nil
 }
 
+// ListProjectUsage returns a project's metered usage, optionally filtered by
+// query params (from, to, group_by, app_id). Quantities only — no cost.
+func (c *Client) ListProjectUsage(ctx context.Context, projectID, query string) ([]*UsageEntry, error) {
+	path := "/api/v1/projects/" + projectID + "/usage"
+	if query != "" {
+		path += "?" + query
+	}
+	httpReq, err := c.newRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var entries []*UsageEntry
+	if err := c.do(httpReq, &entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+// ListOrgUsage returns an org-wide usage rollup across its projects, optionally
+// filtered by query params (from, to, group_by, app_id).
+func (c *Client) ListOrgUsage(ctx context.Context, orgID, query string) ([]*UsageEntry, error) {
+	path := "/api/v1/orgs/" + orgID + "/usage"
+	if query != "" {
+		path += "?" + query
+	}
+	httpReq, err := c.newRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var entries []*UsageEntry
+	if err := c.do(httpReq, &entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
 // DeleteProject deletes a project by ID.
 func (c *Client) DeleteProject(ctx context.Context, id string) error {
 	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/projects/"+id, nil)
@@ -642,6 +678,22 @@ func (c *Client) UpdateAppURLSlug(ctx context.Context, id, slug string) (*App, e
 	return &app, nil
 }
 
+// SetAppDatabase binds the app's unprefixed DATABASE_URL to one of its project's
+// databases by name or id (#544). An empty ref clears the binding: DATABASE_URL
+// then falls back to the project's sole database, or is omitted entirely when the
+// project has several.
+func (c *Client) SetAppDatabase(ctx context.Context, id, databaseRef string) (*App, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/apps/"+id, UpdateAppRequest{Database: &databaseRef})
+	if err != nil {
+		return nil, err
+	}
+	var app App
+	if err := c.do(httpReq, &app); err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
 // SwitchMode migrates an app between hosting modes ("always-on"/"serverless").
 func (c *Client) SwitchMode(ctx context.Context, id, mode string) (*App, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/mode", SwitchModeRequest{Mode: mode})
@@ -658,6 +710,22 @@ func (c *Client) SwitchMode(ctx context.Context, id, mode string) (*App, error) 
 // UpdateAppStorage grows an app's persistent volume (grow-only, always-on mode).
 func (c *Client) UpdateAppStorage(ctx context.Context, id, storage string) (*App, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/storage", UpdateStorageRequest{Storage: storage})
+	if err != nil {
+		return nil, err
+	}
+	var app App
+	if err := c.do(httpReq, &app); err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
+// SetAppKubeServiceAccount names the Kubernetes ServiceAccount an app's pods run
+// as, mounting its token so the workload can call the apiserver; "" restores the
+// hardened default. The ServiceAccount must already exist in the app's namespace.
+// Operator-only — 403 for anyone else.
+func (c *Client) SetAppKubeServiceAccount(ctx context.Context, id, serviceAccount string) (*App, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/kube-service-account", SetKubeServiceAccountRequest{KubeServiceAccount: serviceAccount})
 	if err != nil {
 		return nil, err
 	}
@@ -1378,7 +1446,7 @@ func (c *Client) VerifyDomain(ctx context.Context, appID string, domain string) 
 	return &v, nil
 }
 
-// SetDomainRoutes replaces a domain's path->app route table (#581, ADR-056),
+// SetDomainRoutes replaces a domain's path->app route table (#581, ADR-058),
 // fanning one hostname out to several apps by path prefix. Replace-in-full: an
 // empty list clears the fan-out.
 func (c *Client) SetDomainRoutes(ctx context.Context, appID, domain string, routes []DomainRoute) (*Domain, error) {

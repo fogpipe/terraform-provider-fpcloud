@@ -43,6 +43,30 @@ type AuditEntry struct {
 	Details      map[string]any `json:"details,omitempty"`
 }
 
+// UsageEntry is one aggregated slice of metered usage — a quantity of one
+// resource type over a period, along whichever axis was requested (#675).
+//
+// Identity is a name snapshot rather than a join: usage outlives the resource
+// that produced it, so a deleted app still reports what it consumed.
+type UsageEntry struct {
+	ProjectID   string `json:"project_id,omitempty"`
+	ProjectName string `json:"project_name,omitempty"`
+	// AppID names either an app or a database; ResourceType distinguishes them
+	// (compute.*/volume.* = app, database.* = database). Empty means the usage
+	// belongs to the project rather than to any one workload.
+	AppID   string     `json:"app_id,omitempty"`
+	AppName string     `json:"app_name,omitempty"`
+	Day     *time.Time `json:"day,omitempty"` // set only when grouped by day
+	// ResourceType is an opaque token (compute.cpu, database.storage, …). New
+	// ones appear as metering grows — never enumerate them.
+	ResourceType string `json:"resource_type"`
+	Unit         string `json:"unit"`
+	// Quantity is a decimal string, not a number: the underlying column is
+	// NUMERIC because a float sum over a month of hourly rows drifts. Parse it
+	// only to format it.
+	Quantity string `json:"quantity"`
+}
+
 // UpdateProjectRequest is the request body for updating a project.
 type UpdateProjectRequest struct {
 	DisplayName string  `json:"display_name,omitempty"`
@@ -80,7 +104,8 @@ type App struct {
 	ProjectID           string    `json:"project_id"`
 	Name                string    `json:"name"`
 	DisplayName         string    `json:"display_name"`
-	URLSlug             string    `json:"url_slug"` // optional vanity host override (ADR-040); empty = derived host
+	URLSlug             string    `json:"url_slug"`              // optional vanity host override (ADR-040); empty = derived host
+	DatabaseID          string    `json:"database_id,omitempty"` // database DATABASE_URL points at (#544); empty = the project's sole database, or none when it has several
 	Image               string    `json:"image"`
 	Release             string    `json:"release,omitempty"`         // user-named release currently live (#471)
 	Command             []string  `json:"command,omitempty"`         // container entrypoint override (empty = image ENTRYPOINT)
@@ -98,6 +123,7 @@ type App struct {
 	Routes              []Route   `json:"routes,omitempty"` // per-path visibility carve-outs (#501)
 	Mode                string    `json:"mode"`
 	Storage             string    `json:"storage"`
+	KubeServiceAccount  string    `json:"kube_service_account,omitempty"`
 	StoragePath         string    `json:"storage_path"`
 	ServiceAccountID    string    `json:"service_account_id,omitempty"`
 	HealthCheckPath     string    `json:"health_check_path"`
@@ -208,6 +234,13 @@ type UpdateStorageRequest struct {
 	Storage string `json:"storage"`
 }
 
+// SetKubeServiceAccountRequest is the request body for naming the Kubernetes
+// ServiceAccount an app's pods run as. Empty clears it back to the hardened
+// default (default ServiceAccount, no token mounted).
+type SetKubeServiceAccountRequest struct {
+	KubeServiceAccount string `json:"kube_service_account"`
+}
+
 // UpdateAppRequest is the request body for PATCH /api/v1/apps/{appID}. Both fields
 // are optional: display_name changes the app's cosmetic label (the frozen name is
 // not renamable in place); url_slug sets or clears the optional vanity host override
@@ -215,6 +248,9 @@ type UpdateStorageRequest struct {
 type UpdateAppRequest struct {
 	DisplayName string  `json:"display_name,omitempty"`
 	URLSlug     *string `json:"url_slug,omitempty"`
+	// Database binds the unprefixed DATABASE_URL to one of the project's
+	// databases (#544); a pointer to "" clears it back to the default.
+	Database *string `json:"database,omitempty"`
 }
 
 // UpdateCommandRequest is the request body for changing an app's container
@@ -510,7 +546,7 @@ type Domain struct {
 	TLSStatus         string     `json:"tls_status"`
 	VerificationToken string     `json:"verification_token,omitempty"`
 	VerifiedAt        *time.Time `json:"verified_at,omitempty"`
-	// Routes fan the host out to other apps by path prefix (#581, ADR-056);
+	// Routes fan the host out to other apps by path prefix (#581, ADR-058);
 	// AppID above is the catch-all "/" backend.
 	Routes    []DomainRoute `json:"routes,omitempty"`
 	CreatedAt time.Time     `json:"created_at"`
@@ -518,7 +554,7 @@ type Domain struct {
 }
 
 // DomainRoute sends one path prefix of a hostname to a backend app (#581,
-// ADR-056) — the cross-app counterpart to Route, which selects a path's
+// ADR-058) — the cross-app counterpart to Route, which selects a path's
 // visibility within one app. The request path reaches the backend unmodified.
 type DomainRoute struct {
 	Path    string `json:"path"`               // path prefix, e.g. "/api/"
@@ -765,12 +801,28 @@ type DatabaseBackup struct {
 	StoppedAt string `json:"stopped_at,omitempty"`
 }
 
-// BackupConfig represents the backup configuration for a database.
+// BackupConfig represents the backup configuration for a database, plus what the
+// cluster has actually done with it (Problems).
 type BackupConfig struct {
 	Enabled                  bool   `json:"enabled"`
 	Schedule                 string `json:"schedule"`
 	Retention                string `json:"retention"`
 	FirstRecoverabilityPoint string `json:"first_recoverability_point,omitempty"`
+	// Problems are the reasons this database's backups are not producing restore
+	// points, derived from live cluster state on every read. Empty means the
+	// pipeline is working.
+	Problems []BackupProblem `json:"problems,omitempty"`
+}
+
+// BackupProblem is one reason a database's backups are not producing restore
+// points: a backup wedged mid-run ("backup-stuck"), a newest attempt that failed
+// ("backup-failing"), a schedule the operator stopped firing
+// ("schedule-overdue"), or one whose cluster is gone ("schedule-orphaned").
+type BackupProblem struct {
+	Object string `json:"object"`
+	Reason string `json:"reason"`
+	Detail string `json:"detail"`
+	Since  string `json:"since,omitempty"`
 }
 
 // BackupDestination is an opt-in, per-database external backup target (issue #130,

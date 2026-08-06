@@ -1446,6 +1446,24 @@ func (c *Client) VerifyDomain(ctx context.Context, appID string, domain string) 
 	return &v, nil
 }
 
+// SetDomainRoutes replaces a domain's path->app route table (#581, ADR-060),
+// fanning one hostname out to several apps by path prefix. Replace-in-full: an
+// empty list clears the fan-out.
+func (c *Client) SetDomainRoutes(ctx context.Context, appID, domain string, routes []DomainRoute) (*Domain, error) {
+	if routes == nil {
+		routes = []DomainRoute{}
+	}
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+appID+"/domains/"+domain+"/routes", SetDomainRoutesRequest{Routes: routes})
+	if err != nil {
+		return nil, err
+	}
+	var d Domain
+	if err := c.do(httpReq, &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
 // RemoveDomain removes a custom domain from an app.
 // AddBucketDomain claims a custom domain for a website bucket (#342).
 func (c *Client) AddBucketDomain(ctx context.Context, bucketID, domain string) (*Domain, error) {

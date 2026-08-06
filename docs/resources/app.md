@@ -41,6 +41,21 @@ resource "fpcloud_app" "web" {
     },
   ]
 
+  # All three probes default to health_check_path, which makes one request decide
+  # both whether traffic arrives and whether the pod is killed. Splitting them
+  # keeps a slow dependency from restarting a process that is running fine:
+  # readiness checks the downstream, liveness only checks that the app responds.
+  # Anything left unset here keeps the health_check_* value above.
+  health_check_path = "/ready" # readiness: checks the database
+  probes = {
+    liveness = {
+      path = "/healthz" # no downstream — a DB blip must not restart the pod
+    }
+    startup = {
+      failure_threshold = 30 # allow 30 × period for a slow boot
+    }
+  }
+
   replicas     = 2 # fixed replica count (always-on mode)
   min_scale    = 1
   max_scale    = 5
@@ -77,6 +92,7 @@ resource "fpcloud_app" "web" {
 - `min_scale` (Number) Minimum number of instances. Server-computed when unset.
 - `mode` (String) Hosting mode: 'always-on' (plain Deployment, default) or 'serverless' (scale-to-zero Knative). Mutable in place — switches the running app over without recreating it.
 - `port` (Number) Container port. Defaults to 8080.
+- `probes` (Attributes) Per-probe overrides for liveness, readiness and startup. By default all three run the app's health_check_* settings, so one request decides both whether traffic reaches the app and whether the pod is restarted. Point liveness at a cheap path that touches no downstream and readiness at the one that does, and a dependency blip pulls the pod out of the load balancer without killing it. Any attribute left unset keeps the matching health_check_* value, so overriding a path never means restating the timing. Always-on apps only. (see [below for nested schema](#nestedatt--probes))
 - `release_command` (List of String) Command run once per deploy — from the exact image being deployed, with the app's env/secrets — before the new version goes live; a failure aborts the deploy (e.g. DB migrations). A single element containing spaces runs via 'sh -c'; use multiple elements for exec form. Write-only from Terraform's perspective.
 - `replicas` (Number) Fixed replica count for always-on apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.
 - `routes` (Attributes List) Per-path visibility carve-outs. A route marked internal is withheld from the external ingress — on the app's own URL and on every custom domain attached to it — while staying reachable at the app's in-cluster address, so a scheduled job calling it keeps working. External requests are refused at the edge. Matching is by path prefix on segment boundaries ('/internal/' covers '/internal/sync' but not '/internalx'). Always-on apps with ingress = "all" only. (see [below for nested schema](#nestedatt--routes))
@@ -96,6 +112,55 @@ resource "fpcloud_app" "web" {
 - `status` (String) Current status of the app.
 - `updated_at` (String) Timestamp when the app was last updated.
 - `url` (String) URL where the app is accessible.
+
+<a id="nestedatt--probes"></a>
+### Nested Schema for `probes`
+
+Optional:
+
+- `liveness` (Attributes) Restarts the pod when it fails. Kubernetes holds it off until the startup probe first succeeds. Unset attributes fall back to the app's health_check_* values. (see [below for nested schema](#nestedatt--probes--liveness))
+- `readiness` (Attributes) Decides whether traffic reaches the pod. Failing it only pulls the pod out of the Service until it recovers. Unset attributes fall back to the app's health_check_* values. (see [below for nested schema](#nestedatt--probes--readiness))
+- `startup` (Attributes) Gates the other two until the app has booted. Raise failure_threshold for a slow start rather than delaying liveness. Unset attributes fall back to the app's health_check_* values. (see [below for nested schema](#nestedatt--probes--startup))
+
+<a id="nestedatt--probes--liveness"></a>
+### Nested Schema for `probes.liveness`
+
+Optional:
+
+- `failure_threshold` (Number) Consecutive failures before the probe acts. Defaults to health_check_retries.
+- `initial_delay_seconds` (Number) Seconds to wait after the container starts before the first check. Defaults to 0.
+- `path` (String) HTTP path this probe requests, e.g. '/healthz'. Defaults to health_check_path.
+- `period_seconds` (Number) Seconds between checks. Defaults to health_check_interval.
+- `success_threshold` (Number) Consecutive successes before the probe counts as passing. Readiness only — Kubernetes requires 1 for liveness and startup, and the API rejects anything else there.
+- `timeout_seconds` (Number) Seconds before a check counts as failed. Defaults to health_check_timeout.
+
+
+<a id="nestedatt--probes--readiness"></a>
+### Nested Schema for `probes.readiness`
+
+Optional:
+
+- `failure_threshold` (Number) Consecutive failures before the probe acts. Defaults to health_check_retries.
+- `initial_delay_seconds` (Number) Seconds to wait after the container starts before the first check. Defaults to 0.
+- `path` (String) HTTP path this probe requests, e.g. '/healthz'. Defaults to health_check_path.
+- `period_seconds` (Number) Seconds between checks. Defaults to health_check_interval.
+- `success_threshold` (Number) Consecutive successes before the probe counts as passing. Readiness only — Kubernetes requires 1 for liveness and startup, and the API rejects anything else there.
+- `timeout_seconds` (Number) Seconds before a check counts as failed. Defaults to health_check_timeout.
+
+
+<a id="nestedatt--probes--startup"></a>
+### Nested Schema for `probes.startup`
+
+Optional:
+
+- `failure_threshold` (Number) Consecutive failures before the probe acts. Defaults to health_check_retries.
+- `initial_delay_seconds` (Number) Seconds to wait after the container starts before the first check. Defaults to 0.
+- `path` (String) HTTP path this probe requests, e.g. '/healthz'. Defaults to health_check_path.
+- `period_seconds` (Number) Seconds between checks. Defaults to health_check_interval.
+- `success_threshold` (Number) Consecutive successes before the probe counts as passing. Readiness only — Kubernetes requires 1 for liveness and startup, and the API rejects anything else there.
+- `timeout_seconds` (Number) Seconds before a check counts as failed. Defaults to health_check_timeout.
+
+
 
 <a id="nestedatt--routes"></a>
 ### Nested Schema for `routes`

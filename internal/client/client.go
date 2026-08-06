@@ -1446,7 +1446,7 @@ func (c *Client) VerifyDomain(ctx context.Context, appID string, domain string) 
 	return &v, nil
 }
 
-// SetDomainRoutes replaces a domain's path->app route table (#581, ADR-058),
+// SetDomainRoutes replaces a domain's path->app route table (#581, ADR-060),
 // fanning one hostname out to several apps by path prefix. Replace-in-full: an
 // empty list clears the fan-out.
 func (c *Client) SetDomainRoutes(ctx context.Context, appID, domain string, routes []DomainRoute) (*Domain, error) {

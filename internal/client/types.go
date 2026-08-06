@@ -546,7 +546,7 @@ type Domain struct {
 	TLSStatus         string     `json:"tls_status"`
 	VerificationToken string     `json:"verification_token,omitempty"`
 	VerifiedAt        *time.Time `json:"verified_at,omitempty"`
-	// Routes fan the host out to other apps by path prefix (#581, ADR-058);
+	// Routes fan the host out to other apps by path prefix (#581, ADR-060);
 	// AppID above is the catch-all "/" backend.
 	Routes    []DomainRoute `json:"routes,omitempty"`
 	CreatedAt time.Time     `json:"created_at"`
@@ -554,7 +554,7 @@ type Domain struct {
 }
 
 // DomainRoute sends one path prefix of a hostname to a backend app (#581,
-// ADR-058) — the cross-app counterpart to Route, which selects a path's
+// ADR-060) — the cross-app counterpart to Route, which selects a path's
 // visibility within one app. The request path reaches the backend unmodified.
 type DomainRoute struct {
 	Path    string `json:"path"`               // path prefix, e.g. "/api/"

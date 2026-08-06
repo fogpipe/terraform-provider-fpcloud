@@ -43,6 +43,124 @@ type AuditEntry struct {
 	Details      map[string]any `json:"details,omitempty"`
 }
 
+// UsageEntry is one aggregated slice of metered usage — a quantity of one
+// resource type over a period, along whichever axis was requested (#675).
+//
+// Identity is a name snapshot rather than a join: usage outlives the resource
+// that produced it, so a deleted app still reports what it consumed.
+type UsageEntry struct {
+	ProjectID   string `json:"project_id,omitempty"`
+	ProjectName string `json:"project_name,omitempty"`
+	// AppID names either an app or a database; ResourceType distinguishes them
+	// (compute.*/volume.* = app, database.* = database). Empty means the usage
+	// belongs to the project rather than to any one workload.
+	AppID   string     `json:"app_id,omitempty"`
+	AppName string     `json:"app_name,omitempty"`
+	Day     *time.Time `json:"day,omitempty"` // set only when grouped by day
+	// ResourceType is an opaque token (compute.cpu, database.storage, …). New
+	// ones appear as metering grows — never enumerate them.
+	ResourceType string `json:"resource_type"`
+	Unit         string `json:"unit"`
+	// Quantity is a decimal string, not a number: the underlying column is
+	// NUMERIC because a float sum over a month of hourly rows drifts. Parse it
+	// only to format it.
+	Quantity string `json:"quantity"`
+}
+
+// RatedLine is one priced component of a period's usage (#112).
+//
+// One line per (resource type, RATE) — a period spanning a price change yields
+// two lines for the same resource, each at the rate that actually applied.
+// Grouping these by resource type alone double-counts or silently picks one
+// rate.
+//
+// Quantity, UnitPrice and Amount are decimal strings for the same reason
+// UsageEntry.Quantity is: the arithmetic happens in Postgres NUMERIC and a
+// float64 round-trip loses exactness money cannot afford. Parse only to format.
+type RatedLine struct {
+	ResourceType string `json:"resource_type"`
+	Unit         string `json:"unit"`
+	Quantity     string `json:"quantity"`
+	// Empty when Priced is false.
+	UnitPrice string `json:"unit_price,omitempty"`
+	Amount    string `json:"amount,omitempty"`
+	Currency  string `json:"currency"`
+	// Priced is false when the resource is metered but has no price in effect.
+	// Reported rather than billed at zero — metering keeps adding resource types
+	// and each arrives before anyone has priced it.
+	Priced bool `json:"priced"`
+}
+
+// RatedPeriod is what a scope's usage came to over a period.
+//
+// Total covers the priced lines only, and UnpricedTypes names what it left out.
+// A non-empty UnpricedTypes means Total is an understatement and a surface
+// showing it has to say so.
+type RatedPeriod struct {
+	Lines         []*RatedLine `json:"lines"`
+	Total         string       `json:"total"`
+	Currency      string       `json:"currency"`
+	UnpricedTypes []string     `json:"unpriced_types,omitempty"`
+}
+
+// Invoice is what an org owed for one closed period (#111). Amounts are decimal
+// strings; a finalized invoice is immutable.
+type Invoice struct {
+	ID               string     `json:"id"`
+	BillingAccountID string     `json:"billing_account_id"`
+	OrgID            string     `json:"org_id"`
+	PeriodStart      time.Time  `json:"period_start"`
+	PeriodEnd        time.Time  `json:"period_end"`
+	Status           string     `json:"status"` // draft, finalized, void
+	Currency         string     `json:"currency"`
+	Subtotal         string     `json:"subtotal"`
+	Tax              string     `json:"tax"`
+	Total            string     `json:"total"`
+	FinalizedAt      *time.Time `json:"finalized_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	// Lines is populated only when fetching a single invoice.
+	Lines []*InvoiceLineItem `json:"lines,omitempty"`
+}
+
+// InvoiceLineItem is one (resource type, project, rate) component of an invoice.
+//
+// UnitPrice is the rate this was BILLED at, stored on the line rather than
+// looked up — an invoice that referenced the current price would be rewritten by
+// the next reprice and a dispute would have no evidence left.
+type InvoiceLineItem struct {
+	ResourceType string `json:"resource_type"`
+	ProjectID    string `json:"project_id,omitempty"`
+	ProjectName  string `json:"project_name,omitempty"`
+	Unit         string `json:"unit"`
+	Quantity     string `json:"quantity"`
+	UnitPrice    string `json:"unit_price"`
+	Amount       string `json:"amount"`
+}
+
+// BillingBinding grants a billing role on an org (#114). A SEPARATE axis from
+// the resource roles — an org owner without one of these cannot see the bill.
+type BillingBinding struct {
+	ID         string    `json:"id"`
+	OrgID      string    `json:"org_id"`
+	MemberType string    `json:"member_type"`
+	Member     string    `json:"member"`
+	Role       string    `json:"role"` // billing.viewer, billing.admin
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// Billing roles (#114).
+const (
+	BillingViewer = "billing.viewer"
+	BillingAdmin  = "billing.admin"
+)
+
+// GrantBillingBindingRequest grants a billing role to a member.
+type GrantBillingBindingRequest struct {
+	Member     string `json:"member"`
+	MemberType string `json:"member_type,omitempty"`
+	Role       string `json:"role"`
+}
+
 // UpdateProjectRequest is the request body for updating a project.
 type UpdateProjectRequest struct {
 	DisplayName string  `json:"display_name,omitempty"`
@@ -522,8 +640,20 @@ type Domain struct {
 	TLSStatus         string     `json:"tls_status"`
 	VerificationToken string     `json:"verification_token,omitempty"`
 	VerifiedAt        *time.Time `json:"verified_at,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	// Routes fan the host out to other apps by path prefix (#581, ADR-060);
+	// AppID above is the catch-all "/" backend.
+	Routes    []DomainRoute `json:"routes,omitempty"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
+}
+
+// DomainRoute sends one path prefix of a hostname to a backend app (#581,
+// ADR-060) — the cross-app counterpart to Route, which selects a path's
+// visibility within one app. The request path reaches the backend unmodified.
+type DomainRoute struct {
+	Path    string `json:"path"`               // path prefix, e.g. "/api/"
+	AppID   string `json:"app_id"`             // backend app; always-on, same project as the domain
+	AppName string `json:"app_name,omitempty"` // joined for display; ignored on write
 }
 
 // DomainRequest is the request body for adding or removing a domain.
@@ -531,6 +661,12 @@ type DomainRequest struct {
 	Domain string `json:"domain"`
 	// Mode selects the attachment behavior (ADR-044); empty defaults to "verified".
 	Mode string `json:"mode,omitempty"`
+}
+
+// SetDomainRoutesRequest replaces a domain's path->app route table (#581).
+// Replace-in-full: an empty list clears the fan-out.
+type SetDomainRoutesRequest struct {
+	Routes []DomainRoute `json:"routes"`
 }
 
 // Domain attachment modes (ADR-044).

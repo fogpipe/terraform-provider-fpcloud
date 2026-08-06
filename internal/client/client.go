@@ -486,6 +486,135 @@ func (c *Client) ListAudit(ctx context.Context, query string) ([]*AuditEntry, er
 	return entries, nil
 }
 
+// ListProjectUsage returns a project's metered usage, optionally filtered by
+// query params (from, to, group_by, app_id). Quantities only — no cost.
+func (c *Client) ListProjectUsage(ctx context.Context, projectID, query string) ([]*UsageEntry, error) {
+	path := "/api/v1/projects/" + projectID + "/usage"
+	if query != "" {
+		path += "?" + query
+	}
+	httpReq, err := c.newRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var entries []*UsageEntry
+	if err := c.do(httpReq, &entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+// ListOrgUsage returns an org-wide usage rollup across its projects, optionally
+// filtered by query params (from, to, group_by, app_id).
+func (c *Client) ListOrgUsage(ctx context.Context, orgID, query string) ([]*UsageEntry, error) {
+	path := "/api/v1/orgs/" + orgID + "/usage"
+	if query != "" {
+		path += "?" + query
+	}
+	httpReq, err := c.newRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var entries []*UsageEntry
+	if err := c.do(httpReq, &entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+// GetBillingEstimate returns the cost of the period in progress (#111).
+//
+// Computed, never persisted: the usage is still accruing and the number changes
+// every hour. query takes from/to (RFC3339); empty means the current UTC
+// calendar month — the same period the close task invoices, so an estimate and
+// the bill that replaces it cover the same hours.
+//
+// Gated on the BILLING axis (#114), not the resource roles: a caller who can
+// read the org's usage may still be refused here.
+func (c *Client) GetBillingEstimate(ctx context.Context, orgID, query string) (*RatedPeriod, error) {
+	path := "/api/v1/orgs/" + orgID + "/billing/estimate"
+	if query != "" {
+		path += "?" + query
+	}
+	httpReq, err := c.newRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var rated RatedPeriod
+	if err := c.do(httpReq, &rated); err != nil {
+		return nil, err
+	}
+	return &rated, nil
+}
+
+// ListInvoices returns an org's invoices, newest period first.
+func (c *Client) ListInvoices(ctx context.Context, orgID string) ([]*Invoice, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/orgs/"+orgID+"/billing/invoices", nil)
+	if err != nil {
+		return nil, err
+	}
+	var invoices []*Invoice
+	if err := c.do(httpReq, &invoices); err != nil {
+		return nil, err
+	}
+	return invoices, nil
+}
+
+// GetInvoice returns one invoice with its line items.
+func (c *Client) GetInvoice(ctx context.Context, orgID, invoiceID string) (*Invoice, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet,
+		"/api/v1/orgs/"+orgID+"/billing/invoices/"+invoiceID, nil)
+	if err != nil {
+		return nil, err
+	}
+	var inv Invoice
+	if err := c.do(httpReq, &inv); err != nil {
+		return nil, err
+	}
+	return &inv, nil
+}
+
+// ListBillingBindings returns an org's billing role grants.
+func (c *Client) ListBillingBindings(ctx context.Context, orgID string) ([]*BillingBinding, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/orgs/"+orgID+"/billing/bindings", nil)
+	if err != nil {
+		return nil, err
+	}
+	var bindings []*BillingBinding
+	if err := c.do(httpReq, &bindings); err != nil {
+		return nil, err
+	}
+	return bindings, nil
+}
+
+// GrantBillingBinding grants a billing role to a member. Requires billing.admin.
+func (c *Client) GrantBillingBinding(ctx context.Context, orgID, member, memberType, role string) (*BillingBinding, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/orgs/"+orgID+"/billing/bindings",
+		GrantBillingBindingRequest{Member: member, MemberType: memberType, Role: role})
+	if err != nil {
+		return nil, err
+	}
+	var b BillingBinding
+	if err := c.do(httpReq, &b); err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// RevokeBillingBinding removes a member's billing role. The server refuses to
+// remove an org's last billing admin.
+func (c *Client) RevokeBillingBinding(ctx context.Context, orgID, member, memberType string) error {
+	path := "/api/v1/orgs/" + orgID + "/billing/bindings/" + url.PathEscape(member)
+	if memberType != "" {
+		path += "?member_type=" + url.QueryEscape(memberType)
+	}
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, path, nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
 // DeleteProject deletes a project by ID.
 func (c *Client) DeleteProject(ctx context.Context, id string) error {
 	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/projects/"+id, nil)
@@ -1408,6 +1537,24 @@ func (c *Client) VerifyDomain(ctx context.Context, appID string, domain string) 
 		return nil, err
 	}
 	return &v, nil
+}
+
+// SetDomainRoutes replaces a domain's path->app route table (#581, ADR-060),
+// fanning one hostname out to several apps by path prefix. Replace-in-full: an
+// empty list clears the fan-out.
+func (c *Client) SetDomainRoutes(ctx context.Context, appID, domain string, routes []DomainRoute) (*Domain, error) {
+	if routes == nil {
+		routes = []DomainRoute{}
+	}
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+appID+"/domains/"+domain+"/routes", SetDomainRoutesRequest{Routes: routes})
+	if err != nil {
+		return nil, err
+	}
+	var d Domain
+	if err := c.do(httpReq, &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
 }
 
 // RemoveDomain removes a custom domain from an app.

@@ -67,6 +67,100 @@ type UsageEntry struct {
 	Quantity string `json:"quantity"`
 }
 
+// RatedLine is one priced component of a period's usage (#112).
+//
+// One line per (resource type, RATE) — a period spanning a price change yields
+// two lines for the same resource, each at the rate that actually applied.
+// Grouping these by resource type alone double-counts or silently picks one
+// rate.
+//
+// Quantity, UnitPrice and Amount are decimal strings for the same reason
+// UsageEntry.Quantity is: the arithmetic happens in Postgres NUMERIC and a
+// float64 round-trip loses exactness money cannot afford. Parse only to format.
+type RatedLine struct {
+	ResourceType string `json:"resource_type"`
+	Unit         string `json:"unit"`
+	Quantity     string `json:"quantity"`
+	// Empty when Priced is false.
+	UnitPrice string `json:"unit_price,omitempty"`
+	Amount    string `json:"amount,omitempty"`
+	Currency  string `json:"currency"`
+	// Priced is false when the resource is metered but has no price in effect.
+	// Reported rather than billed at zero — metering keeps adding resource types
+	// and each arrives before anyone has priced it.
+	Priced bool `json:"priced"`
+}
+
+// RatedPeriod is what a scope's usage came to over a period.
+//
+// Total covers the priced lines only, and UnpricedTypes names what it left out.
+// A non-empty UnpricedTypes means Total is an understatement and a surface
+// showing it has to say so.
+type RatedPeriod struct {
+	Lines         []*RatedLine `json:"lines"`
+	Total         string       `json:"total"`
+	Currency      string       `json:"currency"`
+	UnpricedTypes []string     `json:"unpriced_types,omitempty"`
+}
+
+// Invoice is what an org owed for one closed period (#111). Amounts are decimal
+// strings; a finalized invoice is immutable.
+type Invoice struct {
+	ID               string     `json:"id"`
+	BillingAccountID string     `json:"billing_account_id"`
+	OrgID            string     `json:"org_id"`
+	PeriodStart      time.Time  `json:"period_start"`
+	PeriodEnd        time.Time  `json:"period_end"`
+	Status           string     `json:"status"` // draft, finalized, void
+	Currency         string     `json:"currency"`
+	Subtotal         string     `json:"subtotal"`
+	Tax              string     `json:"tax"`
+	Total            string     `json:"total"`
+	FinalizedAt      *time.Time `json:"finalized_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	// Lines is populated only when fetching a single invoice.
+	Lines []*InvoiceLineItem `json:"lines,omitempty"`
+}
+
+// InvoiceLineItem is one (resource type, project, rate) component of an invoice.
+//
+// UnitPrice is the rate this was BILLED at, stored on the line rather than
+// looked up — an invoice that referenced the current price would be rewritten by
+// the next reprice and a dispute would have no evidence left.
+type InvoiceLineItem struct {
+	ResourceType string `json:"resource_type"`
+	ProjectID    string `json:"project_id,omitempty"`
+	ProjectName  string `json:"project_name,omitempty"`
+	Unit         string `json:"unit"`
+	Quantity     string `json:"quantity"`
+	UnitPrice    string `json:"unit_price"`
+	Amount       string `json:"amount"`
+}
+
+// BillingBinding grants a billing role on an org (#114). A SEPARATE axis from
+// the resource roles — an org owner without one of these cannot see the bill.
+type BillingBinding struct {
+	ID         string    `json:"id"`
+	OrgID      string    `json:"org_id"`
+	MemberType string    `json:"member_type"`
+	Member     string    `json:"member"`
+	Role       string    `json:"role"` // billing.viewer, billing.admin
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// Billing roles (#114).
+const (
+	BillingViewer = "billing.viewer"
+	BillingAdmin  = "billing.admin"
+)
+
+// GrantBillingBindingRequest grants a billing role to a member.
+type GrantBillingBindingRequest struct {
+	Member     string `json:"member"`
+	MemberType string `json:"member_type,omitempty"`
+	Role       string `json:"role"`
+}
+
 // UpdateProjectRequest is the request body for updating a project.
 type UpdateProjectRequest struct {
 	DisplayName string  `json:"display_name,omitempty"`

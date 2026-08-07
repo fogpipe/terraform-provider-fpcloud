@@ -861,6 +861,21 @@ func (c *Client) UpdateAppRoutes(ctx context.Context, id string, routes []Route)
 	return &app, nil
 }
 
+// UpdateAppProbes replaces an app's per-probe liveness/readiness/startup
+// overrides (#453). nil clears them, reverting every probe to the shared
+// HealthCheck* shorthand.
+func (c *Client) UpdateAppProbes(ctx context.Context, id string, probes *ProbeOverrides) (*App, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/probes", UpdateProbesRequest{Probes: probes})
+	if err != nil {
+		return nil, err
+	}
+	var app App
+	if err := c.do(httpReq, &app); err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
 // RollbackApp returns an app to a previous release. A rollback that would cross
 // a release command fails with a 409 APIError (code
 // MIGRATION_CONFIRMATION_REQUIRED) until req.ConfirmMigrations is set.

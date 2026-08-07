@@ -103,6 +103,19 @@ type RatedPeriod struct {
 	UnpricedTypes []string     `json:"unpriced_types,omitempty"`
 }
 
+// Price is what one unit of a metered resource costs.
+//
+// The unit lives on the usage, not here — it is a property of how a resource is
+// metered rather than of what it costs. UnitPrice is a decimal string: rates
+// carry more precision than a cent (EUR 0.00005 per gib-hour is real) and JSON
+// numbers are floats.
+type Price struct {
+	ResourceType  string    `json:"resource_type"`
+	Currency      string    `json:"currency"`
+	UnitPrice     string    `json:"unit_price"`
+	EffectiveFrom time.Time `json:"effective_from"`
+}
+
 // Invoice is what an org owed for one closed period (#111). Amounts are decimal
 // strings; a finalized invoice is immutable.
 type Invoice struct {

@@ -547,6 +547,23 @@ func (c *Client) GetBillingEstimate(ctx context.Context, orgID, query string) (*
 	return &rated, nil
 }
 
+// ListPrices returns the platform's current price list.
+//
+// Unauthenticated — a rate is a published fact, not tenant data. Callable
+// before you have an account, which is the point: the only other way to see
+// what a resource costs is to have already been billed for it.
+func (c *Client) ListPrices(ctx context.Context) ([]*Price, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/prices", nil)
+	if err != nil {
+		return nil, err
+	}
+	var prices []*Price
+	if err := c.do(httpReq, &prices); err != nil {
+		return nil, err
+	}
+	return prices, nil
+}
+
 // ListInvoices returns an org's invoices, newest period first.
 func (c *Client) ListInvoices(ctx context.Context, orgID string) ([]*Invoice, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/orgs/"+orgID+"/billing/invoices", nil)

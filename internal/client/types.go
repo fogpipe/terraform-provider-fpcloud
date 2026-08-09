@@ -119,18 +119,18 @@ type Price struct {
 // Invoice is what an org owed for one closed period (#111). Amounts are decimal
 // strings; a finalized invoice is immutable.
 type Invoice struct {
-	ID               string    `json:"id"`
-	BillingAccountID string    `json:"billing_account_id"`
-	OrgID            string    `json:"org_id"`
-	PeriodStart      time.Time `json:"period_start"`
-	PeriodEnd        time.Time `json:"period_end"`
-	Status           string    `json:"status"` // draft, finalized, void
-	Currency         string    `json:"currency"`
-	// One amount, summed from the lines. No subtotal or tax: VAT is #115 and
-	// arrives with the code that computes it.
-	Total       string     `json:"total"`
-	FinalizedAt *time.Time `json:"finalized_at,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID               string     `json:"id"`
+	BillingAccountID string     `json:"billing_account_id"`
+	OrgID            string     `json:"org_id"`
+	PeriodStart      time.Time  `json:"period_start"`
+	PeriodEnd        time.Time  `json:"period_end"`
+	Status           string     `json:"status"` // draft, finalized, void
+	Currency         string     `json:"currency"`
+	Subtotal         string     `json:"subtotal"`
+	Tax              string     `json:"tax"`
+	Total            string     `json:"total"`
+	FinalizedAt      *time.Time `json:"finalized_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
 	// Lines is populated only when fetching a single invoice.
 	Lines []*InvoiceLineItem `json:"lines,omitempty"`
 }
@@ -831,7 +831,14 @@ type AppWebhook struct {
 	LastDeploySHA string  `json:"last_deploy_sha,omitempty"`
 }
 
-// RegisterResponse is the response from provisioning a user account.
+// RegisterRequest is the request body for user registration.
+type RegisterRequest struct {
+	Email   string `json:"email"`
+	Name    string `json:"name"`
+	OrgName string `json:"org_name,omitempty"`
+}
+
+// RegisterResponse is the response from user registration.
 type RegisterResponse struct {
 	User         *User         `json:"user"`
 	Organization *Organization `json:"organization"`

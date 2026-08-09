@@ -63,6 +63,7 @@ type AppResourceModel struct {
 	HealthCheckTimeout  types.Int64  `tfsdk:"health_check_timeout"`
 	HealthCheckInterval types.Int64  `tfsdk:"health_check_interval"`
 	HealthCheckRetries  types.Int64  `tfsdk:"health_check_retries"`
+	Probes              types.Object `tfsdk:"probes"`
 	AdoptExisting       types.Bool   `tfsdk:"adopt_existing"`
 	Routes              types.List   `tfsdk:"routes"`
 	Traffic             types.List   `tfsdk:"traffic"`
@@ -91,6 +92,27 @@ type VolumeMountModel struct {
 	Name      types.String `tfsdk:"name"`
 	MountPath types.String `tfsdk:"mount_path"`
 	SubPath   types.String `tfsdk:"sub_path"`
+}
+
+// ProbeOverridesModel describes the per-probe overrides block in state. A null
+// probe here means that probe keeps using the app's shared health_check_*
+// settings, so overriding one never means restating the other two.
+type ProbeOverridesModel struct {
+	Liveness  types.Object `tfsdk:"liveness"`
+	Readiness types.Object `tfsdk:"readiness"`
+	Startup   types.Object `tfsdk:"startup"`
+}
+
+// ProbeSpecModel is one probe's path and timing in state. Every attribute is
+// independently optional — a null one falls back to the matching health_check_*
+// value rather than to a hardcoded default.
+type ProbeSpecModel struct {
+	Path                types.String `tfsdk:"path"`
+	InitialDelaySeconds types.Int64  `tfsdk:"initial_delay_seconds"`
+	PeriodSeconds       types.Int64  `tfsdk:"period_seconds"`
+	TimeoutSeconds      types.Int64  `tfsdk:"timeout_seconds"`
+	FailureThreshold    types.Int64  `tfsdk:"failure_threshold"`
+	SuccessThreshold    types.Int64  `tfsdk:"success_threshold"`
 }
 
 // SecurityContextModel describes the pod/container hardening block in state.
@@ -363,6 +385,21 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Computed:    true,
 				Default:     int64default.StaticInt64(3),
 			},
+			"probes": schema.SingleNestedAttribute{
+				Description: "Per-probe overrides for liveness, readiness and startup. By default all " +
+					"three run the app's health_check_* settings, so one request decides both whether " +
+					"traffic reaches the app and whether the pod is restarted. Point liveness at a cheap " +
+					"path that touches no downstream and readiness at the one that does, and a dependency " +
+					"blip pulls the pod out of the load balancer without killing it. Any attribute left " +
+					"unset keeps the matching health_check_* value, so overriding a path never means " +
+					"restating the timing. Always-on apps only.",
+				Optional: true,
+				Attributes: map[string]schema.Attribute{
+					"liveness":  probeSchema("Restarts the pod when it fails. Kubernetes holds it off until the startup probe first succeeds."),
+					"readiness": probeSchema("Decides whether traffic reaches the pod. Failing it only pulls the pod out of the Service until it recovers."),
+					"startup":   probeSchema("Gates the other two until the app has booted. Raise failure_threshold for a slow start rather than delaying liveness."),
+				},
+			},
 			"adopt_existing": schema.BoolAttribute{
 				Description: "When true, if an app with this name already exists in the project, adopt it " +
 					"into Terraform state on create instead of failing with a 409 conflict. Defaults to " +
@@ -481,6 +518,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	volumeMounts := volumeMountsFromModel(ctx, plan.VolumeMounts, &resp.Diagnostics)
 	securityContext := securityContextFromModel(ctx, plan.SecurityContext, &resp.Diagnostics)
 	routes := routesFromModel(ctx, plan.Routes, &resp.Diagnostics)
+	probes := probesFromModel(ctx, plan.Probes, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -505,6 +543,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		HealthCheckTimeout:  int(plan.HealthCheckTimeout.ValueInt64()),
 		HealthCheckInterval: int(plan.HealthCheckInterval.ValueInt64()),
 		HealthCheckRetries:  int(plan.HealthCheckRetries.ValueInt64()),
+		Probes:              probes,
 	}
 	if !plan.ServiceAccount.IsNull() && !plan.ServiceAccount.IsUnknown() {
 		createReq.ServiceAccount = plan.ServiceAccount.ValueString()
@@ -772,6 +811,22 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		app = rerouted
 	}
 
+	// Probes are validated against the app's mode, so like routes above this runs
+	// after the mode switch. Also like routes, an unknown plan value is not a
+	// request to change anything — sending it would clear the overrides the app
+	// already has back to the shared health check.
+	if !plan.Probes.IsUnknown() && !plan.Probes.Equal(state.Probes) {
+		reprobed, err := r.client.UpdateAppProbes(ctx, appID, probesFromModel(ctx, plan.Probes, &resp.Diagnostics))
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if err != nil {
+			resp.Diagnostics.AddError("Error updating app probes", err.Error())
+			return
+		}
+		app = reprobed
+	}
+
 	// Update scaling if any scaling attributes changed.
 	if plan.MinScale.ValueInt64() != state.MinScale.ValueInt64() ||
 		plan.MaxScale.ValueInt64() != state.MaxScale.ValueInt64() ||
@@ -1034,6 +1089,150 @@ func routeAttrTypes() map[string]attr.Type {
 	}
 }
 
+// probeSchema builds one liveness/readiness/startup block. success_threshold is
+// offered on all three because the schema is shared, but the API rejects a value
+// above 1 on liveness and startup — Kubernetes requires it there.
+func probeSchema(description string) schema.SingleNestedAttribute {
+	return schema.SingleNestedAttribute{
+		Description: description + " Unset attributes fall back to the app's health_check_* values.",
+		Optional:    true,
+		Attributes: map[string]schema.Attribute{
+			"path": schema.StringAttribute{
+				Description: "HTTP path this probe requests, e.g. '/healthz'. Defaults to health_check_path.",
+				Optional:    true,
+			},
+			"initial_delay_seconds": schema.Int64Attribute{
+				Description: "Seconds to wait after the container starts before the first check. Defaults to 0.",
+				Optional:    true,
+			},
+			"period_seconds": schema.Int64Attribute{
+				Description: "Seconds between checks. Defaults to health_check_interval.",
+				Optional:    true,
+			},
+			"timeout_seconds": schema.Int64Attribute{
+				Description: "Seconds before a check counts as failed. Defaults to health_check_timeout.",
+				Optional:    true,
+			},
+			"failure_threshold": schema.Int64Attribute{
+				Description: "Consecutive failures before the probe acts. Defaults to health_check_retries.",
+				Optional:    true,
+			},
+			"success_threshold": schema.Int64Attribute{
+				Description: "Consecutive successes before the probe counts as passing. Readiness only — " +
+					"Kubernetes requires 1 for liveness and startup, and the API rejects anything else there.",
+				Optional: true,
+			},
+		},
+	}
+}
+
+func probeSpecAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"path":                  types.StringType,
+		"initial_delay_seconds": types.Int64Type,
+		"period_seconds":        types.Int64Type,
+		"timeout_seconds":       types.Int64Type,
+		"failure_threshold":     types.Int64Type,
+		"success_threshold":     types.Int64Type,
+	}
+}
+
+func probesAttrTypes() map[string]attr.Type {
+	spec := types.ObjectType{AttrTypes: probeSpecAttrTypes()}
+	return map[string]attr.Type{"liveness": spec, "readiness": spec, "startup": spec}
+}
+
+// probeSpecToObject converts one probe from the API into state. The API omits a
+// field it does not have, which decodes to the Go zero value — mapped back to
+// null here, not to 0. Writing 0 where the config said nothing would report an
+// inconsistent result after apply, and 0 is not what the field means: unset is
+// "inherit the health check".
+func probeSpecToObject(spec *client.ProbeSpec, diags *diag.Diagnostics) attr.Value {
+	if spec == nil {
+		return types.ObjectNull(probeSpecAttrTypes())
+	}
+	orNull := func(v int) attr.Value {
+		if v == 0 {
+			return types.Int64Null()
+		}
+		return types.Int64Value(int64(v))
+	}
+	path := types.StringNull()
+	if spec.Path != "" {
+		path = types.StringValue(spec.Path)
+	}
+	obj, d := types.ObjectValue(probeSpecAttrTypes(), map[string]attr.Value{
+		"path":                  path,
+		"initial_delay_seconds": orNull(spec.InitialDelaySeconds),
+		"period_seconds":        orNull(spec.PeriodSeconds),
+		"timeout_seconds":       orNull(spec.TimeoutSeconds),
+		"failure_threshold":     orNull(spec.FailureThreshold),
+		"success_threshold":     orNull(spec.SuccessThreshold),
+	})
+	diags.Append(d...)
+	return obj
+}
+
+// setProbesOnModel converts the API's per-probe overrides to the Terraform model.
+func setProbesOnModel(model *AppResourceModel, probes *client.ProbeOverrides, diags *diag.Diagnostics) {
+	if probes == nil || (probes.Liveness == nil && probes.Readiness == nil && probes.Startup == nil) {
+		model.Probes = types.ObjectNull(probesAttrTypes())
+		return
+	}
+	obj, d := types.ObjectValue(probesAttrTypes(), map[string]attr.Value{
+		"liveness":  probeSpecToObject(probes.Liveness, diags),
+		"readiness": probeSpecToObject(probes.Readiness, diags),
+		"startup":   probeSpecToObject(probes.Startup, diags),
+	})
+	diags.Append(d...)
+	model.Probes = obj
+}
+
+// probeSpecFromObject converts one configured probe block into a client spec. A
+// null block yields nil, which is what leaves that probe on the shared health
+// check.
+func probeSpecFromObject(ctx context.Context, o types.Object, diags *diag.Diagnostics) *client.ProbeSpec {
+	if o.IsNull() || o.IsUnknown() {
+		return nil
+	}
+	var m ProbeSpecModel
+	diags.Append(o.As(ctx, &m, basetypes.ObjectAsOptions{})...)
+	if diags.HasError() {
+		return nil
+	}
+	return &client.ProbeSpec{
+		Path:                m.Path.ValueString(),
+		InitialDelaySeconds: int(m.InitialDelaySeconds.ValueInt64()),
+		PeriodSeconds:       int(m.PeriodSeconds.ValueInt64()),
+		TimeoutSeconds:      int(m.TimeoutSeconds.ValueInt64()),
+		FailureThreshold:    int(m.FailureThreshold.ValueInt64()),
+		SuccessThreshold:    int(m.SuccessThreshold.ValueInt64()),
+	}
+}
+
+// probesFromModel converts the configured probes block into client overrides. A
+// null or unknown block yields nil, which the update endpoint reads as "put all
+// three back on the shared health check".
+func probesFromModel(ctx context.Context, o types.Object, diags *diag.Diagnostics) *client.ProbeOverrides {
+	if o.IsNull() || o.IsUnknown() {
+		return nil
+	}
+	var m ProbeOverridesModel
+	diags.Append(o.As(ctx, &m, basetypes.ObjectAsOptions{})...)
+	if diags.HasError() {
+		return nil
+	}
+	probes := &client.ProbeOverrides{
+		Liveness:  probeSpecFromObject(ctx, m.Liveness, diags),
+		Readiness: probeSpecFromObject(ctx, m.Readiness, diags),
+		Startup:   probeSpecFromObject(ctx, m.Startup, diags),
+	}
+	if probes.Liveness == nil && probes.Readiness == nil && probes.Startup == nil {
+		return nil
+	}
+	return probes
+}
+
 // setRoutesOnModel converts the API's route carve-outs to the Terraform model.
 func setRoutesOnModel(model *AppResourceModel, routes []client.Route, diags *diag.Diagnostics) {
 	if len(routes) == 0 {
@@ -1080,9 +1279,11 @@ func routesFromModel(ctx context.Context, l types.List, diags *diag.Diagnostics)
 // setModelFromApp maps an API App response to the Terraform resource model.
 // It preserves the plan's env/secret maps since they are not returned by the API.
 func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, diags *diag.Diagnostics) {
-	// Unlike volume_mounts/security_context, routes ARE echoed by the API, so they
-	// are read back rather than preserved from the plan — drift is detectable.
+	// Unlike volume_mounts/security_context, routes and probes ARE echoed by the
+	// API, so they are read back rather than preserved from the plan — drift is
+	// detectable.
 	setRoutesOnModel(model, app.Routes, diags)
+	setProbesOnModel(model, app.Probes, diags)
 	model.ID = types.StringValue(app.ID)
 	model.ProjectID = types.StringValue(app.ProjectID)
 	model.Name = types.StringValue(app.Name)

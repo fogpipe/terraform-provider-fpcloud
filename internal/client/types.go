@@ -207,38 +207,62 @@ type CreateTrustBindingRequest struct {
 
 // App represents a deployed application.
 type App struct {
-	ID                  string    `json:"id"`
-	ProjectID           string    `json:"project_id"`
-	Name                string    `json:"name"`
-	DisplayName         string    `json:"display_name"`
-	URLSlug             string    `json:"url_slug"`              // optional vanity host override (ADR-040); empty = derived host
-	DatabaseID          string    `json:"database_id,omitempty"` // database DATABASE_URL points at (#544); empty = the project's sole database, or none when it has several
-	Image               string    `json:"image"`
-	Release             string    `json:"release,omitempty"`         // user-named release currently live (#471)
-	Command             []string  `json:"command,omitempty"`         // container entrypoint override (empty = image ENTRYPOINT)
-	Args                []string  `json:"args,omitempty"`            // container arguments (empty = image CMD)
-	ReleaseCommand      []string  `json:"release_command,omitempty"` // run once per deploy, before the new version goes live
-	Status              string    `json:"status"`
-	URL                 string    `json:"url"`
-	Domains             []string  `json:"domains"`
-	Replicas            int       `json:"replicas"`
-	MinScale            int32     `json:"min_scale"`
-	MaxScale            int32     `json:"max_scale"`
-	CPULimit            string    `json:"cpu_limit"`
-	MemoryLimit         string    `json:"memory_limit"`
-	Ingress             string    `json:"ingress"`
-	Routes              []Route   `json:"routes,omitempty"` // per-path visibility carve-outs (#501)
-	Mode                string    `json:"mode"`
-	Storage             string    `json:"storage"`
-	KubeServiceAccount  string    `json:"kube_service_account,omitempty"`
-	StoragePath         string    `json:"storage_path"`
-	ServiceAccountID    string    `json:"service_account_id,omitempty"`
-	HealthCheckPath     string    `json:"health_check_path"`
-	HealthCheckTimeout  int       `json:"health_check_timeout"`
-	HealthCheckInterval int       `json:"health_check_interval"`
-	HealthCheckRetries  int       `json:"health_check_retries"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID                  string          `json:"id"`
+	ProjectID           string          `json:"project_id"`
+	Name                string          `json:"name"`
+	DisplayName         string          `json:"display_name"`
+	URLSlug             string          `json:"url_slug"`              // optional vanity host override (ADR-040); empty = derived host
+	DatabaseID          string          `json:"database_id,omitempty"` // database DATABASE_URL points at (#544); empty = the project's sole database, or none when it has several
+	Image               string          `json:"image"`
+	Release             string          `json:"release,omitempty"`         // user-named release currently live (#471)
+	Command             []string        `json:"command,omitempty"`         // container entrypoint override (empty = image ENTRYPOINT)
+	Args                []string        `json:"args,omitempty"`            // container arguments (empty = image CMD)
+	ReleaseCommand      []string        `json:"release_command,omitempty"` // run once per deploy, before the new version goes live
+	Status              string          `json:"status"`
+	URL                 string          `json:"url"`
+	Domains             []string        `json:"domains"`
+	Replicas            int             `json:"replicas"`
+	MinScale            int32           `json:"min_scale"`
+	MaxScale            int32           `json:"max_scale"`
+	CPULimit            string          `json:"cpu_limit"`
+	MemoryLimit         string          `json:"memory_limit"`
+	Ingress             string          `json:"ingress"`
+	Routes              []Route         `json:"routes,omitempty"` // per-path visibility carve-outs (#501)
+	Mode                string          `json:"mode"`
+	Storage             string          `json:"storage"`
+	KubeServiceAccount  string          `json:"kube_service_account,omitempty"`
+	StoragePath         string          `json:"storage_path"`
+	ServiceAccountID    string          `json:"service_account_id,omitempty"`
+	HealthCheckPath     string          `json:"health_check_path"`
+	HealthCheckTimeout  int             `json:"health_check_timeout"`
+	HealthCheckInterval int             `json:"health_check_interval"`
+	HealthCheckRetries  int             `json:"health_check_retries"`
+	Probes              *ProbeOverrides `json:"probes,omitempty"` // per-probe path/timing overrides (#453); nil = every probe uses the HealthCheck* shorthand
+	CreatedAt           time.Time       `json:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at"`
+}
+
+// ProbeOverrides lets liveness, readiness, and startup diverge from the shared
+// HealthCheck* shorthand (#453) — e.g. a liveness probe on a cheap,
+// dependency-free path while readiness also checks a downstream. A nil field
+// means "use HealthCheckPath/Interval/Timeout/Retries".
+type ProbeOverrides struct {
+	Liveness  *ProbeSpec `json:"liveness,omitempty"`
+	Readiness *ProbeSpec `json:"readiness,omitempty"`
+	Startup   *ProbeSpec `json:"startup,omitempty"`
+}
+
+// ProbeSpec is one probe's HTTP path and timing, each field independently
+// optional (zero/empty = fall back to the shared HealthCheck* default).
+// SuccessThreshold is only meaningful on Readiness — Kubernetes requires 1 for
+// Liveness and Startup.
+type ProbeSpec struct {
+	Path                string `json:"path,omitempty"`
+	InitialDelaySeconds int    `json:"initial_delay_seconds,omitempty"`
+	PeriodSeconds       int    `json:"period_seconds,omitempty"`
+	TimeoutSeconds      int    `json:"timeout_seconds,omitempty"`
+	FailureThreshold    int    `json:"failure_threshold,omitempty"`
+	SuccessThreshold    int    `json:"success_threshold,omitempty"`
 }
 
 // VolumeMount mounts a ConfigMap/Secret as read-only files, or an emptyDir as
@@ -295,6 +319,14 @@ type CreateAppRequest struct {
 	HealthCheckTimeout  int               `json:"health_check_timeout,omitempty"`
 	HealthCheckInterval int               `json:"health_check_interval,omitempty"`
 	HealthCheckRetries  int               `json:"health_check_retries,omitempty"`
+	Probes              *ProbeOverrides   `json:"probes,omitempty"` // per-probe path/timing overrides (#453); nil = every probe uses the HealthCheck* shorthand
+}
+
+// UpdateProbesRequest replaces an app's per-probe liveness/readiness/startup
+// overrides (#453). nil clears them, reverting every probe to the shared
+// HealthCheck* shorthand.
+type UpdateProbesRequest struct {
+	Probes *ProbeOverrides `json:"probes"`
 }
 
 // DeployRequest is the request body for deploying a new app revision.

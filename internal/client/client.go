@@ -80,6 +80,21 @@ func (c *Client) do(req *http.Request, out any) error {
 	return nil
 }
 
+// Register creates a new user account. Does not require authentication.
+func (c *Client) Register(ctx context.Context, req RegisterRequest) (*RegisterResponse, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/auth/register", req)
+	if err != nil {
+		return nil, err
+	}
+	// Remove auth header — registration is public.
+	httpReq.Header.Del("Authorization")
+	var resp RegisterResponse
+	if err := c.do(httpReq, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // FKECredentials fetches the cluster connection facts for a kubeconfig context
 // scoped to the project (GET /projects/{id}/fke/credentials). Returns an error
 // matching client.ErrNotFound when the API predates the endpoint (404), letting
@@ -164,12 +179,17 @@ type RegistryVulnerabilities struct {
 }
 
 // RegistryImage is one tagged image with metadata from the zot search extension.
-// Size/Digest/PushedAt are zero when the search extension is unavailable.
+// Size/Digest are zero when the search extension is unavailable.
+//
+// FirstSeenAt is when the registry was first seen holding this manifest, which
+// fpcloud records itself. It is not the image's build date: the only timestamp
+// an OCI image carries is the one its builder wrote, and reproducible builds pin
+// that to a fixed epoch. Nil means no record yet, not old.
 type RegistryImage struct {
 	Tag             string                   `json:"tag"`
 	Digest          string                   `json:"digest,omitempty"`
 	Size            int64                    `json:"size,omitempty"`
-	PushedAt        *time.Time               `json:"pushed_at,omitempty"`
+	FirstSeenAt     *time.Time               `json:"first_seen_at,omitempty"`
 	Vulnerabilities *RegistryVulnerabilities `json:"vulnerabilities,omitempty"`
 }
 
@@ -220,11 +240,11 @@ type SetRegistryVisibilityRequest struct {
 
 // RetentionPreviewItem is one tag a retention policy would delete.
 type RetentionPreviewItem struct {
-	Repo     string     `json:"repo"`
-	Tag      string     `json:"tag"`
-	Digest   string     `json:"digest,omitempty"`
-	Reason   string     `json:"reason"`
-	PushedAt *time.Time `json:"pushed_at,omitempty"`
+	Repo        string     `json:"repo"`
+	Tag         string     `json:"tag"`
+	Digest      string     `json:"digest,omitempty"`
+	Reason      string     `json:"reason"`
+	FirstSeenAt *time.Time `json:"first_seen_at,omitempty"`
 }
 
 // RetentionPreview is the dry-run (or applied) set of retention deletions.

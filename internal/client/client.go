@@ -80,21 +80,6 @@ func (c *Client) do(req *http.Request, out any) error {
 	return nil
 }
 
-// Register creates a new user account. Does not require authentication.
-func (c *Client) Register(ctx context.Context, req RegisterRequest) (*RegisterResponse, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/auth/register", req)
-	if err != nil {
-		return nil, err
-	}
-	// Remove auth header — registration is public.
-	httpReq.Header.Del("Authorization")
-	var resp RegisterResponse
-	if err := c.do(httpReq, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
-}
-
 // FKECredentials fetches the cluster connection facts for a kubeconfig context
 // scoped to the project (GET /projects/{id}/fke/credentials). Returns an error
 // matching client.ErrNotFound when the API predates the endpoint (404), letting
@@ -179,17 +164,12 @@ type RegistryVulnerabilities struct {
 }
 
 // RegistryImage is one tagged image with metadata from the zot search extension.
-// Size/Digest are zero when the search extension is unavailable.
-//
-// FirstSeenAt is when the registry was first seen holding this manifest, which
-// fpcloud records itself. It is not the image's build date: the only timestamp
-// an OCI image carries is the one its builder wrote, and reproducible builds pin
-// that to a fixed epoch. Nil means no record yet, not old.
+// Size/Digest/PushedAt are zero when the search extension is unavailable.
 type RegistryImage struct {
 	Tag             string                   `json:"tag"`
 	Digest          string                   `json:"digest,omitempty"`
 	Size            int64                    `json:"size,omitempty"`
-	FirstSeenAt     *time.Time               `json:"first_seen_at,omitempty"`
+	PushedAt        *time.Time               `json:"pushed_at,omitempty"`
 	Vulnerabilities *RegistryVulnerabilities `json:"vulnerabilities,omitempty"`
 }
 
@@ -240,11 +220,11 @@ type SetRegistryVisibilityRequest struct {
 
 // RetentionPreviewItem is one tag a retention policy would delete.
 type RetentionPreviewItem struct {
-	Repo        string     `json:"repo"`
-	Tag         string     `json:"tag"`
-	Digest      string     `json:"digest,omitempty"`
-	Reason      string     `json:"reason"`
-	FirstSeenAt *time.Time `json:"first_seen_at,omitempty"`
+	Repo     string     `json:"repo"`
+	Tag      string     `json:"tag"`
+	Digest   string     `json:"digest,omitempty"`
+	Reason   string     `json:"reason"`
+	PushedAt *time.Time `json:"pushed_at,omitempty"`
 }
 
 // RetentionPreview is the dry-run (or applied) set of retention deletions.
@@ -462,7 +442,7 @@ func (c *Client) UpdateProjectEgress(ctx context.Context, id, egress string) (*P
 // UpdateProjectQuota sets a project's operator-only resource caps; only the
 // non-nil caps are changed.
 func (c *Client) UpdateProjectQuota(ctx context.Context, id string, maxCPU, maxMemory *string, maxPods *int, maxStorage *string) (*Project, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/admin/projects/"+id+"/quota", SetQuotaRequest{MaxCPU: maxCPU, MaxMemory: maxMemory, MaxPods: maxPods, MaxStorage: maxStorage})
+	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/projects/"+id, UpdateProjectRequest{MaxCPU: maxCPU, MaxMemory: maxMemory, MaxPods: maxPods, MaxStorage: maxStorage})
 	if err != nil {
 		return nil, err
 	}
@@ -840,7 +820,7 @@ func (c *Client) UpdateAppStorage(ctx context.Context, id, storage string) (*App
 // hardened default. The ServiceAccount must already exist in the app's namespace.
 // Operator-only — 403 for anyone else.
 func (c *Client) SetAppKubeServiceAccount(ctx context.Context, id, serviceAccount string) (*App, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/admin/apps/"+id+"/kube-service-account", SetKubeServiceAccountRequest{KubeServiceAccount: serviceAccount})
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/kube-service-account", SetKubeServiceAccountRequest{KubeServiceAccount: serviceAccount})
 	if err != nil {
 		return nil, err
 	}
@@ -1801,10 +1781,9 @@ func (c *Client) GetOrg(ctx context.Context, id string) (*Organization, error) {
 }
 
 // UpdateOrgFKE toggles an organization's FKE entitlement (kubectl/kubeconfig
-// access). Operator-only: it lives under /admin, which is gated on administrate
-// over the platform-operator org (#710).
+// access). Operator-only server-side: a tenant cannot enable it for their org.
 func (c *Client) UpdateOrgFKE(ctx context.Context, id string, enabled bool) (*Organization, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/admin/orgs/"+id+"/fke", SetOrgFKERequest{Enabled: &enabled})
+	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/orgs/"+id, UpdateOrgRequest{FKEEnabled: &enabled})
 	if err != nil {
 		return nil, err
 	}

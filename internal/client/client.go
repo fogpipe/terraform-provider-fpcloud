@@ -80,21 +80,6 @@ func (c *Client) do(req *http.Request, out any) error {
 	return nil
 }
 
-// Register creates a new user account. Does not require authentication.
-func (c *Client) Register(ctx context.Context, req RegisterRequest) (*RegisterResponse, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/auth/register", req)
-	if err != nil {
-		return nil, err
-	}
-	// Remove auth header — registration is public.
-	httpReq.Header.Del("Authorization")
-	var resp RegisterResponse
-	if err := c.do(httpReq, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
-}
-
 // FKECredentials fetches the cluster connection facts for a kubeconfig context
 // scoped to the project (GET /projects/{id}/fke/credentials). Returns an error
 // matching client.ErrNotFound when the API predates the endpoint (404), letting

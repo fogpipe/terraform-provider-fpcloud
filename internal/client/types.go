@@ -126,10 +126,10 @@ type Invoice struct {
 	PeriodEnd        time.Time  `json:"period_end"`
 	Status           string     `json:"status"` // draft, finalized, void
 	Currency         string     `json:"currency"`
-	Subtotal         string     `json:"subtotal"`
-	Tax              string     `json:"tax"`
-	Total            string     `json:"total"`
-	FinalizedAt      *time.Time `json:"finalized_at,omitempty"`
+	// One amount, summed from the lines. No subtotal or tax: VAT is #115 and
+	// arrives with the code that computes it.
+	Total       string     `json:"total"`
+	FinalizedAt *time.Time `json:"finalized_at,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	// Lines is populated only when fetching a single invoice.
 	Lines []*InvoiceLineItem `json:"lines,omitempty"`

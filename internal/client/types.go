@@ -119,18 +119,18 @@ type Price struct {
 // Invoice is what an org owed for one closed period (#111). Amounts are decimal
 // strings; a finalized invoice is immutable.
 type Invoice struct {
-	ID               string     `json:"id"`
-	BillingAccountID string     `json:"billing_account_id"`
-	OrgID            string     `json:"org_id"`
-	PeriodStart      time.Time  `json:"period_start"`
-	PeriodEnd        time.Time  `json:"period_end"`
-	Status           string     `json:"status"` // draft, finalized, void
-	Currency         string     `json:"currency"`
-	Subtotal         string     `json:"subtotal"`
-	Tax              string     `json:"tax"`
-	Total            string     `json:"total"`
-	FinalizedAt      *time.Time `json:"finalized_at,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
+	ID               string    `json:"id"`
+	BillingAccountID string    `json:"billing_account_id"`
+	OrgID            string    `json:"org_id"`
+	PeriodStart      time.Time `json:"period_start"`
+	PeriodEnd        time.Time `json:"period_end"`
+	Status           string    `json:"status"` // draft, finalized, void
+	Currency         string    `json:"currency"`
+	// One amount, summed from the lines. No subtotal or tax: VAT is #115 and
+	// arrives with the code that computes it.
+	Total       string     `json:"total"`
+	FinalizedAt *time.Time `json:"finalized_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
 	// Lines is populated only when fetching a single invoice.
 	Lines []*InvoiceLineItem `json:"lines,omitempty"`
 }
@@ -176,17 +176,12 @@ type GrantBillingBindingRequest struct {
 
 // UpdateProjectRequest is the request body for updating a project.
 type UpdateProjectRequest struct {
-	DisplayName string `json:"display_name,omitempty"`
-	Egress      string `json:"egress,omitempty"`
-}
-
-// SetQuotaRequest carries the ADR-035 resource caps. Operator-only: it targets
-// PUT /admin/projects/{id}/quota, not the tenant PATCH (#710).
-type SetQuotaRequest struct {
-	MaxCPU     *string `json:"max_cpu,omitempty"`
-	MaxMemory  *string `json:"max_memory,omitempty"`
-	MaxPods    *int    `json:"max_pods,omitempty"`
-	MaxStorage *string `json:"max_storage,omitempty"`
+	DisplayName string  `json:"display_name,omitempty"`
+	Egress      string  `json:"egress,omitempty"`
+	MaxCPU      *string `json:"max_cpu,omitempty"`
+	MaxMemory   *string `json:"max_memory,omitempty"`
+	MaxPods     *int    `json:"max_pods,omitempty"`
+	MaxStorage  *string `json:"max_storage,omitempty"`
 }
 
 // TrustBinding is a per-project OIDC federation trust binding: a repo (matched by
@@ -797,14 +792,8 @@ type Organization struct {
 // a pointer so an omitted field is distinguishable from an explicit false;
 // DisplayName changes the mutable cosmetic label.
 type UpdateOrgRequest struct {
+	FKEEnabled  *bool  `json:"fke_enabled,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`
-}
-
-// SetOrgFKERequest toggles the FKE entitlement. Operator-only: it targets
-// PUT /admin/orgs/{id}/fke, not the tenant PATCH (#710). Pointer so an omitted
-// field is refused rather than read as "disable".
-type SetOrgFKERequest struct {
-	Enabled *bool `json:"enabled"`
 }
 
 // OrgSecret is a Fogpipe Secrets Manager bundle (ADR-028): an org-scoped named
@@ -842,14 +831,7 @@ type AppWebhook struct {
 	LastDeploySHA string  `json:"last_deploy_sha,omitempty"`
 }
 
-// RegisterRequest is the request body for user registration.
-type RegisterRequest struct {
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	OrgName string `json:"org_name,omitempty"`
-}
-
-// RegisterResponse is the response from user registration.
+// RegisterResponse is the response from provisioning a user account.
 type RegisterResponse struct {
 	User         *User         `json:"user"`
 	Organization *Organization `json:"organization"`

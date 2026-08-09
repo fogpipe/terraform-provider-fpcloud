@@ -11,38 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestClientRegister(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "/api/v1/auth/register", r.URL.Path)
-		assert.Empty(t, r.Header.Get("Authorization"), "register should not send auth header")
-
-		var req RegisterRequest
-		err := json.NewDecoder(r.Body).Decode(&req)
-		require.NoError(t, err)
-		assert.Equal(t, "test@example.com", req.Email)
-		assert.Equal(t, "Test User", req.Name)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(RegisterResponse{
-			User:   &User{ID: "usr-1", Email: "test@example.com", Name: "Test User"},
-			APIKey: "fp-testkey123",
-		})
-	}))
-	defer server.Close()
-
-	c := New(server.URL, "some-api-key")
-	resp, err := c.Register(context.Background(), RegisterRequest{
-		Email: "test@example.com",
-		Name:  "Test User",
-	})
-
-	require.NoError(t, err)
-	assert.Equal(t, "usr-1", resp.User.ID)
-	assert.Equal(t, "fp-testkey123", resp.APIKey)
-}
-
 func TestClientCreateProject(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)

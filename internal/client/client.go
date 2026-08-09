@@ -1777,16 +1777,18 @@ func (c *Client) GetDeployment(ctx context.Context, appID, deploymentID string) 
 
 // --- Organization methods ---
 
-// ListOrgs lists all organizations the authenticated user belongs to.
 // CreateOrg creates a new organization (the caller becomes its owner). shortID
 // optionally sets an explicit org id (the platform-org override); empty = an
 // opaque random id is assigned server-side.
+//
+// An operator-only route: creating an org is admitting a tenant (ADR-061), so it
+// lives under /admin and a tenant credential is refused.
 func (c *Client) CreateOrg(ctx context.Context, name, displayName, shortID string) (*Organization, error) {
 	body := map[string]string{"name": name, "display_name": displayName}
 	if shortID != "" {
 		body["short_id"] = shortID
 	}
-	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/orgs", body)
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/admin/orgs", body)
 	if err != nil {
 		return nil, err
 	}

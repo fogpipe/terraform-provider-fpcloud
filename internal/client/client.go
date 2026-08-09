@@ -447,7 +447,7 @@ func (c *Client) UpdateProjectEgress(ctx context.Context, id, egress string) (*P
 // UpdateProjectQuota sets a project's operator-only resource caps; only the
 // non-nil caps are changed.
 func (c *Client) UpdateProjectQuota(ctx context.Context, id string, maxCPU, maxMemory *string, maxPods *int, maxStorage *string) (*Project, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/projects/"+id, UpdateProjectRequest{MaxCPU: maxCPU, MaxMemory: maxMemory, MaxPods: maxPods, MaxStorage: maxStorage})
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/admin/projects/"+id+"/quota", SetQuotaRequest{MaxCPU: maxCPU, MaxMemory: maxMemory, MaxPods: maxPods, MaxStorage: maxStorage})
 	if err != nil {
 		return nil, err
 	}
@@ -825,7 +825,7 @@ func (c *Client) UpdateAppStorage(ctx context.Context, id, storage string) (*App
 // hardened default. The ServiceAccount must already exist in the app's namespace.
 // Operator-only — 403 for anyone else.
 func (c *Client) SetAppKubeServiceAccount(ctx context.Context, id, serviceAccount string) (*App, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/kube-service-account", SetKubeServiceAccountRequest{KubeServiceAccount: serviceAccount})
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/admin/apps/"+id+"/kube-service-account", SetKubeServiceAccountRequest{KubeServiceAccount: serviceAccount})
 	if err != nil {
 		return nil, err
 	}
@@ -1786,9 +1786,10 @@ func (c *Client) GetOrg(ctx context.Context, id string) (*Organization, error) {
 }
 
 // UpdateOrgFKE toggles an organization's FKE entitlement (kubectl/kubeconfig
-// access). Operator-only server-side: a tenant cannot enable it for their org.
+// access). Operator-only: it lives under /admin, which is gated on administrate
+// over the platform-operator org (#710).
 func (c *Client) UpdateOrgFKE(ctx context.Context, id string, enabled bool) (*Organization, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/orgs/"+id, UpdateOrgRequest{FKEEnabled: &enabled})
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/admin/orgs/"+id+"/fke", SetOrgFKERequest{Enabled: &enabled})
 	if err != nil {
 		return nil, err
 	}

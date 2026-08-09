@@ -831,14 +831,7 @@ type AppWebhook struct {
 	LastDeploySHA string  `json:"last_deploy_sha,omitempty"`
 }
 
-// RegisterRequest is the request body for user registration.
-type RegisterRequest struct {
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	OrgName string `json:"org_name,omitempty"`
-}
-
-// RegisterResponse is the response from user registration.
+// RegisterResponse is the response from provisioning a user account.
 type RegisterResponse struct {
 	User         *User         `json:"user"`
 	Organization *Organization `json:"organization"`

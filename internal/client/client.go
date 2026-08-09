@@ -622,6 +622,43 @@ func (c *Client) RevokeBillingBinding(ctx context.Context, orgID, member, member
 	return c.do(httpReq, nil)
 }
 
+// GetBudget returns an org's budget and the threshold crossings recorded against
+// it. Requires a billing role; a nil Budget means none is set.
+func (c *Client) GetBudget(ctx context.Context, orgID string) (*BudgetView, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/orgs/"+orgID+"/billing/budget", nil)
+	if err != nil {
+		return nil, err
+	}
+	var view BudgetView
+	if err := c.do(httpReq, &view); err != nil {
+		return nil, err
+	}
+	return &view, nil
+}
+
+// SetBudget creates or replaces an org's budget. Requires billing.admin.
+func (c *Client) SetBudget(ctx context.Context, orgID string, req SetBudgetRequest) (*BillingBudget, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/orgs/"+orgID+"/billing/budget", req)
+	if err != nil {
+		return nil, err
+	}
+	var b BillingBudget
+	if err := c.do(httpReq, &b); err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// DeleteBudget removes an org's budget, stopping further alerts. Crossings
+// already recorded are kept. Requires billing.admin.
+func (c *Client) DeleteBudget(ctx context.Context, orgID string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/orgs/"+orgID+"/billing/budget", nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
 // DeleteProject deletes a project by ID.
 func (c *Client) DeleteProject(ctx context.Context, id string) error {
 	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/projects/"+id, nil)

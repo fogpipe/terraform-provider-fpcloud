@@ -150,6 +150,47 @@ type InvoiceLineItem struct {
 	Amount       string `json:"amount"`
 }
 
+// BillingBudget is what an org means to spend in a period, with the percentages
+// of it at which it wants to be told (#109). An alerting threshold, never a cap:
+// nothing is refused when it is crossed. Amount is a decimal string like every
+// other money value here.
+type BillingBudget struct {
+	OrgID      string    `json:"org_id"`
+	Amount     string    `json:"amount"`
+	Currency   string    `json:"currency"`
+	Thresholds []int     `json:"thresholds"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// BillingBudgetAlert is one recorded threshold crossing. Amount is the estimate
+// at the moment it crossed, which exists nowhere else afterwards — the estimate
+// keeps moving.
+type BillingBudgetAlert struct {
+	OrgID            string    `json:"org_id"`
+	PeriodStart      time.Time `json:"period_start"`
+	ThresholdPercent int       `json:"threshold_percent"`
+	Amount           string    `json:"amount"`
+	BudgetAmount     string    `json:"budget_amount"`
+	Currency         string    `json:"currency"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// BudgetView is a budget together with the crossings recorded against it. Budget
+// is null when the org has set none, which is an ordinary state.
+type BudgetView struct {
+	Budget *BillingBudget        `json:"budget"`
+	Alerts []*BillingBudgetAlert `json:"alerts"`
+}
+
+// SetBudgetRequest sets an org's budget. Empty Thresholds means the defaults
+// (50/90/100).
+type SetBudgetRequest struct {
+	Amount     string `json:"amount"`
+	Currency   string `json:"currency,omitempty"`
+	Thresholds []int  `json:"thresholds,omitempty"`
+}
+
 // BillingBinding grants a billing role on an org (#114). A SEPARATE axis from
 // the resource roles — an org owner without one of these cannot see the bill.
 type BillingBinding struct {

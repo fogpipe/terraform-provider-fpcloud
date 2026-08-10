@@ -800,6 +800,22 @@ func (c *Client) UpdateAppDisplayName(ctx context.Context, id, displayName strin
 	return &app, nil
 }
 
+// SetAppSecurityContext replaces an app's security context, or clears it when sc
+// is nil so the app returns to the platform default. Clearing is how a non-root
+// opt-out is revoked once the image no longer needs it.
+func (c *Client) SetAppSecurityContext(ctx context.Context, id string, sc *SecurityContext) (*App, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPut, "/api/v1/apps/"+id+"/security-context",
+		SetSecurityContextRequest{SecurityContext: sc})
+	if err != nil {
+		return nil, err
+	}
+	var app App
+	if err := c.do(httpReq, &app); err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
 // UpdateAppURLSlug sets or clears an app's optional vanity host override (ADR-040).
 // An empty slug clears it, reverting the host to the derived label; a non-empty slug
 // makes the app reachable at <slug>.app.<platform_domain>. Always-on mode only.

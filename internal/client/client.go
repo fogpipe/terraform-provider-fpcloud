@@ -2348,8 +2348,15 @@ func (c *Client) DeleteRunner(ctx context.Context, id string) error {
 // StartGitHubConnect returns the URL to open in a browser to install the
 // Fogpipe GitHub App and bind the account to a project. Ownership is proved
 // there, by GitHub, not here.
-func (c *Client) StartGitHubConnect(ctx context.Context, projectID string) (*GitHubConnectStart, error) {
-	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/projects/"+projectID+"/github/connect", nil)
+// account is optional and only disambiguates when the caller administers
+// several accounts with the app installed; it selects within what GitHub
+// confirms and can never widen it.
+func (c *Client) StartGitHubConnect(ctx context.Context, projectID, account string) (*GitHubConnectStart, error) {
+	path := "/api/v1/projects/" + projectID + "/github/connect"
+	if account != "" {
+		path += "?account=" + url.QueryEscape(account)
+	}
+	httpReq, err := c.newRequest(ctx, http.MethodPost, path, nil)
 	if err != nil {
 		return nil, err
 	}

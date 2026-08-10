@@ -43,16 +43,25 @@ account:
 fpcloud runner create ci
 ```
 
-Then use the pool from a workflow. Its name is its `runs-on` label:
+Then use the pool from a workflow. Its `runs-on` label is your project name and
+the pool name joined — so a pool called `ci` in project `acme` is `acme-ci`:
 
 ```yaml
 jobs:
   test:
-    runs-on: ci
+    runs-on: acme-ci
     steps:
       - uses: actions/checkout@v5
       - run: make test
 ```
+
+The label is scoped that way because GitHub registers runners per **account**,
+and several of your projects can share one account. Without the project in the
+name, two projects that both called a pool `ci` would claim the same label — and
+jobs would land in whichever project's runners GitHub happened to pick.
+
+`fpcloud runner create` prints the exact label, and `fpcloud runner show <name>`
+repeats it, so you never have to assemble it yourself.
 
 ## Bringing your own credential
 
@@ -174,8 +183,8 @@ fpcloud runner delete ci
 ```
 
 The pool is deregistered from GitHub and its pods go with it. Workflows that
-still say `runs-on: ci` will queue with nothing to pick them up, so change them
-first.
+still name its label in `runs-on` will queue with nothing to pick them up, so
+change them first.
 
 ## Limits
 

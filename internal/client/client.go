@@ -64,11 +64,7 @@ func (c *Client) do(req *http.Request, out any) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		apiErr := &APIError{StatusCode: resp.StatusCode}
-		if err := json.NewDecoder(resp.Body).Decode(apiErr); err != nil {
-			return &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("HTTP %d", resp.StatusCode)}
-		}
-		return apiErr
+		return responseError(resp)
 	}
 
 	if out != nil {
@@ -78,6 +74,16 @@ func (c *Client) do(req *http.Request, out any) error {
 	}
 
 	return nil
+}
+
+// responseError turns an error response into an APIError, falling back to the
+// bare status when the body is not the API's error shape.
+func responseError(resp *http.Response) error {
+	apiErr := &APIError{StatusCode: resp.StatusCode}
+	if err := json.NewDecoder(resp.Body).Decode(apiErr); err != nil {
+		return &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("HTTP %d", resp.StatusCode)}
+	}
+	return apiErr
 }
 
 // FKECredentials fetches the cluster connection facts for a kubeconfig context
@@ -2335,4 +2341,39 @@ func (c *Client) DeleteRunner(ctx context.Context, id string) error {
 		return err
 	}
 	return c.do(httpReq, nil)
+}
+
+// ProjectStatus fetches the whole-project status document (GET
+// /projects/{id}/status) and the ETag identifying the state it describes.
+//
+// Conditional when ifNoneMatch is a previous response's ETag: an unchanged
+// project answers 304 and returns (nil, ifNoneMatch, nil), so a client watching
+// a project pays for a document only when there is a new one. A nil status with
+// a nil error therefore means "what you already have is still current" and is
+// never an empty project.
+func (c *Client) ProjectStatus(ctx context.Context, projectID, ifNoneMatch string) (*ProjectStatus, string, error) {
+	req, err := c.newRequest(ctx, http.MethodGet, "/api/v1/projects/"+projectID+"/status", nil)
+	if err != nil {
+		return nil, "", err
+	}
+	if ifNoneMatch != "" {
+		req.Header.Set("If-None-Match", ifNoneMatch)
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("executing request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotModified {
+		return nil, ifNoneMatch, nil
+	}
+	if resp.StatusCode >= 400 {
+		return nil, "", responseError(resp)
+	}
+	var status ProjectStatus
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return nil, "", fmt.Errorf("decoding response: %w", err)
+	}
+	return &status, resp.Header.Get("ETag"), nil
 }

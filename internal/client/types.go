@@ -1367,3 +1367,130 @@ type UpdateRunnerRequest struct {
 	GitHubAppPrivateKey     *string `json:"github_app_private_key,omitempty"`
 	GitHubToken             *string `json:"github_token,omitempty"`
 }
+
+// ProjectStatus is the whole project in one document (GET
+// /projects/{id}/status) — every resource kind with its derived status and the
+// problems attached to the resource they belong to.
+type ProjectStatus struct {
+	Project   StatusProject    `json:"project"`
+	Apps      []AppStatus      `json:"apps"`
+	Databases []DatabaseStatus `json:"databases"`
+	Jobs      []JobStatus      `json:"jobs"`
+	Domains   []DomainStatus   `json:"domains"`
+	Buckets   []BucketStatus   `json:"buckets"`
+	Runners   []RunnerStatus   `json:"runners"`
+
+	// Unchecked names the checks that could not be run. A report carrying these
+	// is incomplete, not clean — never render it as healthy.
+	Unchecked []UncheckedStatus `json:"unchecked,omitempty"`
+
+	ObservedAt time.Time `json:"observed_at"`
+}
+
+// StatusProject is the project itself and the caps its namespace is held to.
+type StatusProject struct {
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	Name           string `json:"name"`
+	DisplayName    string `json:"display_name"`
+	Namespace      string `json:"namespace"`
+	Status         string `json:"status"`
+	Egress         string `json:"egress"`
+	MaxCPU         string `json:"max_cpu,omitempty"`
+	MaxMemory      string `json:"max_memory,omitempty"`
+	MaxPods        int    `json:"max_pods,omitempty"`
+	MaxStorage     string `json:"max_storage,omitempty"`
+}
+
+// StatusProblem is one thing wrong with one resource, in the same shape
+// whatever kind it belongs to.
+type StatusProblem struct {
+	Reason string `json:"reason"`
+	Detail string `json:"detail,omitempty"`
+	Count  int32  `json:"count,omitempty"`
+	Since  string `json:"since,omitempty"`
+}
+
+// UncheckedStatus is a check that did not run, and why.
+type UncheckedStatus struct {
+	Check string `json:"check"`
+	Error string `json:"error"`
+}
+
+// AppStatus is one app: what it should be running, what it is running, and what
+// is wrong with it.
+type AppStatus struct {
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Mode     string          `json:"mode"`
+	Image    string          `json:"image,omitempty"`
+	Release  string          `json:"release,omitempty"`
+	URL      string          `json:"url,omitempty"`
+	Status   string          `json:"status"`
+	Desired  int32           `json:"desired"`
+	Ready    int32           `json:"ready"`
+	Problems []StatusProblem `json:"problems,omitempty"`
+}
+
+// DatabaseStatus is one managed database and the state of its restore points.
+type DatabaseStatus struct {
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Engine   string          `json:"engine"`
+	Version  string          `json:"version"`
+	Status   string          `json:"status"`
+	Pooler   bool            `json:"pooler"`
+	Problems []StatusProblem `json:"problems,omitempty"`
+}
+
+// JobStatus is one scheduled job and its most recent run.
+type JobStatus struct {
+	ID        string        `json:"id"`
+	Name      string        `json:"name"`
+	Schedule  string        `json:"schedule"`
+	Timezone  string        `json:"timezone,omitempty"`
+	Target    string        `json:"target"`
+	Suspended bool          `json:"suspended"`
+	LastRun   *JobRunStatus `json:"last_run,omitempty"`
+}
+
+// JobRunStatus is the outcome of one run, trimmed to what a status line shows.
+type JobRunStatus struct {
+	Status     string     `json:"status"`
+	Trigger    string     `json:"trigger,omitempty"`
+	ExitCode   *int       `json:"exit_code,omitempty"`
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	DurationMs *int       `json:"duration_ms,omitempty"`
+}
+
+// DomainStatus is one custom hostname and whether it is actually serving.
+type DomainStatus struct {
+	Domain    string          `json:"domain"`
+	Mode      string          `json:"mode"`
+	Status    string          `json:"status"`
+	TLSStatus string          `json:"tls_status,omitempty"`
+	Owner     string          `json:"owner,omitempty"`
+	OwnerKind string          `json:"owner_kind,omitempty"`
+	Problems  []StatusProblem `json:"problems,omitempty"`
+}
+
+// BucketStatus is one managed bucket, and whether it serves a website.
+type BucketStatus struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Status         string `json:"status"`
+	WebsiteEnabled bool   `json:"website_enabled"`
+	WebsiteURL     string `json:"website_url,omitempty"`
+}
+
+// RunnerStatus is one CI runner pool and how many runners are alive in it.
+type RunnerStatus struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Status         string `json:"status"`
+	CurrentRunners int    `json:"current_runners"`
+	MinRunners     int    `json:"min_runners"`
+	MaxRunners     int    `json:"max_runners"`
+	Message        string `json:"message,omitempty"`
+}

@@ -21,13 +21,23 @@ Once per project, connect the GitHub account your runners will serve:
 fpcloud github connect
 ```
 
-This opens GitHub, installs the **Fogpipe** app on the account you choose, and
-records it against this project. That is the entire setup: nothing to copy, no
+This opens GitHub and asks you to authorize as yourself. Fogpipe then records
+the account against this project. That is the entire setup: nothing to copy, no
 key to handle, and no organization name to type.
 
-You are asked to authorize the install as yourself, and only accounts **you can
-administer** are offered. Fogpipe never takes an organization name on trust, so
-no project can point runners at an account it does not control.
+Only accounts **you administer** can be connected — an owner of the
+organization, or your own user account. Being a member is not enough, because
+connecting lets a project run CI on that account. Fogpipe never takes an
+organization name on trust, so no project can point runners at an account it
+does not control.
+
+If the **Fogpipe** app is not installed on the account yet, connecting tells you
+and gives you the link. If you administer more than one account with it
+installed, say which:
+
+```bash
+fpcloud github connect --account acme
+```
 
 ```bash
 fpcloud github status      # which account this project is connected to

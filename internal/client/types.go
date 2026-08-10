@@ -1285,3 +1285,77 @@ type UpdateJobRequest struct {
 	HTTPHeaders     *map[string]string `json:"http_headers,omitempty"`
 	HTTPBody        *string            `json:"http_body,omitempty"`
 }
+
+// --- Managed GitHub Actions runners (#418, ADR-064) ---
+
+// Runner is a managed GitHub Actions runner pool: a declaration the platform
+// turns into ephemeral pods, one per job, in the project's namespace.
+type Runner struct {
+	ID          string `json:"id"`
+	ProjectID   string `json:"project_id"`
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+
+	GitHubConfigURL string `json:"github_config_url"`
+	RunnerGroup     string `json:"runner_group"`
+	MinRunners      int    `json:"min_runners"`
+	MaxRunners      int    `json:"max_runners"`
+	Image           string `json:"image,omitempty"`
+	CPU             string `json:"cpu,omitempty"`
+	Memory          string `json:"memory,omitempty"`
+	Builds          bool   `json:"builds"`
+
+	// The private key and the token are write-only and never come back.
+	GitHubAppID             string `json:"github_app_id,omitempty"`
+	GitHubAppInstallationID string `json:"github_app_installation_id,omitempty"`
+
+	// Labels is what a workflow puts in `runs-on`.
+	Labels []string `json:"labels,omitempty"`
+
+	Status         string `json:"status,omitempty"`
+	CurrentRunners int    `json:"current_runners,omitempty"`
+	Message        string `json:"message,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// CreateRunnerRequest is the request body for declaring a runner pool. Exactly
+// one credential is given: a GitHub App triple or a token.
+type CreateRunnerRequest struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name,omitempty"`
+
+	GitHubConfigURL string `json:"github_config_url"`
+	RunnerGroup     string `json:"runner_group,omitempty"`
+	MinRunners      *int   `json:"min_runners,omitempty"`
+	MaxRunners      *int   `json:"max_runners,omitempty"`
+	Image           string `json:"image,omitempty"`
+	CPU             string `json:"cpu,omitempty"`
+	Memory          string `json:"memory,omitempty"`
+	Builds          bool   `json:"builds,omitempty"`
+
+	GitHubAppID             string `json:"github_app_id,omitempty"`
+	GitHubAppInstallationID string `json:"github_app_installation_id,omitempty"`
+	GitHubAppPrivateKey     string `json:"github_app_private_key,omitempty"`
+	GitHubToken             string `json:"github_token,omitempty"`
+}
+
+// UpdateRunnerRequest patches a runner pool; a nil field is left unchanged.
+// Identity (project, name) is immutable.
+type UpdateRunnerRequest struct {
+	DisplayName     *string `json:"display_name,omitempty"`
+	GitHubConfigURL *string `json:"github_config_url,omitempty"`
+	RunnerGroup     *string `json:"runner_group,omitempty"`
+	MinRunners      *int    `json:"min_runners,omitempty"`
+	MaxRunners      *int    `json:"max_runners,omitempty"`
+	Image           *string `json:"image,omitempty"`
+	CPU             *string `json:"cpu,omitempty"`
+	Memory          *string `json:"memory,omitempty"`
+	Builds          *bool   `json:"builds,omitempty"`
+
+	GitHubAppID             *string `json:"github_app_id,omitempty"`
+	GitHubAppInstallationID *string `json:"github_app_installation_id,omitempty"`
+	GitHubAppPrivateKey     *string `json:"github_app_private_key,omitempty"`
+	GitHubToken             *string `json:"github_token,omitempty"`
+}

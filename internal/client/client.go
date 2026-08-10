@@ -2273,3 +2273,66 @@ func (c *Client) GetJobLogs(ctx context.Context, id, runName string) (string, er
 	}
 	return out.Logs, nil
 }
+
+// --- Managed GitHub Actions runners (#418, ADR-064) ---
+
+// CreateRunner declares a runner pool in a project.
+func (c *Client) CreateRunner(ctx context.Context, projectID string, req CreateRunnerRequest) (*Runner, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/projects/"+projectID+"/runners", req)
+	if err != nil {
+		return nil, err
+	}
+	var runner Runner
+	if err := c.do(httpReq, &runner); err != nil {
+		return nil, err
+	}
+	return &runner, nil
+}
+
+// ListRunners lists a project's runner pools.
+func (c *Client) ListRunners(ctx context.Context, projectID string) ([]*Runner, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/projects/"+projectID+"/runners", nil)
+	if err != nil {
+		return nil, err
+	}
+	var runners []*Runner
+	if err := c.do(httpReq, &runners); err != nil {
+		return nil, err
+	}
+	return runners, nil
+}
+
+// GetRunner retrieves a runner pool by ID.
+func (c *Client) GetRunner(ctx context.Context, id string) (*Runner, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/runners/"+id, nil)
+	if err != nil {
+		return nil, err
+	}
+	var runner Runner
+	if err := c.do(httpReq, &runner); err != nil {
+		return nil, err
+	}
+	return &runner, nil
+}
+
+// UpdateRunner patches a runner pool.
+func (c *Client) UpdateRunner(ctx context.Context, id string, req UpdateRunnerRequest) (*Runner, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPatch, "/api/v1/runners/"+id, req)
+	if err != nil {
+		return nil, err
+	}
+	var runner Runner
+	if err := c.do(httpReq, &runner); err != nil {
+		return nil, err
+	}
+	return &runner, nil
+}
+
+// DeleteRunner removes a runner pool and deregisters it from GitHub.
+func (c *Client) DeleteRunner(ctx context.Context, id string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/runners/"+id, nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}

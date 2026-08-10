@@ -442,6 +442,12 @@ type UpdateAppRequest struct {
 // entrypoint override and arguments. Each field is optional: a nil pointer leaves
 // the value untouched, a non-nil pointer (including an empty array) replaces it —
 // an empty array clears the override back to the image defaults.
+// SetSecurityContextRequest replaces an app's security context. A nil
+// SecurityContext clears it back to the platform default.
+type SetSecurityContextRequest struct {
+	SecurityContext *SecurityContext `json:"security_context"`
+}
+
 type UpdateCommandRequest struct {
 	Command        *[]string `json:"command,omitempty"`
 	Args           *[]string `json:"args,omitempty"`

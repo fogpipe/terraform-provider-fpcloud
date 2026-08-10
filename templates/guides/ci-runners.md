@@ -19,19 +19,17 @@ Point the pool at what it serves — one repository, or a whole organization:
 
 ```bash
 # every workflow in one repository
-fpcloud runner create ci --repo acme/api \
-    --github-app-id 123456 \
-    --github-app-installation-id 7891011 \
-    --github-app-private-key-file ./acme-ci.private-key.pem
+fpcloud runner create ci --repo acme/api
 
 # every workflow in the organization
-fpcloud runner create shared --org acme \
-    --github-app-id 123456 \
-    --github-app-installation-id 7891011 \
-    --github-app-private-key-file ./acme-ci.private-key.pem
+fpcloud runner create shared --org acme
 ```
 
-Then use it from a workflow. The pool's name is its `runs-on` label:
+The first time, you will be asked to install the **Fogpipe** GitHub App on that
+account. That is the entire setup: nothing to copy, no key to handle. If the app
+is not installed yet, the command tells you and prints the link.
+
+Then use the pool from a workflow. Its name is its `runs-on` label:
 
 ```yaml
 jobs:
@@ -42,27 +40,36 @@ jobs:
       - run: make test
 ```
 
-## The credential
+## Bringing your own credential
 
-A pool has to authenticate to GitHub to receive work. Two ways:
-
-- **A GitHub App** — the one to use. Create it on your organization with the
-  **Self-hosted runners: Read & write** organization permission, install it, and
-  give the pool its app id, its installation id, and the private key GitHub
-  shows you once.
-- **A personal access token** (`--github-token`) — fine for a first try. It
-  carries a person's full access and dies with their account, so it is not
-  something to leave in place.
-
-The secret half is encrypted on arrival and **write-only**: it is never returned
-by the API, the CLI or the console. Rotate it by supplying a new one:
+The Fogpipe app is the default and needs nothing from you. Two cases it cannot
+serve, both selected explicitly:
 
 ```bash
-fpcloud runner update ci --github-app-private-key-file ./new-key.pem
+# your own GitHub App — for an organization whose policy forbids third-party apps
+fpcloud runner create ci --repo acme/api --credential app \
+    --github-app-id 123456 \
+    --github-app-installation-id 7891011 \
+    --github-app-private-key-file ./acme-ci.private-key.pem
+
+# a personal access token — fine for a first try
+fpcloud runner create ci --repo acme/api --credential token --github-token ghp_…
 ```
 
-Supplying a credential replaces the previous one whole. A pool authenticates as
-an App *or* as a token, never as half of each.
+Your own app needs the **Self-hosted runners: Read & write** organization
+permission. A token carries a person's full access and dies with their account,
+so it is not something to leave in place.
+
+Anything secret you supply is encrypted on arrival and **write-only**: it is
+never returned by the API, the CLI or the console. Rotate it by supplying a new
+one:
+
+```bash
+fpcloud runner update ci --credential app --github-app-private-key-file ./new-key.pem
+```
+
+A credential is replaced whole. A pool authenticates as an app *or* as a token,
+never as half of each.
 
 ## Scaling
 
@@ -130,12 +137,18 @@ credential without the self-hosted-runner permission).
 `ACTIVE` is how many runner pods exist right now, which is how many of your jobs
 are running.
 
-## Network access
+## Where runners run
 
-Runner pods are allowed outbound HTTPS so they can reach GitHub, download
-actions and fetch toolchains — you do not need to open your project's egress to
-get that. Anything else a job needs (a package registry on a non-standard port,
-say) follows your project's egress setting.
+Runner pods get a namespace of their own, alongside your project's rather than
+inside it. It is per-project — no other tenant's jobs share it — and it exists
+so the credential a pool registers with is somewhere nothing you run can read,
+including the code in your own workflows.
+
+Two things follow from that. Runner pods are allowed outbound HTTPS, so they
+reach GitHub, actions and toolchains without you opening your project's egress.
+And they **cannot** reach your project's own services by their in-cluster names:
+a job that needs your database or your app should go through its public
+address, or bring its own service container.
 
 ## Removing a pool
 

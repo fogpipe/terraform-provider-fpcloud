@@ -44,6 +44,7 @@ type RunnerResourceModel struct {
 	CPU             types.String `tfsdk:"cpu"`
 	Memory          types.String `tfsdk:"memory"`
 	Builds          types.Bool   `tfsdk:"builds"`
+	Credential      types.String `tfsdk:"credential"`
 
 	GitHubAppID             types.String `tfsdk:"github_app_id"`
 	GitHubAppInstallationID types.String `tfsdk:"github_app_installation_id"`
@@ -135,24 +136,34 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Optional: true,
 				Computed: true,
 			},
+			"credential": schema.StringAttribute{
+				Description: "How the pool authenticates: `platform` (default) uses the Fogpipe GitHub App, " +
+					"which you install on your account in one click and which needs nothing else set here; " +
+					"`app` uses your own GitHub App; `token` uses a personal access token. Chosen explicitly " +
+					"rather than inferred, so a pool that means to use the Fogpipe app and one carrying its own " +
+					"key are told apart by reading the config.",
+				Optional: true,
+				Computed: true,
+			},
 			"github_app_id": schema.StringAttribute{
-				Description: "GitHub App id the pool authenticates as. Use this with " +
-					"`github_app_installation_id` and `github_app_private_key`, or use `github_token` — never both.",
+				Description: "Your GitHub App's id, with `credential = \"app\"`. Use alongside " +
+					"`github_app_installation_id` and `github_app_private_key`.",
 				Optional: true,
 			},
 			"github_app_installation_id": schema.StringAttribute{
-				Description: "Installation id of the GitHub App on the organization.",
+				Description: "Installation id of your GitHub App on the organization, with `credential = \"app\"`. " +
+					"With `credential = \"platform\"` this is resolved for you and read-only in practice.",
 				Optional:    true,
 			},
 			"github_app_private_key": schema.StringAttribute{
-				Description: "The GitHub App's private key (PEM). Write-only — never returned by the API; " +
-					"the configured value is preserved in state across reads.",
+				Description: "Your GitHub App's private key (PEM), with `credential = \"app\"`. Write-only — " +
+					"never returned by the API; the configured value is preserved in state across reads.",
 				Optional:  true,
 				Sensitive: true,
 			},
 			"github_token": schema.StringAttribute{
-				Description: "A personal access token, instead of a GitHub App. Write-only — never returned " +
-					"by the API. It carries a person's full access and dies with their account; prefer an App.",
+				Description: "A personal access token, with `credential = \"token\"`. Write-only — never " +
+					"returned by the API. It carries a person's full access and dies with their account.",
 				Optional:  true,
 				Sensitive: true,
 			},
@@ -204,6 +215,7 @@ func (r *RunnerResource) Create(ctx context.Context, req resource.CreateRequest,
 		CPU:                     plan.CPU.ValueString(),
 		Memory:                  plan.Memory.ValueString(),
 		Builds:                  plan.Builds.ValueBool(),
+		Credential:              plan.Credential.ValueString(),
 		GitHubAppID:             plan.GitHubAppID.ValueString(),
 		GitHubAppInstallationID: plan.GitHubAppInstallationID.ValueString(),
 		GitHubAppPrivateKey:     plan.GitHubAppPrivateKey.ValueString(),
@@ -290,10 +302,13 @@ func (r *RunnerResource) Update(ctx context.Context, req resource.UpdateRequest,
 	// returns it, so an unconditional send would re-encrypt and re-render the
 	// same secret on every apply — and, worse, would clear it whenever it is
 	// supplied from somewhere Terraform does not track.
-	if !plan.GitHubAppID.Equal(state.GitHubAppID) ||
+	if !plan.Credential.Equal(state.Credential) ||
+		!plan.GitHubAppID.Equal(state.GitHubAppID) ||
 		!plan.GitHubAppInstallationID.Equal(state.GitHubAppInstallationID) ||
 		!plan.GitHubAppPrivateKey.Equal(state.GitHubAppPrivateKey) ||
 		!plan.GitHubToken.Equal(state.GitHubToken) {
+		credential := plan.Credential.ValueString()
+		updateReq.Credential = &credential
 		appID := plan.GitHubAppID.ValueString()
 		installationID := plan.GitHubAppInstallationID.ValueString()
 		privateKey := plan.GitHubAppPrivateKey.ValueString()
@@ -356,6 +371,7 @@ func (r *RunnerResource) apply(ctx context.Context, m *RunnerResourceModel, runn
 	m.MinRunners = types.Int64Value(int64(runner.MinRunners))
 	m.MaxRunners = types.Int64Value(int64(runner.MaxRunners))
 	m.Builds = types.BoolValue(runner.Builds)
+	m.Credential = types.StringValue(runner.Credential)
 	m.Image = optionalString(runner.Image)
 	m.CPU = optionalString(runner.CPU)
 	m.Memory = optionalString(runner.Memory)

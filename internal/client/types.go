@@ -1305,6 +1305,10 @@ type Runner struct {
 	Memory          string `json:"memory,omitempty"`
 	Builds          bool   `json:"builds"`
 
+	// Credential is which source the pool authenticates with: platform (the
+	// Fogpipe GitHub App), app (your own), or token.
+	Credential string `json:"credential"`
+
 	// The private key and the token are write-only and never come back.
 	GitHubAppID             string `json:"github_app_id,omitempty"`
 	GitHubAppInstallationID string `json:"github_app_installation_id,omitempty"`
@@ -1335,6 +1339,9 @@ type CreateRunnerRequest struct {
 	Memory          string `json:"memory,omitempty"`
 	Builds          bool   `json:"builds,omitempty"`
 
+	// Credential defaults to "platform" — the Fogpipe GitHub App, installed in
+	// one click, with nothing else to supply.
+	Credential              string `json:"credential,omitempty"`
 	GitHubAppID             string `json:"github_app_id,omitempty"`
 	GitHubAppInstallationID string `json:"github_app_installation_id,omitempty"`
 	GitHubAppPrivateKey     string `json:"github_app_private_key,omitempty"`
@@ -1354,6 +1361,7 @@ type UpdateRunnerRequest struct {
 	Memory          *string `json:"memory,omitempty"`
 	Builds          *bool   `json:"builds,omitempty"`
 
+	Credential              *string `json:"credential,omitempty"`
 	GitHubAppID             *string `json:"github_app_id,omitempty"`
 	GitHubAppInstallationID *string `json:"github_app_installation_id,omitempty"`
 	GitHubAppPrivateKey     *string `json:"github_app_private_key,omitempty"`

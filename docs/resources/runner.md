@@ -16,15 +16,15 @@ Manages a pool of GitHub Actions runners in a project. A pool is not a machine: 
 # CI for one repository. The pool scales to zero: a pod is created for a job and
 # destroyed when it ends, so an idle pool costs nothing. Workflows opt in with
 # `runs-on: ci`.
+#
+# No credential is configured: the default `platform` uses the Fogpipe GitHub
+# App, which you install on your account once, in one click. The first apply
+# fails with the install link if it is not installed yet.
 resource "fpcloud_runner" "ci" {
   project           = fpcloud_project.example.name
   name              = "ci"
   github_config_url = "https://github.com/acme/api"
   max_runners       = 4
-
-  github_app_id              = var.github_app_id
-  github_app_installation_id = var.github_app_installation_id
-  github_app_private_key     = file("${path.module}/acme-ci.private-key.pem")
 }
 
 # A shared pool for the whole organization, able to build container images.
@@ -39,7 +39,16 @@ resource "fpcloud_runner" "shared" {
   builds            = true
   cpu               = "4"
   memory            = "8Gi"
+}
 
+# Bring your own GitHub App instead — for an organization whose policy forbids
+# third-party apps, or GitHub Enterprise Server.
+resource "fpcloud_runner" "own_app" {
+  project           = fpcloud_project.example.name
+  name              = "isolated"
+  github_config_url = "https://github.com/acme/api"
+
+  credential                 = "app"
   github_app_id              = var.github_app_id
   github_app_installation_id = var.github_app_installation_id
   github_app_private_key     = file("${path.module}/acme-ci.private-key.pem")
@@ -59,11 +68,12 @@ resource "fpcloud_runner" "shared" {
 
 - `builds` (Boolean) Run a rootless BuildKit alongside each job and point `BUILDKIT_HOST` at it. There is no Docker daemon in a runner and Docker-in-Docker is not available, so this is how a job builds images. Off by default.
 - `cpu` (String) CPU limit for one runner pod, e.g. "2".
+- `credential` (String) How the pool authenticates: `platform` (default) uses the Fogpipe GitHub App, which you install on your account in one click and which needs nothing else set here; `app` uses your own GitHub App; `token` uses a personal access token. Chosen explicitly rather than inferred, so a pool that means to use the Fogpipe app and one carrying its own key are told apart by reading the config.
 - `display_name` (String) Human-readable label. Defaults to the name. Mutable in place.
-- `github_app_id` (String) GitHub App id the pool authenticates as. Use this with `github_app_installation_id` and `github_app_private_key`, or use `github_token` — never both.
-- `github_app_installation_id` (String) Installation id of the GitHub App on the organization.
-- `github_app_private_key` (String, Sensitive) The GitHub App's private key (PEM). Write-only — never returned by the API; the configured value is preserved in state across reads.
-- `github_token` (String, Sensitive) A personal access token, instead of a GitHub App. Write-only — never returned by the API. It carries a person's full access and dies with their account; prefer an App.
+- `github_app_id` (String) Your GitHub App's id, with `credential = "app"`. Use alongside `github_app_installation_id` and `github_app_private_key`.
+- `github_app_installation_id` (String) Installation id of your GitHub App on the organization, with `credential = "app"`. With `credential = "platform"` this is resolved for you and read-only in practice.
+- `github_app_private_key` (String, Sensitive) Your GitHub App's private key (PEM), with `credential = "app"`. Write-only — never returned by the API; the configured value is preserved in state across reads.
+- `github_token` (String, Sensitive) A personal access token, with `credential = "token"`. Write-only — never returned by the API. It carries a person's full access and dies with their account.
 - `image` (String) Runner image. Defaults to the platform's, which the operator keeps current — GitHub refuses work to deprecated runner versions, so pinning your own means keeping it current yourself.
 - `max_runners` (Number) Jobs the pool runs at once; further jobs queue on GitHub. Defaults to 2. Runners share the project's quota with everything else in it.
 - `memory` (String) Memory limit for one runner pod, e.g. "4Gi".

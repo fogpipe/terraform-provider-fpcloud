@@ -13,21 +13,35 @@ from one job to the next.
 Runners live in your project's namespace, beside your apps and databases, and
 are isolated from other tenants exactly the way those are.
 
-## Create a pool
+## Connect your GitHub account
 
-Point the pool at what it serves — one repository, or a whole organization:
+Once per project, connect the GitHub account your runners will serve:
 
 ```bash
-# every workflow in one repository
-fpcloud runner create ci --repo acme/api
-
-# every workflow in the organization
-fpcloud runner create shared --org acme
+fpcloud github connect
 ```
 
-The first time, you will be asked to install the **Fogpipe** GitHub App on that
-account. That is the entire setup: nothing to copy, no key to handle. If the app
-is not installed yet, the command tells you and prints the link.
+This opens GitHub, installs the **Fogpipe** app on the account you choose, and
+records it against this project. That is the entire setup: nothing to copy, no
+key to handle, and no organization name to type.
+
+You are asked to authorize the install as yourself, and only accounts **you can
+administer** are offered. Fogpipe never takes an organization name on trust, so
+no project can point runners at an account it does not control.
+
+```bash
+fpcloud github status      # which account this project is connected to
+fpcloud github disconnect  # remove the binding (delete its pools first)
+```
+
+## Create a pool
+
+A pool needs nothing but a name — it serves every repository in the connected
+account:
+
+```bash
+fpcloud runner create ci
+```
 
 Then use the pool from a workflow. Its name is its `runs-on` label:
 
@@ -45,15 +59,18 @@ jobs:
 The Fogpipe app is the default and needs nothing from you. Two cases it cannot
 serve, both selected explicitly:
 
+These need `--github-account`, because a key or a token says nothing about which
+account it is for. Holding the credential is itself the proof it is yours:
+
 ```bash
 # your own GitHub App — for an organization whose policy forbids third-party apps
-fpcloud runner create ci --repo acme/api --credential app \
+fpcloud runner create ci --credential app --github-account acme \
     --github-app-id 123456 \
     --github-app-installation-id 7891011 \
     --github-app-private-key-file ./acme-ci.private-key.pem
 
 # a personal access token — fine for a first try
-fpcloud runner create ci --repo acme/api --credential token --github-token ghp_…
+fpcloud runner create ci --credential token --github-account acme --github-token ghp_…
 ```
 
 Your own app needs the **Self-hosted runners: Read & write** organization
@@ -74,7 +91,7 @@ never as half of each.
 ## Scaling
 
 ```bash
-fpcloud runner create ci --repo acme/api --min 1 --max 4 ...
+fpcloud runner create ci --min 1 --max 4 ...
 ```
 
 - `--max` is how many jobs the pool runs at once. Jobs beyond it queue on
@@ -93,7 +110,7 @@ it needs a privileged container, which the platform does not run for anyone.
 Instead, ask for a builder:
 
 ```bash
-fpcloud runner create ci --repo acme/api --builds ...
+fpcloud runner create ci --builds ...
 ```
 
 `--builds` puts a rootless [BuildKit](https://github.com/moby/buildkit)

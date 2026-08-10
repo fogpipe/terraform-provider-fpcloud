@@ -1324,20 +1324,24 @@ type Runner struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// CreateRunnerRequest is the request body for declaring a runner pool. Exactly
-// one credential is given: a GitHub App triple or a token.
+// CreateRunnerRequest is the request body for declaring a runner pool.
+//
+// It names no GitHub account with the default "platform" credential: the
+// account is the one the project connected and proved it controls (#790).
+// GitHubAccount applies only to a tenant-supplied credential, which carries no
+// account of its own.
 type CreateRunnerRequest struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"display_name,omitempty"`
 
-	GitHubConfigURL string `json:"github_config_url"`
-	RunnerGroup     string `json:"runner_group,omitempty"`
-	MinRunners      *int   `json:"min_runners,omitempty"`
-	MaxRunners      *int   `json:"max_runners,omitempty"`
-	Image           string `json:"image,omitempty"`
-	CPU             string `json:"cpu,omitempty"`
-	Memory          string `json:"memory,omitempty"`
-	Builds          bool   `json:"builds,omitempty"`
+	GitHubAccount string `json:"github_account,omitempty"`
+	RunnerGroup   string `json:"runner_group,omitempty"`
+	MinRunners    *int   `json:"min_runners,omitempty"`
+	MaxRunners    *int   `json:"max_runners,omitempty"`
+	Image         string `json:"image,omitempty"`
+	CPU           string `json:"cpu,omitempty"`
+	Memory        string `json:"memory,omitempty"`
+	Builds        bool   `json:"builds,omitempty"`
 
 	// Credential defaults to "platform" — the Fogpipe GitHub App, installed in
 	// one click, with nothing else to supply.
@@ -1351,21 +1355,44 @@ type CreateRunnerRequest struct {
 // UpdateRunnerRequest patches a runner pool; a nil field is left unchanged.
 // Identity (project, name) is immutable.
 type UpdateRunnerRequest struct {
-	DisplayName     *string `json:"display_name,omitempty"`
-	GitHubConfigURL *string `json:"github_config_url,omitempty"`
-	RunnerGroup     *string `json:"runner_group,omitempty"`
-	MinRunners      *int    `json:"min_runners,omitempty"`
-	MaxRunners      *int    `json:"max_runners,omitempty"`
-	Image           *string `json:"image,omitempty"`
-	CPU             *string `json:"cpu,omitempty"`
-	Memory          *string `json:"memory,omitempty"`
-	Builds          *bool   `json:"builds,omitempty"`
+	DisplayName   *string `json:"display_name,omitempty"`
+	GitHubAccount *string `json:"github_account,omitempty"`
+	RunnerGroup   *string `json:"runner_group,omitempty"`
+	MinRunners    *int    `json:"min_runners,omitempty"`
+	MaxRunners    *int    `json:"max_runners,omitempty"`
+	Image         *string `json:"image,omitempty"`
+	CPU           *string `json:"cpu,omitempty"`
+	Memory        *string `json:"memory,omitempty"`
+	Builds        *bool   `json:"builds,omitempty"`
 
 	Credential              *string `json:"credential,omitempty"`
 	GitHubAppID             *string `json:"github_app_id,omitempty"`
 	GitHubAppInstallationID *string `json:"github_app_installation_id,omitempty"`
 	GitHubAppPrivateKey     *string `json:"github_app_private_key,omitempty"`
 	GitHubToken             *string `json:"github_token,omitempty"`
+}
+
+// GitHubConnection is the GitHub account a project has proved it controls
+// (#790). Runner pools take their scope from it, so there is no organization to
+// name when creating one.
+type GitHubConnection struct {
+	ID        string `json:"id"`
+	ProjectID string `json:"project_id"`
+
+	InstallationID string `json:"installation_id"`
+	AccountLogin   string `json:"account_login"`
+	AccountType    string `json:"account_type"`
+	ConnectedBy    string `json:"connected_by,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// GitHubConnectStart is where to send someone to install the Fogpipe GitHub App
+// and authorize the connection. The URL is single-use in effect: it carries a
+// signed, short-lived state naming the project.
+type GitHubConnectStart struct {
+	URL string `json:"url"`
 }
 
 // ProjectStatus is the whole project in one document (GET

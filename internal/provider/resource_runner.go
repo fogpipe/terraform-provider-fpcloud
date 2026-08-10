@@ -36,6 +36,7 @@ type RunnerResourceModel struct {
 	Name        types.String `tfsdk:"name"`
 	DisplayName types.String `tfsdk:"display_name"`
 
+	GitHubAccount   types.String `tfsdk:"github_account"`
 	GitHubConfigURL types.String `tfsdk:"github_config_url"`
 	RunnerGroup     types.String `tfsdk:"runner_group"`
 	MinRunners      types.Int64  `tfsdk:"min_runners"`
@@ -64,8 +65,9 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 	resp.Schema = schema.Schema{
 		Description: "Manages a pool of GitHub Actions runners in a project. A pool is not a machine: " +
 			"a pod is created for one job and destroyed when it ends, so an idle pool costs nothing. " +
-			"Workflows opt in by naming the pool in `runs-on`. Point `github_config_url` at an " +
-			"organization to serve every repository in it, or at a single repository.",
+			"Workflows opt in by naming the pool in `runs-on`. A pool serves every repository in " +
+			"the GitHub account the project is connected to — connect it once with " +
+			"`fpcloud github connect`, which proves you control that account.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Runner ID.",
@@ -94,10 +96,17 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Optional:    true,
 				Computed:    true,
 			},
+			"github_account": schema.StringAttribute{
+				Description: "The GitHub account the pool serves, e.g. `acme`. Only with a credential " +
+					"you supply (`app` or `token`), which carries no account of its own. With the " +
+					"default `platform` credential the account comes from the project's GitHub " +
+					"connection and setting this is an error — an account is proved, not named.",
+				Optional: true,
+			},
 			"github_config_url": schema.StringAttribute{
-				Description: "The organization (`https://github.com/acme`) or repository " +
-					"(`https://github.com/acme/api`) the pool serves. This is the pool's entire scope.",
-				Required: true,
+				Description: "The account URL the pool registered with, derived from the connection " +
+					"or from `github_account`. Read-only.",
+				Computed: true,
 			},
 			"runner_group": schema.StringAttribute{
 				Description: "GitHub runner group the pool joins. Defaults to `Default`.",
@@ -209,7 +218,7 @@ func (r *RunnerResource) Create(ctx context.Context, req resource.CreateRequest,
 	createReq := client.CreateRunnerRequest{
 		Name:                    plan.Name.ValueString(),
 		DisplayName:             plan.DisplayName.ValueString(),
-		GitHubConfigURL:         plan.GitHubConfigURL.ValueString(),
+		GitHubAccount:           plan.GitHubAccount.ValueString(),
 		RunnerGroup:             plan.RunnerGroup.ValueString(),
 		Image:                   plan.Image.ValueString(),
 		CPU:                     plan.CPU.ValueString(),
@@ -277,7 +286,7 @@ func (r *RunnerResource) Update(ctx context.Context, req resource.UpdateRequest,
 	// state, so a field the user removed from the config must be cleared, not
 	// left at whatever the server last saw.
 	displayName := plan.DisplayName.ValueString()
-	configURL := plan.GitHubConfigURL.ValueString()
+	account := plan.GitHubAccount.ValueString()
 	group := plan.RunnerGroup.ValueString()
 	image := plan.Image.ValueString()
 	cpu := plan.CPU.ValueString()
@@ -288,7 +297,7 @@ func (r *RunnerResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 	updateReq := client.UpdateRunnerRequest{
 		DisplayName:     &displayName,
-		GitHubConfigURL: &configURL,
+		GitHubAccount: &account,
 		RunnerGroup:     &group,
 		MinRunners:      &minRunners,
 		MaxRunners:      &maxRunners,

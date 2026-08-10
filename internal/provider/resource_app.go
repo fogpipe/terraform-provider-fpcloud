@@ -14,7 +14,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -245,12 +244,9 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			"security_context": schema.SingleNestedAttribute{
 				Description: "Opt-in pod/container hardening. When set, the container is locked to the " +
 					"PSS-restricted baseline (drop ALL capabilities, no privilege escalation, RuntimeDefault " +
-					"seccomp) plus the run-as identity below. Create-only — the API has no update path and " +
-					"does not echo it back, so any change forces the app to be replaced.",
+					"seccomp) plus the run-as identity below. Updated in place: removing the block clears it, " +
+					"which is how an app that once needed root returns to the platform default.",
 				Optional: true,
-				PlanModifiers: []planmodifier.Object{
-					objectplanmodifier.RequiresReplace(),
-				},
 				Attributes: map[string]schema.Attribute{
 					"run_as_user": schema.Int64Attribute{
 						Description: "UID to run the container process as.",
@@ -781,6 +777,24 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			return
 		}
 		app = updated
+	}
+
+	// Apply a changed security context. Updated in place rather than replacing the
+	// app: this block is how an app opts out of the non-root requirement, and
+	// destroying and recreating an app to revoke an exception would make the
+	// safer setting the more disruptive one. Removing the block clears it, which
+	// the API expresses as a null security_context.
+	if !plan.SecurityContext.Equal(state.SecurityContext) {
+		sc := securityContextFromModel(ctx, plan.SecurityContext, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		hardened, err := r.client.SetAppSecurityContext(ctx, appID, sc)
+		if err != nil {
+			resp.Diagnostics.AddError("Error updating app security context", err.Error())
+			return
+		}
+		app = hardened
 	}
 
 	// Switch hosting mode if it changed, before scaling — replicas is only valid

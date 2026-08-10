@@ -3,50 +3,51 @@
 page_title: "fpcloud_runner Resource - fpcloud"
 subcategory: ""
 description: |-
-  Manages a pool of GitHub Actions runners in a project. A pool is not a machine: a pod is created for one job and destroyed when it ends, so an idle pool costs nothing. Workflows opt in by naming the pool in runs-on. Point github_config_url at an organization to serve every repository in it, or at a single repository.
+  Manages a pool of GitHub Actions runners in a project. A pool is not a machine: a pod is created for one job and destroyed when it ends, so an idle pool costs nothing. Workflows opt in by naming the pool in runs-on. A pool serves every repository in the GitHub account the project is connected to — connect it once with fpcloud github connect, which proves you control that account.
 ---
 
 # fpcloud_runner (Resource)
 
-Manages a pool of GitHub Actions runners in a project. A pool is not a machine: a pod is created for one job and destroyed when it ends, so an idle pool costs nothing. Workflows opt in by naming the pool in `runs-on`. Point `github_config_url` at an organization to serve every repository in it, or at a single repository.
+Manages a pool of GitHub Actions runners in a project. A pool is not a machine: a pod is created for one job and destroyed when it ends, so an idle pool costs nothing. Workflows opt in by naming the pool in `runs-on`. A pool serves every repository in the GitHub account the project is connected to — connect it once with `fpcloud github connect`, which proves you control that account.
 
 ## Example Usage
 
 ```terraform
-# CI for one repository. The pool scales to zero: a pod is created for a job and
-# destroyed when it ends, so an idle pool costs nothing. Workflows opt in with
-# `runs-on: ci`.
+# CI for the project's GitHub account. The pool scales to zero: a pod is created
+# for a job and destroyed when it ends, so an idle pool costs nothing. Workflows
+# opt in with `runs-on: ci`.
 #
-# No credential is configured: the default `platform` uses the Fogpipe GitHub
-# App, which you install on your account once, in one click. The first apply
-# fails with the install link if it is not installed yet.
+# There is no account to configure. Connect the project once with
+# `fpcloud github connect` — you authorize the install as yourself, which is
+# what proves you control the account — and every pool serves it.
 resource "fpcloud_runner" "ci" {
-  project           = fpcloud_project.example.name
-  name              = "ci"
-  github_config_url = "https://github.com/acme/api"
-  max_runners       = 4
+  project     = fpcloud_project.example.name
+  name        = "ci"
+  max_runners = 4
 }
 
-# A shared pool for the whole organization, able to build container images.
-# `builds` runs a rootless BuildKit alongside each job and sets BUILDKIT_HOST —
-# there is no Docker daemon in a runner, and Docker-in-Docker is not available.
+# A second pool, able to build container images. `builds` runs a rootless
+# BuildKit alongside each job and sets BUILDKIT_HOST — there is no Docker daemon
+# in a runner, and Docker-in-Docker is not available.
 resource "fpcloud_runner" "shared" {
-  project           = fpcloud_project.example.name
-  name              = "shared"
-  github_config_url = "https://github.com/acme"
-  min_runners       = 1
-  max_runners       = 6
-  builds            = true
-  cpu               = "4"
-  memory            = "8Gi"
+  project     = fpcloud_project.example.name
+  name        = "shared"
+  min_runners = 1
+  max_runners = 6
+  builds      = true
+  cpu         = "4"
+  memory      = "8Gi"
 }
 
 # Bring your own GitHub App instead — for an organization whose policy forbids
 # third-party apps, or GitHub Enterprise Server.
+#
+# This is the one case that names an account: your own key says nothing about
+# which account it is for. Holding the key is itself the proof it is yours.
 resource "fpcloud_runner" "own_app" {
-  project           = fpcloud_project.example.name
-  name              = "isolated"
-  github_config_url = "https://github.com/acme/api"
+  project        = fpcloud_project.example.name
+  name           = "isolated"
+  github_account = "acme"
 
   credential                 = "app"
   github_app_id              = var.github_app_id
@@ -60,7 +61,6 @@ resource "fpcloud_runner" "own_app" {
 
 ### Required
 
-- `github_config_url` (String) The organization (`https://github.com/acme`) or repository (`https://github.com/acme/api`) the pool serves. This is the pool's entire scope.
 - `name` (String) Runner name, unique within the project (DNS-1123 label). This is also the `runs-on` label workflows use. Changing it forces a new runner.
 - `project` (String) ID or name of the project this runner belongs to. Changing it forces a new runner.
 
@@ -68,10 +68,11 @@ resource "fpcloud_runner" "own_app" {
 
 - `builds` (Boolean) Run a rootless BuildKit alongside each job and point `BUILDKIT_HOST` at it. There is no Docker daemon in a runner and Docker-in-Docker is not available, so this is how a job builds images. Off by default.
 - `cpu` (String) CPU limit for one runner pod, e.g. "2".
-- `credential` (String) How the pool authenticates: `platform` (default) uses the Fogpipe GitHub App, which you install on your account in one click and which needs nothing else set here; `app` uses your own GitHub App; `token` uses a personal access token. Chosen explicitly rather than inferred, so a pool that means to use the Fogpipe app and one carrying its own key are told apart by reading the config.
+- `credential` (String) How the pool authenticates: `platform` (default) uses the Fogpipe GitHub App and takes its account from the project's GitHub connection, so nothing else is set here; `app` uses your own GitHub App; `token` uses a personal access token. Chosen explicitly rather than inferred, so a pool that means to use the Fogpipe app and one carrying its own key are told apart by reading the config.
 - `display_name` (String) Human-readable label. Defaults to the name. Mutable in place.
+- `github_account` (String) The GitHub account the pool serves, e.g. `acme`. Only with a credential you supply (`app` or `token`), which carries no account of its own. With the default `platform` credential the account comes from the project's GitHub connection and setting this is an error — an account is proved, not named.
 - `github_app_id` (String) Your GitHub App's id, with `credential = "app"`. Use alongside `github_app_installation_id` and `github_app_private_key`.
-- `github_app_installation_id` (String) Installation id of your GitHub App on the organization, with `credential = "app"`. With `credential = "platform"` this is resolved for you and read-only in practice.
+- `github_app_installation_id` (String) Installation id of your GitHub App on the organization, with `credential = "app"`. With `credential = "platform"` it comes from the project's GitHub connection.
 - `github_app_private_key` (String, Sensitive) Your GitHub App's private key (PEM), with `credential = "app"`. Write-only — never returned by the API; the configured value is preserved in state across reads.
 - `github_token` (String, Sensitive) A personal access token, with `credential = "token"`. Write-only — never returned by the API. It carries a person's full access and dies with their account.
 - `image` (String) Runner image. Defaults to the platform's, which the operator keeps current — GitHub refuses work to deprecated runner versions, so pinning your own means keeping it current yourself.
@@ -83,6 +84,7 @@ resource "fpcloud_runner" "own_app" {
 ### Read-Only
 
 - `current_runners` (Number) Runner pods alive right now — how many of your jobs are running.
+- `github_config_url` (String) The account URL the pool registered with, derived from the connection or from `github_account`. Read-only.
 - `id` (String) Runner ID.
 - `labels` (List of String) The `runs-on` labels this pool answers to.
 - `status` (String) Pool state: `pending` while it registers with GitHub, then `running`.

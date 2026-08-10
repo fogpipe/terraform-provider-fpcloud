@@ -1,37 +1,38 @@
-# CI for one repository. The pool scales to zero: a pod is created for a job and
-# destroyed when it ends, so an idle pool costs nothing. Workflows opt in with
-# `runs-on: ci`.
+# CI for the project's GitHub account. The pool scales to zero: a pod is created
+# for a job and destroyed when it ends, so an idle pool costs nothing. Workflows
+# opt in with `runs-on: ci`.
 #
-# No credential is configured: the default `platform` uses the Fogpipe GitHub
-# App, which you install on your account once, in one click. The first apply
-# fails with the install link if it is not installed yet.
+# There is no account to configure. Connect the project once with
+# `fpcloud github connect` — you authorize the install as yourself, which is
+# what proves you control the account — and every pool serves it.
 resource "fpcloud_runner" "ci" {
-  project           = fpcloud_project.example.name
-  name              = "ci"
-  github_config_url = "https://github.com/acme/api"
-  max_runners       = 4
+  project     = fpcloud_project.example.name
+  name        = "ci"
+  max_runners = 4
 }
 
-# A shared pool for the whole organization, able to build container images.
-# `builds` runs a rootless BuildKit alongside each job and sets BUILDKIT_HOST —
-# there is no Docker daemon in a runner, and Docker-in-Docker is not available.
+# A second pool, able to build container images. `builds` runs a rootless
+# BuildKit alongside each job and sets BUILDKIT_HOST — there is no Docker daemon
+# in a runner, and Docker-in-Docker is not available.
 resource "fpcloud_runner" "shared" {
-  project           = fpcloud_project.example.name
-  name              = "shared"
-  github_config_url = "https://github.com/acme"
-  min_runners       = 1
-  max_runners       = 6
-  builds            = true
-  cpu               = "4"
-  memory            = "8Gi"
+  project     = fpcloud_project.example.name
+  name        = "shared"
+  min_runners = 1
+  max_runners = 6
+  builds      = true
+  cpu         = "4"
+  memory      = "8Gi"
 }
 
 # Bring your own GitHub App instead — for an organization whose policy forbids
 # third-party apps, or GitHub Enterprise Server.
+#
+# This is the one case that names an account: your own key says nothing about
+# which account it is for. Holding the key is itself the proof it is yours.
 resource "fpcloud_runner" "own_app" {
-  project           = fpcloud_project.example.name
-  name              = "isolated"
-  github_config_url = "https://github.com/acme/api"
+  project        = fpcloud_project.example.name
+  name           = "isolated"
+  github_account = "acme"
 
   credential                 = "app"
   github_app_id              = var.github_app_id

@@ -2343,6 +2343,45 @@ func (c *Client) DeleteRunner(ctx context.Context, id string) error {
 	return c.do(httpReq, nil)
 }
 
+// --- GitHub connection (#790) ---
+
+// StartGitHubConnect returns the URL to open in a browser to install the
+// Fogpipe GitHub App and bind the account to a project. Ownership is proved
+// there, by GitHub, not here.
+func (c *Client) StartGitHubConnect(ctx context.Context, projectID string) (*GitHubConnectStart, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "/api/v1/projects/"+projectID+"/github/connect", nil)
+	if err != nil {
+		return nil, err
+	}
+	var start GitHubConnectStart
+	if err := c.do(httpReq, &start); err != nil {
+		return nil, err
+	}
+	return &start, nil
+}
+
+// GetGitHubConnection returns the GitHub account a project is connected to.
+func (c *Client) GetGitHubConnection(ctx context.Context, projectID string) (*GitHubConnection, error) {
+	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/projects/"+projectID+"/github", nil)
+	if err != nil {
+		return nil, err
+	}
+	var conn GitHubConnection
+	if err := c.do(httpReq, &conn); err != nil {
+		return nil, err
+	}
+	return &conn, nil
+}
+
+// DisconnectGitHub drops a project's GitHub connection.
+func (c *Client) DisconnectGitHub(ctx context.Context, projectID string) error {
+	httpReq, err := c.newRequest(ctx, http.MethodDelete, "/api/v1/projects/"+projectID+"/github", nil)
+	if err != nil {
+		return err
+	}
+	return c.do(httpReq, nil)
+}
+
 // ProjectStatus fetches the whole-project status document (GET
 // /projects/{id}/status) and the ETag identifying the state it describes.
 //

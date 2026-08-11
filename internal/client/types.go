@@ -1447,16 +1447,33 @@ type UncheckedStatus struct {
 // AppStatus is one app: what it should be running, what it is running, and what
 // is wrong with it.
 type AppStatus struct {
-	ID       string          `json:"id"`
-	Name     string          `json:"name"`
-	Mode     string          `json:"mode"`
-	Image    string          `json:"image,omitempty"`
-	Release  string          `json:"release,omitempty"`
-	URL      string          `json:"url,omitempty"`
-	Status   string          `json:"status"`
-	Desired  int32           `json:"desired"`
-	Ready    int32           `json:"ready"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Mode    string `json:"mode"`
+	Image   string `json:"image,omitempty"`
+	Release string `json:"release,omitempty"`
+	URL     string `json:"url,omitempty"`
+	Status  string `json:"status"`
+	Desired int32  `json:"desired"`
+	Ready   int32  `json:"ready"`
+	// RunningImage and RunningRelease are what the cluster's workload declares,
+	// which differs from Image/Release above exactly while a deploy is in flight.
+	RunningImage   string `json:"running_image,omitempty"`
+	RunningRelease string `json:"running_release,omitempty"`
+	// Rollout is present only while the app is mid-deploy — its presence is the
+	// answer to "is this changing right now".
+	Rollout  *RolloutStatus  `json:"rollout,omitempty"`
 	Problems []StatusProblem `json:"problems,omitempty"`
+}
+
+// RolloutStatus is an app mid-deploy: how many replicas are on the new template,
+// how many exist in total (old ones included), and what it is waiting for.
+type RolloutStatus struct {
+	Desired   int32  `json:"desired"`
+	Updated   int32  `json:"updated"`
+	Total     int32  `json:"total"`
+	Available int32  `json:"available"`
+	Reason    string `json:"reason"`
 }
 
 // DatabaseStatus is one managed database and the state of its restore points.

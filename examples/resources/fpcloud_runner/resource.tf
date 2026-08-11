@@ -11,17 +11,25 @@ resource "fpcloud_runner" "ci" {
   max_runners = 4
 }
 
-# A second pool, able to build container images. `builds` runs a rootless
+# A second pool, able to build container images. `builder` runs a rootless
 # BuildKit alongside each job and sets BUILDKIT_HOST — there is no Docker daemon
 # in a runner, and Docker-in-Docker is not available.
+#
+# `cpu`/`memory` bound the runner your steps execute in; the builder is sized
+# apart from it because the two do different work, and it adds to what the pool
+# costs. Leave the builder's fields out to take the platform's defaults.
 resource "fpcloud_runner" "shared" {
   project     = fpcloud_project.example.name
   name        = "shared"
   min_runners = 1
   max_runners = 6
-  builds      = true
   cpu         = "4"
   memory      = "8Gi"
+
+  builder = {
+    cpu    = "2"
+    memory = "4Gi"
+  }
 }
 
 # Bring your own GitHub App instead — for an organization whose policy forbids

@@ -1,0 +1,10 @@
+terraform-provider-fpcloud
+Copyright 2026 Fogpipe
+
+This product includes software developed at Fogpipe.
+
+`.goreleaser.yml` follows the release configuration from HashiCorp's
+terraform-provider-scaffolding-framework, which is licensed under the Mozilla
+Public License 2.0. That file's terms are unchanged by the Apache License
+covering the rest of this repository; a copy of the MPL-2.0 is at
+https://mozilla.org/MPL/2.0/.

@@ -13,47 +13,83 @@ from one job to the next.
 Runners live in your project's namespace, beside your apps and databases, and
 are isolated from other tenants exactly the way those are.
 
-## Create a pool
+## Connect your GitHub account
 
-Point the pool at what it serves — one repository, or a whole organization:
+Once per project, connect the GitHub account your runners will serve:
 
 ```bash
-# every workflow in one repository
-fpcloud runner create ci --repo acme/api
-
-# every workflow in the organization
-fpcloud runner create shared --org acme
+fpcloud github connect
 ```
 
-The first time, you will be asked to install the **Fogpipe** GitHub App on that
-account. That is the entire setup: nothing to copy, no key to handle. If the app
-is not installed yet, the command tells you and prints the link.
+This opens GitHub and asks you to authorize as yourself. Fogpipe then records
+the account against this project. That is the entire setup: nothing to copy, no
+key to handle, and no organization name to type.
 
-Then use the pool from a workflow. Its name is its `runs-on` label:
+Only accounts **you administer** can be connected — an owner of the
+organization, or your own user account. Being a member is not enough, because
+connecting lets a project run CI on that account. Fogpipe never takes an
+organization name on trust, so no project can point runners at an account it
+does not control.
+
+If the **Fogpipe** app is not installed on the account yet, connecting tells you
+and gives you the link. If you administer more than one account with it
+installed, say which:
+
+```bash
+fpcloud github connect --account acme
+```
+
+```bash
+fpcloud github status      # which account this project is connected to
+fpcloud github disconnect  # remove the binding (delete its pools first)
+```
+
+## Create a pool
+
+A pool needs nothing but a name — it serves every repository in the connected
+account:
+
+```bash
+fpcloud runner create ci
+```
+
+Then use the pool from a workflow. Its `runs-on` label is your project name and
+the pool name joined — so a pool called `ci` in project `acme` is `acme-ci`:
 
 ```yaml
 jobs:
   test:
-    runs-on: ci
+    runs-on: acme-ci
     steps:
       - uses: actions/checkout@v5
       - run: make test
 ```
+
+The label is scoped that way because GitHub registers runners per **account**,
+and several of your projects can share one account. Without the project in the
+name, two projects that both called a pool `ci` would claim the same label — and
+jobs would land in whichever project's runners GitHub happened to pick.
+
+`fpcloud runner create` prints the exact label, and `fpcloud runner show <name>`
+repeats it, so you never have to assemble it yourself.
 
 ## Bringing your own credential
 
 The Fogpipe app is the default and needs nothing from you. Two cases it cannot
 serve, both selected explicitly:
 
+These need `--github-account`, because a key or a token says nothing about which
+account it is for. Holding the credential is itself the proof it is yours:
+
 ```bash
 # your own GitHub App — for an organization whose policy forbids third-party apps
-fpcloud runner create ci --repo acme/api --credential app \
+fpcloud runner create ci --credential app --github-account acme \
     --github-app-id 123456 \
     --github-app-installation-id 7891011 \
     --github-app-private-key-file ./acme-ci.private-key.pem
 
 # a personal access token — fine for a first try
-fpcloud runner create ci --repo acme/api --credential token --github-token ghp_…
+fpcloud runner create ci --credential token --github-account acme --github-token ghp_…
 ```
 
 Your own app needs the **Self-hosted runners: Read & write** organization
@@ -74,17 +110,23 @@ never as half of each.
 ## Scaling
 
 ```bash
-fpcloud runner create ci --repo acme/api --min 1 --max 4 ...
+fpcloud runner create ci --min 1 --max 4 ...
 ```
 
 - `--max` is how many jobs the pool runs at once. Jobs beyond it queue on
-  GitHub. Runners share your project's CPU and memory quota with everything else
-  in it, so this is a budget, not a throughput dial.
+  GitHub. Every one of them costs cores and memory for as long as it runs, so
+  this is a budget, not a throughput dial.
 - `--min` keeps that many pods idle and ready, trading cost for a faster start.
   The default is `0` — the pool scales to zero, and a job waits a few seconds for
   its pod.
-- `--cpu` and `--memory` bound one runner pod (for example `--cpu 2 --memory
-  4Gi`).
+- `--cpu` and `--memory` bound the runner — the container your workflow's steps
+  execute in (for example `--cpu 2 --memory 4Gi`). A builder, if you ask for
+  one, is sized separately and adds to what the pool costs.
+
+A job that exceeds `--memory` is killed rather than slowed, and because the
+runner dies mid-job GitHub can take several minutes to notice — the run stalls
+with no further output and ends as cancelled. If a job stops producing output
+part-way through and nothing on your side cancelled it, raise `--memory` first.
 
 ## Building container images
 
@@ -98,10 +140,8 @@ fpcloud runner create ci --builder ...
 
 `--builder` puts a rootless [BuildKit](https://github.com/moby/buildkit)
 alongside each job and points `BUILDKIT_HOST` at it. It is reachable only from
-inside that job's own pod. It is a second container with its own size —
-`--builder-cpu`/`--builder-memory`, or the platform's defaults — so the pool's
-own `--cpu`/`--memory` still bound the runner your steps execute in.
-`docker/build-push-action` works against it through buildx's remote driver:
+inside that job's own pod. `docker/build-push-action` works against it through
+buildx's remote driver:
 
 ```yaml
 - uses: docker/setup-buildx-action@v3
@@ -116,6 +156,22 @@ own `--cpu`/`--memory` still bound the runner your steps execute in.
 
 Because the pod is per-job, no build cache is shared between jobs — every build
 starts cold.
+
+The builder is a second container in the same pod, with its own size and its own
+cost:
+
+```bash
+fpcloud runner create ci --builder-cpu 2 --builder-memory 4Gi ...
+```
+
+`--builder-cpu`/`--builder-memory` imply `--builder`, and either one on its own
+is enough. Left unset, the builder takes the platform's default rather than a
+copy of the runner's — the two containers do different work, and the size your
+workflow needs says nothing about the size your `Dockerfile` needs. What the pool
+costs is the runner's size plus the builder's; `fpcloud runner show` prints both,
+whether or not you named them.
+
+`fpcloud runner update <name> --no-builder` removes the builder again.
 
 ## Pushing to your Fogpipe registry
 
@@ -159,8 +215,8 @@ fpcloud runner delete ci
 ```
 
 The pool is deregistered from GitHub and its pods go with it. Workflows that
-still say `runs-on: ci` will queue with nothing to pick them up, so change them
-first.
+still name its label in `runs-on` will queue with nothing to pick them up, so
+change them first.
 
 ## Limits
 

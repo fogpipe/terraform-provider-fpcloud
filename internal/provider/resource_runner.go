@@ -166,8 +166,8 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"credential": schema.StringAttribute{
-				Description: "How the pool authenticates: `platform` (default) uses the Fogpipe GitHub App, " +
-					"which you install on your account in one click and which needs nothing else set here; " +
+				Description: "How the pool authenticates: `platform` (default) uses the Fogpipe GitHub App " +
+					"and takes its account from the project's GitHub connection, so nothing else is set here; " +
 					"`app` uses your own GitHub App; `token` uses a personal access token. Chosen explicitly " +
 					"rather than inferred, so a pool that means to use the Fogpipe app and one carrying its own " +
 					"key are told apart by reading the config.",
@@ -181,7 +181,7 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			},
 			"github_app_installation_id": schema.StringAttribute{
 				Description: "Installation id of your GitHub App on the organization, with `credential = \"app\"`. " +
-					"With `credential = \"platform\"` this is resolved for you and read-only in practice.",
+					"With `credential = \"platform\"` it comes from the project's GitHub connection.",
 				Optional: true,
 			},
 			"github_app_private_key": schema.StringAttribute{

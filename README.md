@@ -111,4 +111,6 @@ git push origin v0.1.0
 
 ## License
 
-[MPL-2.0](./LICENSE)
+[Apache-2.0](./LICENSE), the licence every public Fogpipe repository carries.
+`.goreleaser.yml` follows HashiCorp's scaffolding template and stays MPL-2.0 —
+see [`NOTICE`](./NOTICE).

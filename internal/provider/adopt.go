@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/fogpipe/terraform-provider-fpcloud/internal/client"
+	"github.com/fogpipe/cloud-cli/pkg/client"
 )
 
 // errNotAccessible marks the case where a resource could not be resolved by

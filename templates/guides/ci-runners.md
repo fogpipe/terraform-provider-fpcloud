@@ -114,13 +114,19 @@ fpcloud runner create ci --min 1 --max 4 ...
 ```
 
 - `--max` is how many jobs the pool runs at once. Jobs beyond it queue on
-  GitHub. Runners share your project's CPU and memory quota with everything else
-  in it, so this is a budget, not a throughput dial.
+  GitHub. Every one of them costs cores and memory for as long as it runs, so
+  this is a budget, not a throughput dial.
 - `--min` keeps that many pods idle and ready, trading cost for a faster start.
   The default is `0` — the pool scales to zero, and a job waits a few seconds for
   its pod.
-- `--cpu` and `--memory` bound one runner pod (for example `--cpu 2 --memory
-  4Gi`).
+- `--cpu` and `--memory` bound the runner — the container your workflow's steps
+  execute in (for example `--cpu 2 --memory 4Gi`). A builder, if you ask for
+  one, is sized separately and adds to what the pool costs.
+
+A job that exceeds `--memory` is killed rather than slowed, and because the
+runner dies mid-job GitHub can take several minutes to notice — the run stalls
+with no further output and ends as cancelled. If a job stops producing output
+part-way through and nothing on your side cancelled it, raise `--memory` first.
 
 ## Building container images
 
@@ -134,10 +140,8 @@ fpcloud runner create ci --builder ...
 
 `--builder` puts a rootless [BuildKit](https://github.com/moby/buildkit)
 alongside each job and points `BUILDKIT_HOST` at it. It is reachable only from
-inside that job's own pod. It is a second container with its own size —
-`--builder-cpu`/`--builder-memory`, or the platform's defaults — so the pool's
-own `--cpu`/`--memory` still bound the runner your steps execute in.
-`docker/build-push-action` works against it through buildx's remote driver:
+inside that job's own pod. `docker/build-push-action` works against it through
+buildx's remote driver:
 
 ```yaml
 - uses: docker/setup-buildx-action@v3
@@ -152,6 +156,22 @@ own `--cpu`/`--memory` still bound the runner your steps execute in.
 
 Because the pod is per-job, no build cache is shared between jobs — every build
 starts cold.
+
+The builder is a second container in the same pod, with its own size and its own
+cost:
+
+```bash
+fpcloud runner create ci --builder-cpu 2 --builder-memory 4Gi ...
+```
+
+`--builder-cpu`/`--builder-memory` imply `--builder`, and either one on its own
+is enough. Left unset, the builder takes the platform's default rather than a
+copy of the runner's — the two containers do different work, and the size your
+workflow needs says nothing about the size your `Dockerfile` needs. What the pool
+costs is the runner's size plus the builder's; `fpcloud runner show` prints both,
+whether or not you named them.
+
+`fpcloud runner update <name> --no-builder` removes the builder again.
 
 ## Pushing to your Fogpipe registry
 

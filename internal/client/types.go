@@ -1462,8 +1462,23 @@ type AppStatus struct {
 	RunningRelease string `json:"running_release,omitempty"`
 	// Rollout is present only while the app is mid-deploy — its presence is the
 	// answer to "is this changing right now".
-	Rollout  *RolloutStatus  `json:"rollout,omitempty"`
+	Rollout *RolloutStatus `json:"rollout,omitempty"`
+	// Pods is the app's population by state: running, coming up, going away.
+	Pods     *PodPhases      `json:"pods,omitempty"`
 	Problems []StatusProblem `json:"problems,omitempty"`
+}
+
+// PodPhases is how many of an app's pods are running, starting and terminating,
+// and how long each has been in that state.
+type PodPhases struct {
+	Running     int32 `json:"running"`
+	Starting    int32 `json:"starting"`
+	Terminating int32 `json:"terminating"`
+	// RunningSeconds is the age of the oldest running pod — how long this
+	// version has actually been serving.
+	RunningSeconds     int64 `json:"running_seconds,omitempty"`
+	StartingSeconds    int64 `json:"starting_seconds,omitempty"`
+	TerminatingSeconds int64 `json:"terminating_seconds,omitempty"`
 }
 
 // RolloutStatus is an app mid-deploy: how many replicas are on the new template,

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/fogpipe/terraform-provider-fpcloud/internal/client"
+	"github.com/fogpipe/cloud-cli/pkg/client"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"

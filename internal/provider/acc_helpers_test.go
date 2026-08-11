@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/fogpipe/terraform-provider-fpcloud/internal/client"
+	"github.com/fogpipe/cloud-cli/pkg/client"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 

@@ -26,17 +26,25 @@ resource "fpcloud_runner" "ci" {
   max_runners = 4
 }
 
-# A second pool, able to build container images. `builds` runs a rootless
+# A second pool, able to build container images. `builder` runs a rootless
 # BuildKit alongside each job and sets BUILDKIT_HOST — there is no Docker daemon
 # in a runner, and Docker-in-Docker is not available.
+#
+# `cpu`/`memory` bound the runner your steps execute in; the builder is sized
+# apart from it because the two do different work, and it adds to what the pool
+# costs. Leave the builder's fields out to take the platform's defaults.
 resource "fpcloud_runner" "shared" {
   project     = fpcloud_project.example.name
   name        = "shared"
   min_runners = 1
   max_runners = 6
-  builds      = true
   cpu         = "4"
   memory      = "8Gi"
+
+  builder = {
+    cpu    = "2"
+    memory = "4Gi"
+  }
 }
 
 # Bring your own GitHub App instead — for an organization whose policy forbids
@@ -66,8 +74,8 @@ resource "fpcloud_runner" "own_app" {
 
 ### Optional
 
-- `builds` (Boolean) Run a rootless BuildKit alongside each job and point `BUILDKIT_HOST` at it. There is no Docker daemon in a runner and Docker-in-Docker is not available, so this is how a job builds images. Off by default.
-- `cpu` (String) CPU limit for one runner pod, e.g. "2".
+- `builder` (Attributes) Run a rootless BuildKit alongside each job and point `BUILDKIT_HOST` at it. There is no Docker daemon in a runner and Docker-in-Docker is not available, so this is how a job builds images. Omit the block for a pool that builds nothing; set it to `{}` for a builder at the platform's defaults. It is sized apart from the runner because the two do different work — the runner's memory follows your workflow's steps, the builder's follows your Dockerfile — and it adds to what the pool costs. (see [below for nested schema](#nestedatt--builder))
+- `cpu` (String) CPU limit for the runner — the container your workflow's steps execute in, e.g. "2". A builder, if you ask for one, is sized separately and adds to what the pool costs.
 - `credential` (String) How the pool authenticates: `platform` (default) uses the Fogpipe GitHub App and takes its account from the project's GitHub connection, so nothing else is set here; `app` uses your own GitHub App; `token` uses a personal access token. Chosen explicitly rather than inferred, so a pool that means to use the Fogpipe app and one carrying its own key are told apart by reading the config.
 - `display_name` (String) Human-readable label. Defaults to the name. Mutable in place.
 - `github_account` (String) The GitHub account the pool serves, e.g. `acme`. Only with a credential you supply (`app` or `token`), which carries no account of its own. With the default `platform` credential the account comes from the project's GitHub connection and setting this is an error — an account is proved, not named.
@@ -77,7 +85,7 @@ resource "fpcloud_runner" "own_app" {
 - `github_token` (String, Sensitive) A personal access token, with `credential = "token"`. Write-only — never returned by the API. It carries a person's full access and dies with their account.
 - `image` (String) Runner image. Defaults to the platform's, which the operator keeps current — GitHub refuses work to deprecated runner versions, so pinning your own means keeping it current yourself.
 - `max_runners` (Number) Jobs the pool runs at once; further jobs queue on GitHub. Defaults to 2. Runners share the project's quota with everything else in it.
-- `memory` (String) Memory limit for one runner pod, e.g. "4Gi".
+- `memory` (String) Memory limit for the runner, e.g. "4Gi". A job that exceeds it is killed rather than slowed, and GitHub can take several minutes to notice, so a run that stalls with no output and ends as cancelled is usually this.
 - `min_runners` (Number) Runners kept idle and ready. Defaults to 0 — the pool scales to zero and a job waits a few seconds for its pod.
 - `runner_group` (String) GitHub runner group the pool joins. Defaults to `Default`.
 
@@ -88,6 +96,14 @@ resource "fpcloud_runner" "own_app" {
 - `id` (String) Runner ID.
 - `labels` (List of String) The `runs-on` labels this pool answers to.
 - `status` (String) Pool state: `pending` while it registers with GitHub, then `running`.
+
+<a id="nestedatt--builder"></a>
+### Nested Schema for `builder`
+
+Optional:
+
+- `cpu` (String) CPU limit for the builder, e.g. "1". Defaults to the platform's, which is not the runner's size.
+- `memory` (String) Memory limit for the builder, e.g. "2Gi". Defaults to the platform's, which is not the runner's size.
 
 ## Import
 

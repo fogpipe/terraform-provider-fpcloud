@@ -129,13 +129,15 @@ it needs a privileged container, which the platform does not run for anyone.
 Instead, ask for a builder:
 
 ```bash
-fpcloud runner create ci --builds ...
+fpcloud runner create ci --builder ...
 ```
 
-`--builds` puts a rootless [BuildKit](https://github.com/moby/buildkit)
+`--builder` puts a rootless [BuildKit](https://github.com/moby/buildkit)
 alongside each job and points `BUILDKIT_HOST` at it. It is reachable only from
-inside that job's own pod. `docker/build-push-action` works against it through
-buildx's remote driver:
+inside that job's own pod. It is a second container with its own size —
+`--builder-cpu`/`--builder-memory`, or the platform's defaults — so the pool's
+own `--cpu`/`--memory` still bound the runner your steps execute in.
+`docker/build-push-action` works against it through buildx's remote driver:
 
 ```yaml
 - uses: docker/setup-buildx-action@v3

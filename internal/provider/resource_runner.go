@@ -5,12 +5,14 @@ import (
 	"fmt"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 var (
@@ -44,7 +46,7 @@ type RunnerResourceModel struct {
 	Image           types.String `tfsdk:"image"`
 	CPU             types.String `tfsdk:"cpu"`
 	Memory          types.String `tfsdk:"memory"`
-	Builds          types.Bool   `tfsdk:"builds"`
+	Builder         types.Object `tfsdk:"builder"`
 	Credential      types.String `tfsdk:"credential"`
 
 	GitHubAppID             types.String `tfsdk:"github_app_id"`
@@ -131,19 +133,37 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Optional: true,
 			},
 			"cpu": schema.StringAttribute{
-				Description: "CPU limit for one runner pod, e.g. \"2\".",
-				Optional:    true,
+				Description: "CPU limit for the runner — the container your workflow's steps execute in, " +
+					"e.g. \"2\". A builder, if you ask for one, is sized separately and adds to what the " +
+					"pool costs.",
+				Optional: true,
 			},
 			"memory": schema.StringAttribute{
-				Description: "Memory limit for one runner pod, e.g. \"4Gi\".",
-				Optional:    true,
-			},
-			"builds": schema.BoolAttribute{
-				Description: "Run a rootless BuildKit alongside each job and point `BUILDKIT_HOST` at it. " +
-					"There is no Docker daemon in a runner and Docker-in-Docker is not available, so this is " +
-					"how a job builds images. Off by default.",
+				Description: "Memory limit for the runner, e.g. \"4Gi\". A job that exceeds it is killed " +
+					"rather than slowed, and GitHub can take several minutes to notice, so a run that " +
+					"stalls with no output and ends as cancelled is usually this.",
 				Optional: true,
-				Computed: true,
+			},
+			"builder": schema.SingleNestedAttribute{
+				Description: "Run a rootless BuildKit alongside each job and point `BUILDKIT_HOST` at it. " +
+					"There is no Docker daemon in a runner and Docker-in-Docker is not available, so this " +
+					"is how a job builds images. Omit the block for a pool that builds nothing; set it to " +
+					"`{}` for a builder at the platform's defaults. It is sized apart from the runner " +
+					"because the two do different work — the runner's memory follows your workflow's " +
+					"steps, the builder's follows your Dockerfile — and it adds to what the pool costs.",
+				Optional: true,
+				Attributes: map[string]schema.Attribute{
+					"cpu": schema.StringAttribute{
+						Description: "CPU limit for the builder, e.g. \"1\". Defaults to the platform's, which is not the runner's size.",
+						Optional:    true,
+						Computed:    true,
+					},
+					"memory": schema.StringAttribute{
+						Description: "Memory limit for the builder, e.g. \"2Gi\". Defaults to the platform's, which is not the runner's size.",
+						Optional:    true,
+						Computed:    true,
+					},
+				},
 			},
 			"credential": schema.StringAttribute{
 				Description: "How the pool authenticates: `platform` (default) uses the Fogpipe GitHub App, " +
@@ -162,7 +182,7 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"github_app_installation_id": schema.StringAttribute{
 				Description: "Installation id of your GitHub App on the organization, with `credential = \"app\"`. " +
 					"With `credential = \"platform\"` this is resolved for you and read-only in practice.",
-				Optional:    true,
+				Optional: true,
 			},
 			"github_app_private_key": schema.StringAttribute{
 				Description: "Your GitHub App's private key (PEM), with `credential = \"app\"`. Write-only — " +
@@ -223,7 +243,7 @@ func (r *RunnerResource) Create(ctx context.Context, req resource.CreateRequest,
 		Image:                   plan.Image.ValueString(),
 		CPU:                     plan.CPU.ValueString(),
 		Memory:                  plan.Memory.ValueString(),
-		Builds:                  plan.Builds.ValueBool(),
+		Builder:                 runnerBuilderFromModel(ctx, plan.Builder, &resp.Diagnostics),
 		Credential:              plan.Credential.ValueString(),
 		GitHubAppID:             plan.GitHubAppID.ValueString(),
 		GitHubAppInstallationID: plan.GitHubAppInstallationID.ValueString(),
@@ -293,18 +313,16 @@ func (r *RunnerResource) Update(ctx context.Context, req resource.UpdateRequest,
 	memory := plan.Memory.ValueString()
 	minRunners := int(plan.MinRunners.ValueInt64())
 	maxRunners := int(plan.MaxRunners.ValueInt64())
-	builds := plan.Builds.ValueBool()
 
 	updateReq := client.UpdateRunnerRequest{
-		DisplayName:     &displayName,
+		DisplayName:   &displayName,
 		GitHubAccount: &account,
-		RunnerGroup:     &group,
-		MinRunners:      &minRunners,
-		MaxRunners:      &maxRunners,
-		Image:           &image,
-		CPU:             &cpu,
-		Memory:          &memory,
-		Builds:          &builds,
+		RunnerGroup:   &group,
+		MinRunners:    &minRunners,
+		MaxRunners:    &maxRunners,
+		Image:         &image,
+		CPU:           &cpu,
+		Memory:        &memory,
 	}
 
 	// The credential is sent only when the config changed it. The API never
@@ -332,6 +350,22 @@ func (r *RunnerResource) Update(ctx context.Context, req resource.UpdateRequest,
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating runner", err.Error())
 		return
+	}
+
+	// The builder is its own call — the patch above cannot say "remove it" —
+	// and it is made only when the config changed, so an unrelated apply does
+	// not re-render every pool's pods.
+	if !plan.Builder.IsUnknown() && !plan.Builder.Equal(state.Builder) {
+		rebuilt, err := r.client.UpdateRunnerBuilder(ctx, state.ID.ValueString(),
+			runnerBuilderFromModel(ctx, plan.Builder, &resp.Diagnostics))
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if err != nil {
+			resp.Diagnostics.AddError("Error updating runner builder", err.Error())
+			return
+		}
+		runner = rebuilt
 	}
 
 	r.apply(ctx, &plan, runner, &resp.Diagnostics)
@@ -379,7 +413,7 @@ func (r *RunnerResource) apply(ctx context.Context, m *RunnerResourceModel, runn
 	m.RunnerGroup = types.StringValue(runner.RunnerGroup)
 	m.MinRunners = types.Int64Value(int64(runner.MinRunners))
 	m.MaxRunners = types.Int64Value(int64(runner.MaxRunners))
-	m.Builds = types.BoolValue(runner.Builds)
+	setRunnerBuilderOnModel(m, runner.Builder, diags)
 	m.Credential = types.StringValue(runner.Credential)
 	m.Image = optionalString(runner.Image)
 	m.CPU = optionalString(runner.CPU)
@@ -391,4 +425,48 @@ func (r *RunnerResource) apply(ctx context.Context, m *RunnerResourceModel, runn
 	labels, d := types.ListValueFrom(ctx, types.StringType, runner.Labels)
 	diags.Append(d...)
 	m.Labels = labels
+}
+
+// runnerBuilderAttrTypes is the builder block's shape, needed to build a null
+// object of the right type when a pool has none.
+func runnerBuilderAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"cpu":    types.StringType,
+		"memory": types.StringType,
+	}
+}
+
+// runnerBuilderFromModel converts the configured builder block into a client
+// builder. A null or unknown block is a pool that builds nothing.
+func runnerBuilderFromModel(ctx context.Context, obj types.Object, diags *diag.Diagnostics) *client.RunnerBuilder {
+	if obj.IsNull() || obj.IsUnknown() {
+		return nil
+	}
+	var model struct {
+		CPU    types.String `tfsdk:"cpu"`
+		Memory types.String `tfsdk:"memory"`
+	}
+	diags.Append(obj.As(ctx, &model, basetypes.ObjectAsOptions{})...)
+	if diags.HasError() {
+		return nil
+	}
+	return &client.RunnerBuilder{CPU: model.CPU.ValueString(), Memory: model.Memory.ValueString()}
+}
+
+// setRunnerBuilderOnModel writes the API's builder back to the Terraform model.
+// The sizes are Computed, so the server's resolved values land in state even
+// when the config named none — which is the point: what the pool costs is
+// readable from `terraform show` rather than inferred from a default nobody
+// wrote down.
+func setRunnerBuilderOnModel(m *RunnerResourceModel, builder *client.RunnerBuilder, diags *diag.Diagnostics) {
+	if builder == nil {
+		m.Builder = types.ObjectNull(runnerBuilderAttrTypes())
+		return
+	}
+	obj, d := types.ObjectValue(runnerBuilderAttrTypes(), map[string]attr.Value{
+		"cpu":    types.StringValue(builder.CPU),
+		"memory": types.StringValue(builder.Memory),
+	})
+	diags.Append(d...)
+	m.Builder = obj
 }

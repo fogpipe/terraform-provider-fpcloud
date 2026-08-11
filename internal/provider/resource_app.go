@@ -48,6 +48,7 @@ type AppResourceModel struct {
 	Port                types.Int64  `tfsdk:"port"`
 	Ingress             types.String `tfsdk:"ingress"`
 	Mode                types.String `tfsdk:"mode"`
+	Type                types.String `tfsdk:"type"`
 	Storage             types.String `tfsdk:"storage"`
 	StoragePath         types.String `tfsdk:"storage_path"`
 	ServiceAccount      types.String `tfsdk:"service_account"`
@@ -271,10 +272,14 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"port": schema.Int64Attribute{
-				Description: "Container port. Defaults to 8080.",
+				// No provider-side default: the API decides, because the default
+				// depends on `type` — 8080 for a web app, none at all for a
+				// worker, which has no port and refuses one. A static default
+				// here would send 8080 for every unconfigured worker and turn a
+				// valid config into an error.
+				Description: "Container port. Defaults to 8080 on a web app; not valid on a worker.",
 				Optional:    true,
 				Computed:    true,
-				Default:     int64default.StaticInt64(8080),
 			},
 			"ingress": schema.StringAttribute{
 				Optional:    true,
@@ -287,6 +292,15 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Computed:    true,
 				Default:     stringdefault.StaticString("always-on"),
 				Description: "Hosting mode: 'always-on' (plain Deployment, default) or 'serverless' (scale-to-zero Knative). Mutable in place — switches the running app over without recreating it.",
+			},
+			"type": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString("web"),
+				Description: "Process type: 'web' (default) serves HTTP behind a Service, or 'worker' — a long-running process with no port, Service, ingress, URL or health checks. A worker is always-on only. Changing this replaces the app: it decides whether the app has an address at all.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
 			"storage": schema.StringAttribute{
 				Optional:    true,
@@ -358,10 +372,11 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Default:     stringdefault.StaticString("512Mi"),
 			},
 			"health_check_path": schema.StringAttribute{
-				Description: "HTTP path for health checks. Defaults to '/'. Set to a custom path (e.g. '/healthz') to enable startup probes.",
+				// Defaulted by the API for the same reason as `port`: a worker
+				// has no port to probe and refuses a health path.
+				Description: "HTTP path for health checks. Defaults to '/' on a web app; not valid on a worker. Set a custom path (e.g. '/healthz') to enable startup probes.",
 				Optional:    true,
 				Computed:    true,
-				Default:     stringdefault.StaticString("/"),
 			},
 			"health_check_timeout": schema.Int64Attribute{
 				Description: "Health check timeout in seconds. Defaults to 5.",
@@ -533,6 +548,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		Ingress:             plan.Ingress.ValueString(),
 		Routes:              routes,
 		Mode:                plan.Mode.ValueString(),
+		Type:                plan.Type.ValueString(),
 		Storage:             plan.Storage.ValueString(),
 		StoragePath:         plan.StoragePath.ValueString(),
 		HealthCheckPath:     plan.HealthCheckPath.ValueString(),
@@ -1307,6 +1323,7 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	model.Image = types.StringValue(app.Image)
 	model.Ingress = types.StringValue(app.Ingress)
 	model.Mode = types.StringValue(app.Mode)
+	model.Type = types.StringValue(app.Type)
 	model.Storage = types.StringValue(app.Storage)
 	model.StoragePath = types.StringValue(app.StoragePath)
 	model.Replicas = types.Int64Value(int64(app.Replicas))

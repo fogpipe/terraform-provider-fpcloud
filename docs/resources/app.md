@@ -83,7 +83,7 @@ resource "fpcloud_app" "web" {
 - `display_name` (String) Human-readable display name (mutable cosmetic label). Defaults to the name.
 - `env` (Map of String) Environment variables (plaintext)
 - `health_check_interval` (Number) Health check interval in seconds. Defaults to 10.
-- `health_check_path` (String) HTTP path for health checks. Defaults to '/'. Set to a custom path (e.g. '/healthz') to enable startup probes.
+- `health_check_path` (String) HTTP path for health checks. Defaults to '/' on a web app; not valid on a worker. Set a custom path (e.g. '/healthz') to enable startup probes.
 - `health_check_retries` (Number) Health check failure threshold. Defaults to 3.
 - `health_check_timeout` (Number) Health check timeout in seconds. Defaults to 5.
 - `ingress` (String) Ingress setting: 'all' for public access, 'internal' for project-only (default)
@@ -91,7 +91,7 @@ resource "fpcloud_app" "web" {
 - `memory_limit` (String) Memory limit (e.g. 512Mi). Defaults to 512Mi.
 - `min_scale` (Number) Minimum number of instances. Server-computed when unset.
 - `mode` (String) Hosting mode: 'always-on' (plain Deployment, default) or 'serverless' (scale-to-zero Knative). Mutable in place — switches the running app over without recreating it.
-- `port` (Number) Container port. Defaults to 8080.
+- `port` (Number) Container port. Defaults to 8080 on a web app; not valid on a worker.
 - `probes` (Attributes) Per-probe overrides for liveness, readiness and startup. By default all three run the app's health_check_* settings, so one request decides both whether traffic reaches the app and whether the pod is restarted. Point liveness at a cheap path that touches no downstream and readiness at the one that does, and a dependency blip pulls the pod out of the load balancer without killing it. Any attribute left unset keeps the matching health_check_* value, so overriding a path never means restating the timing. Always-on apps only. (see [below for nested schema](#nestedatt--probes))
 - `release_command` (List of String) Command run once per deploy — from the exact image being deployed, with the app's env/secrets — before the new version goes live; a failure aborts the deploy (e.g. DB migrations). A single element containing spaces runs via 'sh -c'; use multiple elements for exec form. Write-only from Terraform's perspective.
 - `replicas` (Number) Fixed replica count for always-on apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.
@@ -102,6 +102,7 @@ resource "fpcloud_app" "web" {
 - `storage` (String) Persistent volume size (e.g. '50Gi'). Opt-in and always-on mode only. Grow-only — the volume can never shrink.
 - `storage_path` (String) Mount path for the persistent volume. Defaults to '/data' when storage is set. Immutable — changing it replaces the app.
 - `traffic` (Attributes List) Traffic routing configuration. Each block specifies a revision and its traffic percentage. Use '@latest' to route to the latest revision. (see [below for nested schema](#nestedatt--traffic))
+- `type` (String) Process type: 'web' (default) serves HTTP behind a Service, or 'worker' — a long-running process with no port, Service, ingress, URL or health checks. A worker is always-on only. Changing this replaces the app: it decides whether the app has an address at all.
 - `url_slug` (String) Optional vanity host override (ADR-040): sets the app's public host to '<url_slug>.app.<platform_domain>'. When empty, the host is derived from the app/project/org names. Globally unique, a DNS-1123 label, always-on mode only. Set to an empty string to clear it back to the derived host.
 - `volume_mounts` (Attributes List) Mount a ConfigMap or Secret as read-only files, or an emptyDir as writable scratch, at a container path. Create-only — the API has no update path and does not echo these back, so any change forces the app to be replaced. (see [below for nested schema](#nestedatt--volume_mounts))
 

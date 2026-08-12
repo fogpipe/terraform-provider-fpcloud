@@ -50,6 +50,7 @@ resource "fpcloud_project" "production" {
 
 - `created_at` (String) Timestamp when the project was created.
 - `id` (String) Project ID.
+- `status` (String) The project's own state: `active`, `suspended`, or `deleting`. A suspended project keeps its resources and refuses changes to them, so a plan that reads `active` here is a plan that can apply.
 - `updated_at` (String) Timestamp when the project was last updated.
 
 ## Import

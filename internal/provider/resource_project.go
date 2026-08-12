@@ -37,6 +37,7 @@ type ProjectResourceModel struct {
 	MaxPods       types.Int64  `tfsdk:"max_pods"`
 	MaxStorage    types.String `tfsdk:"max_storage"`
 	AdoptExisting types.Bool   `tfsdk:"adopt_existing"`
+	Status        types.String `tfsdk:"status"`
 	CreatedAt     types.String `tfsdk:"created_at"`
 	UpdatedAt     types.String `tfsdk:"updated_at"`
 }
@@ -133,6 +134,12 @@ func (r *ProjectResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 					"conflict. Defaults to false, so create never silently takes ownership of a project it " +
 					"did not create.",
 				Optional: true,
+			},
+			"status": schema.StringAttribute{
+				Description: "The project's own state: `active`, `suspended`, or `deleting`. A suspended " +
+					"project keeps its resources and refuses changes to them, so a plan that reads " +
+					"`active` here is a plan that can apply.",
+				Computed: true,
 			},
 			"created_at": schema.StringAttribute{
 				Description: "Timestamp when the project was created.",
@@ -376,6 +383,7 @@ func (r *ProjectResource) apply(m *ProjectResourceModel, project *client.Project
 	m.ID = types.StringValue(project.ID)
 	m.Name = types.StringValue(project.Name)
 	m.DisplayName = types.StringValue(project.DisplayName)
+	m.Status = types.StringValue(project.Status)
 	m.Egress = types.StringValue(project.Egress)
 	m.MaxCPU = types.StringValue(project.MaxCPU)
 	m.MaxMemory = types.StringValue(project.MaxMemory)

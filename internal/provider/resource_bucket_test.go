@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
@@ -15,10 +14,10 @@ import (
 // server defaults; step 2 sets explicit quotas in place (no re-create); step 3
 // round-trips through import.
 func TestAccBucketResource(t *testing.T) {
-	// Keep names short: the Garage global alias is "<project>-<bucket>" and must
-	// satisfy S3's 63-char bucket-name limit, so long RandomWithPrefix names fail.
-	projectName := acctest.RandomWithPrefix("tfa-p")
-	bucketName := acctest.RandomWithPrefix("tfa-b")
+	// The Garage global alias is "<project>-<bucket>" and must satisfy S3's
+	// 63-char bucket-name limit — the same budget accName exists to stay inside.
+	projectName := accName("bktp")
+	bucketName := accName("bkt")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },

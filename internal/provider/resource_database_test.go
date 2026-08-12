@@ -9,7 +9,6 @@ import (
 	"github.com/fogpipe/terraform-provider-fpcloud/internal/provider"
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
@@ -39,7 +38,7 @@ func TestDatabaseResourceSchemaMutableAttrs(t *testing.T) {
 }
 
 func TestAccDatabaseResource(t *testing.T) {
-	proj := acctest.RandomWithPrefix("tf-acc-db-proj")
+	proj := accName("dbp")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -67,7 +66,7 @@ resource "fpcloud_database" "test" {
 }
 
 func TestAccDatabaseResourceWithOptions(t *testing.T) {
-	proj := acctest.RandomWithPrefix("tf-acc-dbo-proj")
+	proj := accName("dbop")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },

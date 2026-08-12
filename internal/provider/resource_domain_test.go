@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
@@ -14,9 +13,9 @@ import (
 // TXT + pointing), which is the expected create outcome — the resource is
 // created, not rejected.
 func TestAccDomainResource(t *testing.T) {
-	proj := acctest.RandomWithPrefix("tf-acc-dom-proj")
-	app := acctest.RandomWithPrefix("tf-acc-dom-app")
-	domain := acctest.RandomWithPrefix("tf-acc") + ".example.com"
+	proj := accName("domp")
+	app := accName("doma")
+	domain := accName("dom") + ".example.com"
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },

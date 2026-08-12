@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
@@ -15,8 +14,8 @@ import (
 // SwitchMode — no replace). The app is kept minimal (public image, internal
 // ingress) so it needs no DNS.
 func TestAccAppResource_mode(t *testing.T) {
-	projectName := acctest.RandomWithPrefix("tf-acc-mode-proj")
-	appName := acctest.RandomWithPrefix("tf-acc-mode-app")
+	projectName := accName("modp")
+	appName := accName("moda")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },

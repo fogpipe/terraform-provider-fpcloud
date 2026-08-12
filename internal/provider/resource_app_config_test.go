@@ -3,13 +3,12 @@ package provider_test
 import (
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
 func TestAccAppConfigResource(t *testing.T) {
-	proj := acctest.RandomWithPrefix("tf-acc-cfg-proj")
-	app := acctest.RandomWithPrefix("tf-acc-cfg-app")
+	proj := accName("cfgp")
+	app := accName("cfga")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -33,8 +32,8 @@ resource "fpcloud_app_config" "test" {
 }
 
 func TestAccAppConfigResourceSecret(t *testing.T) {
-	proj := acctest.RandomWithPrefix("tf-acc-cfgs-proj")
-	app := acctest.RandomWithPrefix("tf-acc-cfgs-app")
+	proj := accName("cfsp")
+	app := accName("cfsa")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },

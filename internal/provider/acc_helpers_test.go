@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
+	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -19,6 +20,20 @@ func testAccPreCheck(t *testing.T) {
 	if os.Getenv("FPCLOUD_API_KEY") == "" {
 		t.Fatal("FPCLOUD_API_KEY must be set for TF_ACC acceptance tests")
 	}
+}
+
+// accName builds a unique DNS-1123 name short enough to survive being combined
+// with the others.
+//
+// An app's hostname is a single label built from the organization, the project
+// and the app name (ADR-032, ADR-058), so those three share 63 characters.
+// acctest.RandomWithPrefix spends 20 of them on its own suffix, which put every
+// app-creating test over the limit and failed them all — correctly, and with a
+// message naming exactly this. Eight random characters are unique enough for a
+// throwaway org and leave room for a tag saying which test left the resource
+// behind.
+func accName(tag string) string {
+	return "tfa" + tag + "-" + acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 }
 
 // testAccAppScaffold renders a real project + always-on public app that

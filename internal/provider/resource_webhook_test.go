@@ -3,7 +3,6 @@ package provider_test
 import (
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
@@ -17,8 +16,8 @@ const accWebhookSkip = "set FPCLOUD_ACC_WEBHOOK_REPO to a real repo the platform
 
 func TestAccWebhookResource(t *testing.T) {
 	t.Skip(accWebhookSkip)
-	proj := acctest.RandomWithPrefix("tf-acc-wh-proj")
-	app := acctest.RandomWithPrefix("tf-acc-wh-app")
+	proj := accName("whp")
+	app := accName("wha")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -40,8 +39,8 @@ resource "fpcloud_webhook" "test" {
 
 func TestAccWebhookResourceWithBranch(t *testing.T) {
 	t.Skip(accWebhookSkip)
-	proj := acctest.RandomWithPrefix("tf-acc-whb-proj")
-	app := acctest.RandomWithPrefix("tf-acc-whb-app")
+	proj := accName("whbp")
+	app := accName("whba")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },

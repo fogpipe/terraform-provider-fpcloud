@@ -5,7 +5,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
@@ -15,7 +14,7 @@ func TestAccProjectResource_basic(t *testing.T) {
 	}
 	// Randomized so a transient delete failure can't leave a fixed-name project
 	// that collides with the next run.
-	name := acctest.RandomWithPrefix("tf-acc-proj")
+	name := accName("proj")
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,

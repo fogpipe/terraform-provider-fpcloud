@@ -1,0 +1,49 @@
+name: ci
+
+# Everything that can be checked without touching a live API. The acceptance
+# suite is the other half and stays on its own schedule, because it creates and
+# destroys real resources — so until this existed, a push to main was verified by
+# nothing at all for up to a week.
+#
+# The docs/ tree is generated from the schema (`just docs`) and is not checked
+# here: that needs OpenTofu and a provider binary, and it drifted unnoticed for
+# exactly that reason. See fogpipe/cloud-workspace#6.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build, vet and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # No go.work here, deliberately: this repo is built alone, so a client
+      # version that only resolves inside the workspace tree fails here rather
+      # than at a tenant's `tofu init`.
+      - name: build
+        run: go build ./...
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        run: go test ./... -count=1
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi

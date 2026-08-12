@@ -24,6 +24,11 @@ testacc:
 # absent. Exporting through the tofu already on PATH avoids the download; the
 # provider address is rewritten because tofu reports registry.opentofu.org and
 # tfplugindocs looks the schema up under the bare provider name.
+#
+# tfplugindocs itself is pinned and fetched here rather than expected on PATH,
+# so this recipe runs from a clean checkout and everyone generates docs with the
+# same version — a different one reflows every page and buries the schema change
+# in the diff.
 docs:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -39,7 +44,8 @@ docs:
     printf 'terraform {\n  required_providers {\n    fpcloud = { source = "fogpipe/fpcloud" }\n  }\n}\n' > "$work/main.tf"
     TF_CLI_CONFIG_FILE="$work/tofurc" tofu -chdir="$work" providers schema -json \
       | sed 's#registry.opentofu.org/fogpipe/fpcloud#fpcloud#' > "$work/schema.json"
-    tfplugindocs generate --provider-name fpcloud --providers-schema "$work/schema.json"
+    GOWORK=off go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@v0.24.0 \
+      generate --provider-name fpcloud --providers-schema "$work/schema.json"
 
 # Local GoReleaser dry-run (no publish, no signing).
 snapshot:

@@ -128,6 +128,18 @@ runner dies mid-job GitHub can take several minutes to notice — the run stalls
 with no further output and ends as cancelled. If a job stops producing output
 part-way through and nothing on your side cancelled it, raise `--memory` first.
 
+`fpcloud runner show <name>` says so directly while it is happening:
+
+```
+Problem   OOMKilled — exited with code 137
+Note      a runner was killed for exceeding its memory limit; raise the pool's
+          memory, and expect the job that was running to end as cancelled once
+          GitHub gives up on it
+```
+
+The pool itself still reports `running` — the platform replaced the killed pod
+straight away, so what failed is the job that was on it, not the pool.
+
 ## Building container images
 
 There is no Docker daemon in a runner, and Docker-in-Docker is not available:

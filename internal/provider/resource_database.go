@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
@@ -50,6 +51,7 @@ type DatabaseResourceModel struct {
 	Storage     types.String         `tfsdk:"storage"`
 	Instances   types.Int64          `tfsdk:"instances"`
 	Pooler      types.Bool           `tfsdk:"pooler"`
+	Extensions  types.Set            `tfsdk:"extensions"`
 	Status      types.String         `tfsdk:"status"`
 	Host        types.String         `tfsdk:"host"`
 	Port        types.Int64          `tfsdk:"port"`
@@ -158,6 +160,14 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
 			},
+			"extensions": schema.SetAttribute{
+				Description: "Curated Postgres extensions installed in the database. The platform installs them, " +
+					"because an untrusted extension needs superuser to install and a managed database hands out none. " +
+					"Needs Postgres 18 or later. Mutable in place; adding or removing one restarts the database.",
+				ElementType: types.StringType,
+				Optional:    true,
+				Computed:    true,
+			},
 			"status": schema.StringAttribute{
 				Description: "The current status of the database.",
 				Computed:    true,
@@ -248,6 +258,7 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 		Memory:      plan.Memory.ValueString(),
 		Storage:     plan.Storage.ValueString(),
 		Pooler:      plan.Pooler.ValueBool(),
+		Extensions:  extensionNames(plan.Extensions),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating database", err.Error())
@@ -394,7 +405,39 @@ func databaseUpdateReq(plan *DatabaseResourceModel) client.UpdateDatabaseRequest
 		instances := plan.Instances.ValueInt64()
 		req.Instances = &instances
 	}
+	// Unknown means the config says nothing and there is no prior state to keep,
+	// which is the one case the API must be left to decide.
+	if !plan.Extensions.IsUnknown() {
+		names := extensionNames(plan.Extensions)
+		req.Extensions = &names
+	}
 	return req
+}
+
+// extensionNames reads a set attribute into the client's plain string slice. A
+// null or unknown set is no extensions, never a nil the API would read as "leave
+// them alone" — the configuration is the desired state.
+func extensionNames(set types.Set) []string {
+	names := []string{}
+	for _, v := range set.Elements() {
+		if s, ok := v.(types.String); ok && !s.IsNull() {
+			names = append(names, s.ValueString())
+		}
+	}
+	return names
+}
+
+// extensionSet renders the API's extension list back into a set attribute.
+func extensionSet(names []string) types.Set {
+	elems := make([]attr.Value, 0, len(names))
+	for _, name := range names {
+		elems = append(elems, types.StringValue(name))
+	}
+	set, diags := types.SetValue(types.StringType, elems)
+	if diags.HasError() {
+		return types.SetNull(types.StringType)
+	}
+	return set
 }
 
 // mapDatabaseToState maps an API Database response to the Terraform state model.
@@ -407,6 +450,7 @@ func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 	state.Version = types.StringValue(db.Version)
 	state.Plan = types.StringValue(db.Plan)
 	state.Pooler = types.BoolValue(db.Pooler)
+	state.Extensions = extensionSet(db.Extensions)
 	state.Status = types.StringValue(db.Status)
 	state.CreatedAt = types.StringValue(db.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	// Note: cpu/memory/storage/instances are intentionally NOT mapped here — the

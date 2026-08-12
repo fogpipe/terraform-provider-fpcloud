@@ -51,6 +51,8 @@ resource "fpcloud_domain" "shop" {
 - `id` (String) The unique identifier of the domain.
 - `status` (String) The current status of the domain.
 - `tls_status` (String) The TLS certificate status for the domain.
+- `verification_token` (String) The value to publish as a TXT record at `_fpcloud-challenge.<domain>` to prove you own the name. Fogpipe issues it when the domain is created and checks for it before pointing anything at your app, so a plan that manages its own DNS feeds this straight into the record — there is nothing to copy by hand.
+- `verified_at` (String) The time ownership was last proved, or empty while it is still unproved.
 
 <a id="nestedatt--routes"></a>
 ### Nested Schema for `routes`

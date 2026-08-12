@@ -123,7 +123,8 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			},
 			"max_runners": schema.Int64Attribute{
 				Description: "Jobs the pool runs at once; further jobs queue on GitHub. Defaults to 2. " +
-					"Runners share the project's quota with everything else in it.",
+					"Every one of them costs cores and memory for as long as it runs, so this is a " +
+					"budget rather than a throughput dial.",
 				Optional: true,
 				Computed: true,
 			},

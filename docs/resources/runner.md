@@ -84,7 +84,7 @@ resource "fpcloud_runner" "own_app" {
 - `github_app_private_key` (String, Sensitive) Your GitHub App's private key (PEM), with `credential = "app"`. Write-only — never returned by the API; the configured value is preserved in state across reads.
 - `github_token` (String, Sensitive) A personal access token, with `credential = "token"`. Write-only — never returned by the API. It carries a person's full access and dies with their account.
 - `image` (String) Runner image. Defaults to the platform's, which the operator keeps current — GitHub refuses work to deprecated runner versions, so pinning your own means keeping it current yourself.
-- `max_runners` (Number) Jobs the pool runs at once; further jobs queue on GitHub. Defaults to 2. Runners share the project's quota with everything else in it.
+- `max_runners` (Number) Jobs the pool runs at once; further jobs queue on GitHub. Defaults to 2. Every one of them costs cores and memory for as long as it runs, so this is a budget rather than a throughput dial.
 - `memory` (String) Memory limit for the runner, e.g. "4Gi". A job that exceeds it is killed rather than slowed, and GitHub can take several minutes to notice, so a run that stalls with no output and ends as cancelled is usually this.
 - `min_runners` (Number) Runners kept idle and ready. Defaults to 0 — the pool scales to zero and a job waits a few seconds for its pod.
 - `runner_group` (String) GitHub runner group the pool joins. Defaults to `Default`.

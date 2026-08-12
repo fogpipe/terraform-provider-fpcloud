@@ -38,6 +38,10 @@ type DomainResourceModel struct {
 	Routes    types.List   `tfsdk:"routes"`
 	Status    types.String `tfsdk:"status"`
 	TLSStatus types.String `tfsdk:"tls_status"`
+
+	VerificationToken types.String `tfsdk:"verification_token"`
+	VerifiedAt        types.String `tfsdk:"verified_at"`
+
 	CreatedAt types.String `tfsdk:"created_at"`
 }
 
@@ -123,6 +127,17 @@ func (r *DomainResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			},
 			"tls_status": schema.StringAttribute{
 				Description: "The TLS certificate status for the domain.",
+				Computed:    true,
+			},
+			"verification_token": schema.StringAttribute{
+				Description: "The value to publish as a TXT record at `_fpcloud-challenge.<domain>` to " +
+					"prove you own the name. Fogpipe issues it when the domain is created and checks " +
+					"for it before pointing anything at your app, so a plan that manages its own DNS " +
+					"feeds this straight into the record — there is nothing to copy by hand.",
+				Computed: true,
+			},
+			"verified_at": schema.StringAttribute{
+				Description: "The time ownership was last proved, or empty while it is still unproved.",
 				Computed:    true,
 			},
 			"created_at": schema.StringAttribute{
@@ -267,6 +282,12 @@ func mapDomainToState(d *client.Domain, state *DomainResourceModel, diags *diag.
 	state.Mode = types.StringValue(d.Mode)
 	state.Status = types.StringValue(d.Status)
 	state.TLSStatus = types.StringValue(d.TLSStatus)
+	state.VerificationToken = types.StringValue(d.VerificationToken)
+	if d.VerifiedAt != nil {
+		state.VerifiedAt = types.StringValue(d.VerifiedAt.Format("2006-01-02T15:04:05Z07:00"))
+	} else {
+		state.VerifiedAt = types.StringValue("")
+	}
 	state.CreatedAt = types.StringValue(d.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	setDomainRoutesOnModel(state, d.Routes, diags)
 }

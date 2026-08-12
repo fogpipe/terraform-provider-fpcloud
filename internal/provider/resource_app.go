@@ -1321,6 +1321,7 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	model.URLSlug = types.StringValue(app.URLSlug)
 	model.Database = types.StringValue(app.DatabaseID)
 	model.Image = types.StringValue(app.Image)
+	model.Port = types.Int64Value(int64(app.Port))
 	model.Ingress = types.StringValue(app.Ingress)
 	model.Mode = types.StringValue(app.Mode)
 	model.Type = types.StringValue(app.Type)
@@ -1341,7 +1342,9 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	model.UpdatedAt = types.StringValue(app.UpdatedAt.String())
 	// Note: env and secret maps are preserved from the plan/state — not returned by API.
 	// Note: command, args, and release_command are preserved from the plan/state — not returned by API.
-	// Note: volume_mounts and security_context are preserved from the plan/state — not returned by API.
+	// Note: volume_mounts and security_context are preserved from the plan/state. The API
+	// does return both, so this could read them back and detect drift instead —
+	// fogpipe/cloud-workspace#12.
 	// Note: service_account is preserved from the plan/state — the API returns service_account_id.
 }
 

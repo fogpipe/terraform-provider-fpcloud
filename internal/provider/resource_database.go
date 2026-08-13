@@ -280,7 +280,7 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 
 	// Configure backup if specified.
 	if plan.Backup != nil && plan.Backup.Enabled.ValueBool() {
-		err := r.client.UpdateBackupConfig(ctx, db.ID, client.BackupConfig{
+		err := r.client.UpdateBackupConfig(ctx, db.ID, client.UpdateBackupConfigRequest{
 			Enabled:   plan.Backup.Enabled.ValueBool(),
 			Schedule:  plan.Backup.Schedule.ValueString(),
 			Retention: plan.Backup.Retention.ValueString(),
@@ -348,7 +348,7 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 
 	// Reconcile backup config toward the desired state (idempotent).
 	if plan.Backup != nil {
-		if err := r.client.UpdateBackupConfig(ctx, state.ID.ValueString(), client.BackupConfig{
+		if err := r.client.UpdateBackupConfig(ctx, state.ID.ValueString(), client.UpdateBackupConfigRequest{
 			Enabled:   plan.Backup.Enabled.ValueBool(),
 			Schedule:  plan.Backup.Schedule.ValueString(),
 			Retention: plan.Backup.Retention.ValueString(),
@@ -356,7 +356,7 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 			resp.Diagnostics.AddWarning("Error updating backup configuration", err.Error())
 		}
 	} else if state.Backup != nil {
-		if err := r.client.UpdateBackupConfig(ctx, state.ID.ValueString(), client.BackupConfig{Enabled: false}); err != nil {
+		if err := r.client.UpdateBackupConfig(ctx, state.ID.ValueString(), client.UpdateBackupConfigRequest{Enabled: false}); err != nil {
 			resp.Diagnostics.AddWarning("Error disabling backup configuration", err.Error())
 		}
 	}

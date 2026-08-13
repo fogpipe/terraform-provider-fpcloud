@@ -227,7 +227,7 @@ func (r *DatabaseBackupDestinationResource) Delete(ctx context.Context, req reso
 // secret_access_key from the plan is sent as-is (empty keeps the stored one); the
 // API never returns it, so callers keep the plan value in state.
 func (r *DatabaseBackupDestinationResource) set(ctx context.Context, plan *DatabaseBackupDestinationResourceModel) (*client.BackupDestination, error) {
-	return r.client.SetBackupDestination(ctx, plan.DatabaseID.ValueString(), client.BackupDestination{
+	return r.client.SetBackupDestination(ctx, plan.DatabaseID.ValueString(), client.SetBackupDestinationRequest{
 		Provider:        plan.Provider.ValueString(),
 		Bucket:          plan.Bucket.ValueString(),
 		Region:          plan.Region.ValueString(),

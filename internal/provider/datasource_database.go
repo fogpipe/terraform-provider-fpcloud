@@ -27,6 +27,10 @@ type DatabaseDataSourceModel struct {
 	Version     types.String `tfsdk:"version"`
 	Plan        types.String `tfsdk:"plan"`
 	Status      types.String `tfsdk:"status"`
+	CPU         types.String `tfsdk:"cpu"`
+	Memory      types.String `tfsdk:"memory"`
+	Storage     types.String `tfsdk:"storage"`
+	Instances   types.Int64  `tfsdk:"instances"`
 	Host        types.String `tfsdk:"host"`
 	Port        types.Int64  `tfsdk:"port"`
 	Username    types.String `tfsdk:"username"`
@@ -76,6 +80,24 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 			},
 			"status": schema.StringAttribute{
 				Description: "The current status of the database.",
+				Computed:    true,
+			},
+			// The size is read from the live cluster, so it reports what the
+			// database actually runs under, whoever last changed it.
+			"cpu": schema.StringAttribute{
+				Description: "CPU request/limit the database runs under (e.g. \"500m\").",
+				Computed:    true,
+			},
+			"memory": schema.StringAttribute{
+				Description: "Memory request/limit the database runs under (e.g. \"2Gi\").",
+				Computed:    true,
+			},
+			"storage": schema.StringAttribute{
+				Description: "Persistent volume size the database runs under (e.g. \"10Gi\").",
+				Computed:    true,
+			},
+			"instances": schema.Int64Attribute{
+				Description: "Number of Postgres instances (1 = single, >1 = HA replicas).",
 				Computed:    true,
 			},
 			"host": schema.StringAttribute{
@@ -141,6 +163,10 @@ func (d *DatabaseDataSource) Read(ctx context.Context, req datasource.ReadReques
 	data.Version = types.StringValue(db.Version)
 	data.Plan = types.StringValue(db.Plan)
 	data.Status = types.StringValue(db.Status)
+	data.CPU = types.StringValue(db.CPU)
+	data.Memory = types.StringValue(db.Memory)
+	data.Storage = types.StringValue(db.Storage)
+	data.Instances = types.Int64Value(db.Instances)
 	// These are on the API response and always were; they used to be hardcoded
 	// empty here, with a comment asserting the API did not expose them.
 	data.Host = types.StringValue(db.Host)

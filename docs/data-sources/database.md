@@ -21,14 +21,18 @@ Use this data source to read a Fogpipe managed database by ID.
 
 ### Read-Only
 
+- `cpu` (String) CPU request/limit the database runs under (e.g. "500m").
 - `created_at` (String) The creation timestamp of the database.
 - `display_name` (String) The human-readable display name.
 - `engine` (String) The database engine (e.g. postgres).
 - `host` (String) Cluster-internal hostname of the database's primary. Not reachable from outside the cluster.
+- `instances` (Number) Number of Postgres instances (1 = single, >1 = HA replicas).
+- `memory` (String) Memory request/limit the database runs under (e.g. "2Gi").
 - `name` (String) The database name.
 - `plan` (String) The database plan (e.g. starter, standard, premium).
 - `port` (Number) The database port.
 - `project_id` (String) The ID of the project this database belongs to.
 - `status` (String) The current status of the database.
+- `storage` (String) Persistent volume size the database runs under (e.g. "10Gi").
 - `username` (String) The database username.
 - `version` (String) The database engine version.

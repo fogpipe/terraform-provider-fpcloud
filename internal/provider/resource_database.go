@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -122,37 +123,35 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			// cpu/memory/storage are Optional+Computed with defaults matching the
-			// server's, because the update API requires all three on every PATCH
-			// (it caps-checks each) yet never echoes them back in the Database
-			// response. Defaulting them keeps them always-known so the provider can
-			// always send them; not being echoed means out-of-band changes aren't
-			// detected (they're effectively write-only from Terraform's side).
+			// cpu/memory/storage keep server-matching defaults so a database
+			// declared without a size still plans as a size. All four are
+			// echoed by the API, read from the live cluster, so a change made
+			// outside Terraform shows up as drift on the next plan.
 			"cpu": schema.StringAttribute{
-				Description: "CPU request/limit (e.g. \"500m\", \"1\"). Mutable in place. Defaults to \"250m\". " +
-					"Not echoed by the API, so out-of-band changes are not detected.",
-				Optional: true,
-				Computed: true,
-				Default:  stringdefault.StaticString("250m"),
+				Description: "CPU request/limit (e.g. \"500m\", \"1\"). Mutable in place. Defaults to \"250m\".",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString("250m"),
 			},
 			"memory": schema.StringAttribute{
-				Description: "Memory request/limit (e.g. \"512Mi\", \"2Gi\"). Mutable in place. Defaults to \"512Mi\". " +
-					"Not echoed by the API, so out-of-band changes are not detected.",
-				Optional: true,
-				Computed: true,
-				Default:  stringdefault.StaticString("512Mi"),
+				Description: "Memory request/limit (e.g. \"512Mi\", \"2Gi\"). Mutable in place. Defaults to \"512Mi\".",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString("512Mi"),
 			},
 			"storage": schema.StringAttribute{
 				Description: "Persistent volume size (e.g. \"10Gi\"). Mutable in place but grow-only — the API rejects " +
-					"a shrink. Defaults to \"10Gi\". Not echoed by the API, so out-of-band changes are not detected.",
+					"a shrink. Defaults to \"10Gi\".",
 				Optional: true,
 				Computed: true,
 				Default:  stringdefault.StaticString("10Gi"),
 			},
 			"instances": schema.Int64Attribute{
 				Description: "Number of Postgres instances (1 = single, >1 = HA replicas). Mutable in place. " +
-					"Not settable at create time via this attribute — it is reconciled immediately after create.",
+					"Defaults to 1, which is what a database is created with.",
 				Optional: true,
+				Computed: true,
+				Default:  int64default.StaticInt64(1),
 			},
 			"pooler": schema.BoolAttribute{
 				Description: "Whether a PgBouncer connection pooler is provisioned (injects DATABASE_POOL_URL). Mutable in place.",
@@ -267,8 +266,7 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 
 	// instances has no create-time field on the API, so reconcile it in place
 	// right after create when the user asked for more than the default single
-	// instance. The update API requires cpu/memory/storage on every PATCH, so
-	// the full spec is sent (databaseUpdateReq), not just instances.
+	// instance.
 	if !plan.Instances.IsNull() && !plan.Instances.IsUnknown() && plan.Instances.ValueInt64() > 1 {
 		updated, uerr := r.client.UpdateDatabase(ctx, db.ID, databaseUpdateReq(&plan))
 		if uerr != nil {
@@ -338,12 +336,9 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Reconcile the mutable spec via PATCH /databases/{id}. The API caps-checks
-	// cpu/memory/storage on every update (rejecting empty), so all three are
-	// always sent — they're always known here (Optional+Computed with defaults).
-	// version defaults to current server-side but is forward-only, so it is always
-	// sent (equal is allowed); pooler is always sent (it overlays the desired
-	// value); instances is sent only when set.
+	// Reconcile the mutable spec via PATCH /databases/{id} with the whole
+	// desired spec (databaseUpdateReq). version is always sent and is
+	// forward-only server-side, so an unchanged value is accepted.
 	db, err := r.client.UpdateDatabase(ctx, state.ID.ValueString(), databaseUpdateReq(&plan))
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating database", err.Error())
@@ -387,10 +382,9 @@ func (r *DatabaseResource) Delete(ctx context.Context, req resource.DeleteReques
 }
 
 // databaseUpdateReq builds the full PATCH body from the planned model. The API
-// caps-checks cpu/memory/storage on every update (empty is rejected), so all
-// three are always included; they are always known because they are
-// Optional+Computed with defaults. version/pooler are always sent (forward-only
-// / overlay semantics); instances only when set.
+// accepts a partial patch and leaves out what a patch omits, but Terraform's
+// job is to assert the whole desired spec, so every field the plan knows is
+// sent — which is all of them, since each is Optional+Computed with a default.
 func databaseUpdateReq(plan *DatabaseResourceModel) client.UpdateDatabaseRequest {
 	pooler := plan.Pooler.ValueBool()
 	req := client.UpdateDatabaseRequest{
@@ -453,9 +447,22 @@ func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 	state.Extensions = extensionSet(db.Extensions)
 	state.Status = types.StringValue(db.Status)
 	state.CreatedAt = types.StringValue(db.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
-	// Note: cpu/memory/storage/instances are intentionally NOT mapped here — the
-	// API Database response does not echo them, so they are preserved from the
-	// plan/state (write-only from Terraform's point of view).
+	// The size comes back from the live cluster, so it is the one thing that
+	// can report a change made outside Terraform. A response that omits it
+	// means the cluster could not be read, not that the database has no size —
+	// keep what we knew rather than planning a resize off a blank.
+	if db.CPU != "" {
+		state.CPU = types.StringValue(db.CPU)
+	}
+	if db.Memory != "" {
+		state.Memory = types.StringValue(db.Memory)
+	}
+	if db.Storage != "" {
+		state.Storage = types.StringValue(db.Storage)
+	}
+	if db.Instances > 0 {
+		state.Instances = types.Int64Value(db.Instances)
+	}
 
 	// Read the address straight off the API response. This used to parse a
 	// `connection_string` field that the API has never emitted, so host, port and

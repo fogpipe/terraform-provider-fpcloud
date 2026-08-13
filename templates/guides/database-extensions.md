@@ -79,7 +79,11 @@ the mechanism that makes that possible arrived in **Postgres 18**. On 15, 16 or
 extensions need postgres 18 or later (this database runs 17)
 ```
 
-Create the database with `--version 18`.
+A new database is created on 18 unless you ask for something older, so this
+only comes up on a database that predates that default or names an older major
+explicitly. A database already running 17 does not move on its own — a major
+version change rewrites the data directory and is never a side effect of asking
+for an extension.
 
 ## What it costs
 

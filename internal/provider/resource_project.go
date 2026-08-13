@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -339,13 +340,23 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 		return
 	}
 
-	err := r.client.DeleteProject(ctx, state.ID.ValueString())
-	if err != nil {
+	if _, err := r.client.DeleteProject(ctx, state.ID.ValueString()); err != nil {
 		if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
 			// Already deleted, nothing to do.
 			return
 		}
 		resp.Diagnostics.AddError("Error deleting project", err.Error())
+		return
+	}
+
+	// The API accepts the deletion and tears the project down behind it. Terraform
+	// takes a returned Delete as "the resource is gone", so waiting here is what
+	// makes that true — otherwise the next apply recreates a project whose
+	// namespace and storage are still being reclaimed. The teardown continues
+	// server-side regardless of what this operation does (#865).
+	if err := r.client.WaitProjectDeleted(ctx, state.ID.ValueString(), 5*time.Second); err != nil {
+		resp.Diagnostics.AddError("Error waiting for project deletion",
+			"The deletion was accepted and is still running server-side: "+err.Error())
 	}
 }
 

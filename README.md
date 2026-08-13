@@ -101,13 +101,13 @@ artifacts, so the repo needs two secrets:
 - `PASSPHRASE` — that key's passphrase
 
 Register the **public** half of the key with the OpenTofu Registry (and the
-Terraform Registry, if publishing there). Then:
+Terraform Registry, if publishing there).
 
-```bash
-just docs && git commit -am "docs" # if schema changed
-git tag v0.1.0
-git push origin v0.1.0
-```
+The provider shares one version with the Fogpipe API and the `fpcloud` CLI: a
+given `vX.Y.Z` of the provider is built against the same release of both, so
+the version you pin in `required_providers` names a known API. Maintainers cut
+all three tags in one command rather than tagging this repo on its own — commit
+regenerated docs (`just docs`) before that, if the schema changed.
 
 ## License
 

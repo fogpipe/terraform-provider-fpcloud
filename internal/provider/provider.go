@@ -117,6 +117,7 @@ func (p *FogpipeProvider) Resources(_ context.Context) []func() resource.Resourc
 		NewBucketKeyResource,
 		NewBucketDomainResource,
 		NewBucketLifecycleRuleResource,
+		NewBucketCORSResource,
 		NewAppBucketResource,
 		NewDomainResource,
 		NewAppConfigResource,

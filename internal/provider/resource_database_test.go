@@ -37,6 +37,26 @@ func TestDatabaseResourceSchemaMutableAttrs(t *testing.T) {
 	}
 }
 
+// A default here is not a convenience, it is an override: a config that names
+// no version plans the provider's number instead of the server's, so the
+// platform's default can move and every Terraform-declared database stays on
+// the old major (#883).
+func TestDatabaseVersionTakesThePlatformDefault(t *testing.T) {
+	var resp fwresource.SchemaResponse
+	provider.NewDatabaseResource().Schema(context.Background(), fwresource.SchemaRequest{}, &resp)
+
+	v, ok := resp.Schema.Attributes["version"].(schema.StringAttribute)
+	if !ok {
+		t.Fatalf("version attribute missing or not a StringAttribute")
+	}
+	if v.Default != nil {
+		t.Errorf("version pins a provider-side default; the server states the major")
+	}
+	if !v.Computed || !v.Optional {
+		t.Errorf("version must be Optional+Computed so the server can state it")
+	}
+}
+
 func TestAccDatabaseResource(t *testing.T) {
 	proj := accName("dbp")
 

@@ -108,12 +108,19 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
+			// Left unset the server states the major, the same way the CLI and the
+			// console do. A default pinned here overrode that silently, so a
+			// database declared without a version was created on a major too old
+			// for the extensions it might ask for (#883).
 			"version": schema.StringAttribute{
-				Description: "The database engine major version (e.g. \"17\"). Mutable: raising it triggers an " +
-					"in-place major-version upgrade (forward-only; the API rejects downgrades).",
+				Description: "The database engine major version (e.g. \"18\"). Omit to take the platform's " +
+					"current default. Mutable: raising it triggers an in-place major-version upgrade " +
+					"(forward-only; the API rejects downgrades).",
 				Optional: true,
 				Computed: true,
-				Default:  stringdefault.StaticString("17"),
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"plan": schema.StringAttribute{
 				Description: "Legacy size tier, derived by the server from cpu/memory (e.g. \"starter\", \"custom\"). " +

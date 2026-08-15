@@ -16,7 +16,6 @@ Manages a Fogpipe managed database.
 resource "fpcloud_database" "main" {
   project_id = fpcloud_project.production.id
   name       = "maindb"
-  version    = "17"
   cpu        = "1"
   memory     = "2Gi"
   storage    = "20Gi"
@@ -43,11 +42,12 @@ resource "fpcloud_database" "main" {
 - `cpu` (String) CPU request/limit (e.g. "500m", "1"). Mutable in place. Defaults to "250m".
 - `display_name` (String) Human-readable display name (mutable cosmetic label). Defaults to the name.
 - `engine` (String) The database engine (e.g. postgres).
+- `extensions` (Set of String) Curated Postgres extensions installed in the database. The platform installs them, because an untrusted extension needs superuser to install and a managed database hands out none. Needs Postgres 18 or later. Mutable in place; adding or removing one restarts the database.
 - `instances` (Number) Number of Postgres instances (1 = single, >1 = HA replicas). Mutable in place. Defaults to 1, which is what a database is created with.
 - `memory` (String) Memory request/limit (e.g. "512Mi", "2Gi"). Mutable in place. Defaults to "512Mi".
 - `pooler` (Boolean) Whether a PgBouncer connection pooler is provisioned (injects DATABASE_POOL_URL). Mutable in place.
 - `storage` (String) Persistent volume size (e.g. "10Gi"). Mutable in place but grow-only — the API rejects a shrink. Defaults to "10Gi".
-- `version` (String) The database engine major version (e.g. "17"). Mutable: raising it triggers an in-place major-version upgrade (forward-only; the API rejects downgrades).
+- `version` (String) The database engine major version (e.g. "18"). Omit to take the platform's current default. Mutable: raising it triggers an in-place major-version upgrade (forward-only; the API rejects downgrades).
 
 ### Read-Only
 

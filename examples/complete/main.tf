@@ -27,7 +27,6 @@ resource "fpcloud_project" "myapp" {
 resource "fpcloud_database" "main" {
   project_id = fpcloud_project.myapp.id
   name       = "maindb"
-  version    = "17"
   cpu        = "1"
   memory     = "2Gi"
 }

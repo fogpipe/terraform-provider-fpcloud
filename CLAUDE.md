@@ -59,7 +59,7 @@ resolves a version, not a branch.
 platform under one `go.work`, so a `pkg/client` change is testable here before
 it is tagged. Without it you are building against the last release.
 
-See `platform/docs/internal/provider-sync.md` for the full model.
+See `../docs/provider-sync.md` for the full model.
 
 ## Releases are not cut here
 

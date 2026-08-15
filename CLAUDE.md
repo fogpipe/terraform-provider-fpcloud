@@ -23,21 +23,27 @@ Nothing operator-internal goes here. Operator-only API paths live under
 
 ## Every API resource maps 1:1, and CI holds you to it
 
-The mirror is not a convention, it is gated — from the platform repo, which
-checks out this one:
+The mirror is not a convention, it is gated — in this repo's own CI
+(`scripts/tf-resource-coverage.ts`, `scripts/tf-field-coverage.ts`):
 
 - a client method no resource or data source calls fails
   `tf-resource-coverage.ts`
 - a client field no schema attribute expresses fails `tf-field-coverage.ts`,
   which pairs client type `X` with this repo's `XResourceModel` one level into
   nested objects
-- `templates/guides` drifting from the platform's docs pool fails the
-  `sync-tf-docs` check
 
-Both coverage gates accept reviewed exclusions via baselines **in the platform
-repo**. Baselining is a decision, not a way past a red build — and a red build
-here often means the fix belongs in a different repo than the one you are
-editing.
+Both resolve `github.com/fogpipe/cloud-cli` at its **latest release**, not the
+version this repo's `go.mod` pins — judging the provider against its own pin
+would make the gate self-satisfying, staying green while the pin sits releases
+behind. A red build here after a `cloud-cli` release is the signal to bump.
+
+`templates/guides` drifting from the platform's docs pool fails a check in
+platform's CI instead, which still clones this repo to run it — that gate
+reads platform's private docs pool, so it cannot move here.
+
+Both coverage gates accept reviewed exclusions via baselines in this repo
+(`scripts/tf-resource-coverage-baseline.txt`, `scripts/tf-field-coverage-baseline.txt`).
+Baselining is a decision, not a way past a red build.
 
 Nested structures are `ListNestedAttribute` / `SingleNestedAttribute`, never
 `Blocks:`. Match what is already there.

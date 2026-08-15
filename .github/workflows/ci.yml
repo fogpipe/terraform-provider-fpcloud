@@ -47,3 +47,26 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
+
+  # Does this provider still cover the client it wraps? Both gates resolve
+  # cloud-cli at its LATEST RELEASE, not the version go.mod here pins — judging
+  # the provider against its own pin would make the gate self-satisfying. See
+  # scripts/tf-resource-coverage.ts.
+  coverage:
+    name: client coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "v2.x"
+
+      - name: every client method has a resource/data source surface (or is baselined)
+        run: deno run --allow-read --allow-run --allow-env scripts/tf-resource-coverage.ts
+
+      - name: every client field has a schema attribute (or is baselined)
+        run: deno run --allow-read --allow-run --allow-env scripts/tf-field-coverage.ts

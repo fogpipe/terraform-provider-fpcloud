@@ -1,0 +1,105 @@
+# client methods with no Terraform resource/data-source calling them, reviewed
+# and accepted as permanent exclusions during the 2026-07-24 coverage sweep.
+# Grouped and reasoned here for humans; scripts/tf-resource-coverage.ts only
+# reads non-comment lines, so --update-baseline will flatten these groupings
+# back to a plain list — re-annotate by hand after running it, or leave the
+# groups as documentation and let a fresh entry land ungrouped at the bottom.
+
+# auth / identity — not infrastructure state
+ProvisionUser
+GetMe
+
+# imperative one-shot actions — not declarative resource state
+CreateBackup
+DeleteBackup
+ListBackups
+RestoreDatabase
+RunBackupDestination
+RestoreBackupDestination
+RollbackApp
+ReconcileApp
+MoveProject
+ApplyRetention
+PreviewRetention
+VerifyDomain
+VerifyBucketDomain
+PublishWebsiteVersion
+ClearBucketLifecycleRules
+
+# data-plane object operations — deliberately imperative, matches the
+# aws_s3_bucket / aws s3 sync split already established for buckets (#389)
+DeleteBucketObject
+ListBucketObjects
+PresignBucketObject
+GetBucketCredentials
+MintBucketSessionCredentials
+ListRegistryRepositories
+ListRegistryTags
+DeleteRegistryTag
+
+# read-only observability — not something you reference as TF resource state
+GetAppLogs
+GetAppVersion
+ListDeployments
+GetDeployment
+ListRevisions
+ListAudit
+ClusterInfo
+FKECredentials
+FKEToken
+GetDatabaseConnection
+# the project status document (#778) is the strongest case in this group: it is
+# an observation of live cluster state that changes between two consecutive
+# reads, so a data source over it would hand Terraform a value that never
+# settles — a perpetual diff for anything referencing it, and a plan that
+# depends on whether an app happened to be restarting
+ProjectStatus
+
+# "list all X" convenience — every existing data source in this provider is a
+# singular lookup (project/app/database); a collection-listing data source has
+# no precedent here and no clear use case yet
+ListDatabases
+ListBuckets
+ListOrgSecrets
+
+# scheduled-job runs (#166) — a run is a record of something that happened, not
+# desired state: you can't declare "three runs should exist". `fpcloud_job`
+# covers the schedule itself; triggering and reading runs stays CLI/API-only
+RunJob
+ListJobRuns
+GetJobLogs
+
+# "list all X" convenience (see above) — jobs are looked up singularly
+ListJobs
+
+# "list all X" convenience (see above) — runner pools are looked up singularly
+ListRunners
+
+# operator-only escalation, deliberately not declarable by a tenant's Terraform:
+# handing an app a Kubernetes identity is granted out-of-band, like fke_enabled
+SetAppKubeServiceAccount
+
+# metered usage (#675) — read-only observability. Usage is produced by the
+# platform, not declared: there is no desired state for "what this app consumed"
+ListProjectUsage
+ListOrgUsage
+
+# billing reads (#109/#111) — same reasoning one level up: an estimate is a
+# computation over usage that has not finished accruing, and an invoice is a
+# record of a period that closed. Neither is desired state anyone declares.
+# The billing ROLES are declarative and do have a resource (fpcloud_billing_binding)
+GetBillingEstimate
+ListInvoices
+GetInvoice
+# the price list is a published fact about the platform, identical for every
+# caller — a data source would return the same rows to everyone and give
+# Terraform a value nothing can be declared against
+ListPrices
+
+# github connection (#790, ADR-066) — cannot be declarative state: binding a
+# project to a GitHub account requires a person to authorize the install in a
+# browser as themselves, which is the entire proof. A Terraform resource could
+# only ever assert an account name, which is what the ADR removed.
+StartGitHubConnect
+GetGitHubConnection
+DisconnectGitHub

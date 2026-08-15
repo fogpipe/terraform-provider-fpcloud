@@ -54,6 +54,17 @@ your own `create extension if not exists semver` runs as a no-op under your
 ordinary role and succeeds, so a schema that already carries that line keeps
 working unedited.
 
+**What the extension creates is yours to use.** The platform installs it as a
+superuser you never hold, so an extension that brings its own schema — as
+`pg_statecharts` brings `fsm` — would otherwise leave you unable to read or write
+a single object in it. Your role is given full rights on the schemas, tables,
+sequences and functions an extension creates, as it creates them, so an upgrade
+that adds a table does not need anything re-run.
+
+Dropping one is still ours: the platform owns what it installed, so
+`drop extension pg_statecharts` under your own role is refused. A migration tool
+that reverts as far as its first change will stop there.
+
 ## What is available
 
 | Extension | Version | Provides |

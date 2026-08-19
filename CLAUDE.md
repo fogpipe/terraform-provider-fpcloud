@@ -83,8 +83,13 @@ unsigned version.
 `just test` is unit-only. `just testacc` runs the acceptance suite against a
 **live** API and needs `FPCLOUD_API_KEY` (plus `FPCLOUD_API_URL` for anything
 but production). Each test randomizes resource names and asserts `CheckDestroy`,
-so a failed run leaves nothing behind. CI runs them on manual dispatch and
-weekly, never on a PR — they cost real resources.
+so a failed run leaves nothing behind — a *killed* one does (^C, a cancelled
+workflow), because teardown never runs. With `FPCLOUD_ACC_SWEEP_ORG` set to
+the throwaway org's name, the suite first deletes that org's projects older
+than two hours, which is how those are reclaimed; leave it unset for a key
+that can see anything you want to keep. CI runs the suite on manual dispatch
+(optionally one test, by name) and weekly, never on a PR — it costs real
+resources.
 
 ## Conventions
 

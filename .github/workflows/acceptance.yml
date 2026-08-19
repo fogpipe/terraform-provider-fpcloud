@@ -6,8 +6,15 @@ name: acceptance
 # schedule catch "Provider produced inconsistent result after apply" regressions.
 #
 # Required repo config:
-#   secrets.FPCLOUD_API_KEY — an fpcloud API key (fp-...) for a throwaway org
-#   vars.FPCLOUD_API_URL    — API base URL (defaults to prod if unset)
+#   secrets.FPCLOUD_API_KEY      — an fpcloud API key (fp-...) for a throwaway org
+#   vars.FPCLOUD_API_URL         — API base URL (defaults to prod if unset)
+#   vars.FPCLOUD_ACC_SWEEP_ORG   — the throwaway org's name. Before the tests
+#                                  start, the suite deletes that org's projects
+#                                  older than two hours — what a cancelled run
+#                                  left behind, since a killed process never
+#                                  reaches its teardown. Unset, nothing is swept
+#                                  and leaks count against the org's project
+#                                  bound until someone clears them by hand.
 on:
   workflow_dispatch:
     inputs:
@@ -44,4 +51,5 @@ jobs:
           TF_ACC: "1"
           FPCLOUD_API_KEY: ${{ secrets.FPCLOUD_API_KEY }}
           FPCLOUD_API_URL: ${{ vars.FPCLOUD_API_URL }}
+          FPCLOUD_ACC_SWEEP_ORG: ${{ vars.FPCLOUD_ACC_SWEEP_ORG }}
         run: go test ./internal/provider/ -run "${{ inputs.run || 'TestAcc' }}" -v -timeout 30m

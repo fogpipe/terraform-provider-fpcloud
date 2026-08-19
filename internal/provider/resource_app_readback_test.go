@@ -81,34 +81,16 @@ func TestSetSecurityContextOnModel(t *testing.T) {
 		t.Fatalf("no context should read as null, got %v", model.SecurityContext)
 	}
 
-	// Config named run_as_user only: the booleans are omitted on the wire when
-	// false, so false must not become a diff against the config's null.
+	// The booleans are omitted on the wire when false and default to false in
+	// the schema, so an absent one reads as a concrete false, never null.
 	setSecurityContextOnModel(model, &client.SecurityContext{RunAsUser: &uid}, &diags)
 	var got SecurityContextModel
 	diags.Append(model.SecurityContext.As(context.Background(), &got, basetypes.ObjectAsOptions{})...)
 	if diags.HasError() {
 		t.Fatal(diags)
 	}
-	if got.RunAsUser.ValueInt64() != 1000 || !got.RunAsGroup.IsNull() || !got.RunAsNonRoot.IsNull() || !got.ReadOnlyRootFilesystem.IsNull() {
+	if got.RunAsUser.ValueInt64() != 1000 || !got.RunAsGroup.IsNull() || got.RunAsNonRoot.IsNull() || got.RunAsNonRoot.ValueBool() || got.ReadOnlyRootFilesystem.ValueBool() {
 		t.Fatalf("unexpected read-back: %+v", got)
-	}
-
-	// Config set run_as_non_root = false explicitly: that false is kept.
-	prior, d := types.ObjectValue(securityContextAttrTypes(), map[string]attr.Value{
-		"run_as_user":               types.Int64Value(1000),
-		"run_as_group":              types.Int64Null(),
-		"fs_group":                  types.Int64Null(),
-		"run_as_non_root":           types.BoolValue(false),
-		"read_only_root_filesystem": types.BoolNull(),
-	})
-	if d.HasError() {
-		t.Fatal(d)
-	}
-	model.SecurityContext = prior
-	setSecurityContextOnModel(model, &client.SecurityContext{RunAsUser: &uid}, &diags)
-	diags.Append(model.SecurityContext.As(context.Background(), &got, basetypes.ObjectAsOptions{})...)
-	if got.RunAsNonRoot.IsNull() || got.RunAsNonRoot.ValueBool() {
-		t.Fatalf("an explicit false must survive, got %+v", got)
 	}
 
 	// A change made outside Terraform is visible.

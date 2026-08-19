@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
@@ -263,12 +264,16 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 						Optional:    true,
 					},
 					"run_as_non_root": schema.BoolAttribute{
-						Description: "Require the container to run as a non-root user.",
+						Description: "Require the container to run as a non-root user. Defaults to false.",
 						Optional:    true,
+						Computed:    true,
+						Default:     booldefault.StaticBool(false),
 					},
 					"read_only_root_filesystem": schema.BoolAttribute{
-						Description: "Mount the container root filesystem read-only.",
+						Description: "Mount the container root filesystem read-only. Defaults to false.",
 						Optional:    true,
+						Computed:    true,
+						Default:     booldefault.StaticBool(false),
 					},
 				},
 			},
@@ -1412,16 +1417,12 @@ func securityContextAttrTypes() map[string]attr.Type {
 }
 
 // setSecurityContextOnModel reads the security context the API echoed. The two
-// booleans are optional in config and omitted on the wire when false, so a
-// false keeps the model's null unless the config set it to false explicitly.
+// booleans are omitted on the wire when false and default to false in the
+// schema, so absent and false are the same value on both sides.
 func setSecurityContextOnModel(model *AppResourceModel, sc *client.SecurityContext, diags *diag.Diagnostics) {
 	if sc == nil {
 		model.SecurityContext = types.ObjectNull(securityContextAttrTypes())
 		return
-	}
-	var prior SecurityContextModel
-	if !model.SecurityContext.IsNull() && !model.SecurityContext.IsUnknown() {
-		diags.Append(model.SecurityContext.As(context.Background(), &prior, basetypes.ObjectAsOptions{})...)
 	}
 	optionalInt := func(v *int64) types.Int64 {
 		if v == nil {
@@ -1429,18 +1430,12 @@ func setSecurityContextOnModel(model *AppResourceModel, sc *client.SecurityConte
 		}
 		return types.Int64Value(*v)
 	}
-	optionalBool := func(v bool, prior types.Bool) types.Bool {
-		if !v && (prior.IsNull() || prior.IsUnknown()) {
-			return types.BoolNull()
-		}
-		return types.BoolValue(v)
-	}
 	obj, d := types.ObjectValue(securityContextAttrTypes(), map[string]attr.Value{
 		"run_as_user":               optionalInt(sc.RunAsUser),
 		"run_as_group":              optionalInt(sc.RunAsGroup),
 		"fs_group":                  optionalInt(sc.FSGroup),
-		"run_as_non_root":           optionalBool(sc.RunAsNonRoot, prior.RunAsNonRoot),
-		"read_only_root_filesystem": optionalBool(sc.ReadOnlyRootFilesystem, prior.ReadOnlyRootFilesystem),
+		"run_as_non_root":           types.BoolValue(sc.RunAsNonRoot),
+		"read_only_root_filesystem": types.BoolValue(sc.ReadOnlyRootFilesystem),
 	})
 	diags.Append(d...)
 	model.SecurityContext = obj

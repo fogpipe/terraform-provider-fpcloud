@@ -181,9 +181,9 @@ Optional:
 Optional:
 
 - `fs_group` (Number) Supplemental group applied to mounted volumes.
-- `read_only_root_filesystem` (Boolean) Mount the container root filesystem read-only.
+- `read_only_root_filesystem` (Boolean) Mount the container root filesystem read-only. Defaults to false.
 - `run_as_group` (Number) GID to run the container process as.
-- `run_as_non_root` (Boolean) Require the container to run as a non-root user.
+- `run_as_non_root` (Boolean) Require the container to run as a non-root user. Defaults to false.
 - `run_as_user` (Number) UID to run the container process as.
 
 

@@ -194,14 +194,14 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Required:    true,
 			},
 			"command": schema.ListAttribute{
-				Description: "Container entrypoint override (ENTRYPOINT). Write-only from Terraform's " +
-					"perspective — the API does not echo it back, so out-of-band changes are not detected.",
+				Description: "Container entrypoint override (ENTRYPOINT). Read back from the API, so a " +
+					"change made outside Terraform shows as drift.",
 				Optional:    true,
 				ElementType: types.StringType,
 			},
 			"args": schema.ListAttribute{
-				Description: "Container arguments (CMD/args). Write-only from Terraform's perspective — the " +
-					"API does not echo it back, so out-of-band changes are not detected.",
+				Description: "Container arguments (CMD/args). Read back from the API, so a change made " +
+					"outside Terraform shows as drift.",
 				Optional:    true,
 				ElementType: types.StringType,
 			},
@@ -209,14 +209,15 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Description: "Command run once per deploy — from the exact image being deployed, with the " +
 					"app's env/secrets — before the new version goes live; a failure aborts the deploy " +
 					"(e.g. DB migrations). A single element containing spaces runs via 'sh -c'; use " +
-					"multiple elements for exec form. Write-only from Terraform's perspective.",
+					"multiple elements for exec form. Read back from the API, so a change made outside " +
+					"Terraform shows as drift.",
 				Optional:    true,
 				ElementType: types.StringType,
 			},
 			"volume_mounts": schema.ListNestedAttribute{
 				Description: "Mount a ConfigMap or Secret as read-only files, or an emptyDir as writable " +
-					"scratch, at a container path. Create-only — the API has no update path and does not " +
-					"echo these back, so any change forces the app to be replaced.",
+					"scratch, at a container path. Create-only — the API has no update path, so any " +
+					"change, including one made outside Terraform, forces the app to be replaced.",
 				Optional: true,
 				PlanModifiers: []planmodifier.List{
 					listplanmodifier.RequiresReplace(),
@@ -1309,11 +1310,17 @@ func routesFromModel(ctx context.Context, l types.List, diags *diag.Diagnostics)
 // setModelFromApp maps an API App response to the Terraform resource model.
 // It preserves the plan's env/secret maps since they are not returned by the API.
 func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, diags *diag.Diagnostics) {
-	// Unlike volume_mounts/security_context, routes and probes ARE echoed by the
-	// API, so they are read back rather than preserved from the plan — drift is
-	// detectable.
 	setRoutesOnModel(model, app.Routes, diags)
 	setProbesOnModel(model, app.Probes, diags)
+	// Everything the API echoes is read back, so a change made outside this
+	// plan shows as drift (fogpipe/cloud-workspace#12). Each read preserves the
+	// model's null where the API's "none" is indistinguishable from it, so a
+	// round-trip of what was written is not a permanent diff.
+	model.Command = stringListFromAPI(model.Command, app.Command)
+	model.Args = stringListFromAPI(model.Args, app.Args)
+	model.ReleaseCommand = stringListFromAPI(model.ReleaseCommand, app.ReleaseCommand)
+	setVolumeMountsOnModel(model, app.VolumeMounts, diags)
+	setSecurityContextOnModel(model, app.SecurityContext, diags)
 	model.ID = types.StringValue(app.ID)
 	model.ProjectID = types.StringValue(app.ProjectID)
 	model.Name = types.StringValue(app.Name)
@@ -1341,11 +1348,102 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	model.CreatedAt = types.StringValue(app.CreatedAt.String())
 	model.UpdatedAt = types.StringValue(app.UpdatedAt.String())
 	// Note: env and secret maps are preserved from the plan/state — not returned by API.
-	// Note: command, args, and release_command are preserved from the plan/state — not returned by API.
-	// Note: volume_mounts and security_context are preserved from the plan/state. The API
-	// does return both, so this could read them back and detect drift instead —
-	// fogpipe/cloud-workspace#12.
 	// Note: service_account is preserved from the plan/state — the API returns service_account_id.
+}
+
+// stringListFromAPI reads a string list the API echoed. The API's "none" is an
+// empty list, which a config expresses by leaving the attribute out — so an
+// empty answer keeps the model's null (or its explicit empty list) rather than
+// becoming a diff between null and [].
+func stringListFromAPI(prior types.List, vals []string) types.List {
+	if len(vals) == 0 {
+		if !prior.IsNull() && !prior.IsUnknown() {
+			return prior
+		}
+		return types.ListNull(types.StringType)
+	}
+	elems := make([]attr.Value, len(vals))
+	for i, v := range vals {
+		elems[i] = types.StringValue(v)
+	}
+	return types.ListValueMust(types.StringType, elems)
+}
+
+func volumeMountAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"source":     types.StringType,
+		"name":       types.StringType,
+		"mount_path": types.StringType,
+		"sub_path":   types.StringType,
+	}
+}
+
+// setVolumeMountsOnModel reads the mounts the API echoed into the model. None
+// reads as null, matching a config with no volume_mounts.
+func setVolumeMountsOnModel(model *AppResourceModel, mounts []client.VolumeMount, diags *diag.Diagnostics) {
+	if len(mounts) == 0 {
+		model.VolumeMounts = types.ListNull(types.ObjectType{AttrTypes: volumeMountAttrTypes()})
+		return
+	}
+	elems := make([]attr.Value, len(mounts))
+	for i, m := range mounts {
+		obj, d := types.ObjectValue(volumeMountAttrTypes(), map[string]attr.Value{
+			"source":     types.StringValue(m.Source),
+			"name":       optionalString(m.Name),
+			"mount_path": types.StringValue(m.MountPath),
+			"sub_path":   optionalString(m.SubPath),
+		})
+		diags.Append(d...)
+		elems[i] = obj
+	}
+	list, d := types.ListValue(types.ObjectType{AttrTypes: volumeMountAttrTypes()}, elems)
+	diags.Append(d...)
+	model.VolumeMounts = list
+}
+
+func securityContextAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"run_as_user":               types.Int64Type,
+		"run_as_group":              types.Int64Type,
+		"fs_group":                  types.Int64Type,
+		"run_as_non_root":           types.BoolType,
+		"read_only_root_filesystem": types.BoolType,
+	}
+}
+
+// setSecurityContextOnModel reads the security context the API echoed. The two
+// booleans are optional in config and omitted on the wire when false, so a
+// false keeps the model's null unless the config set it to false explicitly.
+func setSecurityContextOnModel(model *AppResourceModel, sc *client.SecurityContext, diags *diag.Diagnostics) {
+	if sc == nil {
+		model.SecurityContext = types.ObjectNull(securityContextAttrTypes())
+		return
+	}
+	var prior SecurityContextModel
+	if !model.SecurityContext.IsNull() && !model.SecurityContext.IsUnknown() {
+		diags.Append(model.SecurityContext.As(context.Background(), &prior, basetypes.ObjectAsOptions{})...)
+	}
+	optionalInt := func(v *int64) types.Int64 {
+		if v == nil {
+			return types.Int64Null()
+		}
+		return types.Int64Value(*v)
+	}
+	optionalBool := func(v bool, prior types.Bool) types.Bool {
+		if !v && (prior.IsNull() || prior.IsUnknown()) {
+			return types.BoolNull()
+		}
+		return types.BoolValue(v)
+	}
+	obj, d := types.ObjectValue(securityContextAttrTypes(), map[string]attr.Value{
+		"run_as_user":               optionalInt(sc.RunAsUser),
+		"run_as_group":              optionalInt(sc.RunAsGroup),
+		"fs_group":                  optionalInt(sc.FSGroup),
+		"run_as_non_root":           optionalBool(sc.RunAsNonRoot, prior.RunAsNonRoot),
+		"read_only_root_filesystem": optionalBool(sc.ReadOnlyRootFilesystem, prior.ReadOnlyRootFilesystem),
+	})
+	diags.Append(d...)
+	model.SecurityContext = obj
 }
 
 // volumeMountsFromModel converts the Terraform volume_mounts list to client

@@ -10,6 +10,11 @@ name: acceptance
 #   vars.FPCLOUD_API_URL    — API base URL (defaults to prod if unset)
 on:
   workflow_dispatch:
+    inputs:
+      run:
+        description: "go test -run pattern — one test's name to verify just that test, the default to run them all"
+        default: "TestAcc"
+        required: false
   schedule:
     - cron: "0 6 * * 1" # Mondays 06:00 UTC
 
@@ -39,4 +44,4 @@ jobs:
           TF_ACC: "1"
           FPCLOUD_API_KEY: ${{ secrets.FPCLOUD_API_KEY }}
           FPCLOUD_API_URL: ${{ vars.FPCLOUD_API_URL }}
-        run: go test ./internal/provider/ -run TestAcc -v -timeout 30m
+        run: go test ./internal/provider/ -run "${{ inputs.run || 'TestAcc' }}" -v -timeout 30m

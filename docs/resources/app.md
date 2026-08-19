@@ -76,8 +76,8 @@ resource "fpcloud_app" "web" {
 ### Optional
 
 - `adopt_existing` (Boolean) When true, if an app with this name already exists in the project, adopt it into Terraform state on create instead of failing with a 409 conflict. Defaults to false, so create never silently takes ownership of an app it did not create. Note: adoption records the existing app in state but does not push the configured image/env/secret — run a subsequent apply to reconcile them.
-- `args` (List of String) Container arguments (CMD/args). Write-only from Terraform's perspective — the API does not echo it back, so out-of-band changes are not detected.
-- `command` (List of String) Container entrypoint override (ENTRYPOINT). Write-only from Terraform's perspective — the API does not echo it back, so out-of-band changes are not detected.
+- `args` (List of String) Container arguments (CMD/args). Read back from the API, so a change made outside Terraform shows as drift.
+- `command` (List of String) Container entrypoint override (ENTRYPOINT). Read back from the API, so a change made outside Terraform shows as drift.
 - `cpu_limit` (String) CPU limit (e.g. 500m). Defaults to 500m.
 - `database` (String) Database (name or id) this app's unprefixed DATABASE_URL points at. Leave unset when the project has a single database — that one is used. With several, DATABASE_URL is omitted unless this names one; each database is always injected as '<NAME>_DATABASE_URL' regardless. Set to an empty string to clear the binding.
 - `display_name` (String) Human-readable display name (mutable cosmetic label). Defaults to the name.
@@ -93,7 +93,7 @@ resource "fpcloud_app" "web" {
 - `mode` (String) Hosting mode: 'always-on' (plain Deployment, default) or 'serverless' (scale-to-zero Knative). Mutable in place — switches the running app over without recreating it.
 - `port` (Number) Container port. Defaults to 8080 on a web app; not valid on a worker.
 - `probes` (Attributes) Per-probe overrides for liveness, readiness and startup. By default all three run the app's health_check_* settings, so one request decides both whether traffic reaches the app and whether the pod is restarted. Point liveness at a cheap path that touches no downstream and readiness at the one that does, and a dependency blip pulls the pod out of the load balancer without killing it. Any attribute left unset keeps the matching health_check_* value, so overriding a path never means restating the timing. Always-on apps only. (see [below for nested schema](#nestedatt--probes))
-- `release_command` (List of String) Command run once per deploy — from the exact image being deployed, with the app's env/secrets — before the new version goes live; a failure aborts the deploy (e.g. DB migrations). A single element containing spaces runs via 'sh -c'; use multiple elements for exec form. Write-only from Terraform's perspective.
+- `release_command` (List of String) Command run once per deploy — from the exact image being deployed, with the app's env/secrets — before the new version goes live; a failure aborts the deploy (e.g. DB migrations). A single element containing spaces runs via 'sh -c'; use multiple elements for exec form. Read back from the API, so a change made outside Terraform shows as drift.
 - `replicas` (Number) Fixed replica count for always-on apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.
 - `routes` (Attributes List) Per-path visibility carve-outs. A route marked internal is withheld from the external ingress — on the app's own URL and on every custom domain attached to it — while staying reachable at the app's in-cluster address, so a scheduled job calling it keeps working. External requests are refused at the edge. Matching is by path prefix on segment boundaries ('/internal/' covers '/internal/sync' but not '/internalx'). Always-on apps with ingress = "all" only. (see [below for nested schema](#nestedatt--routes))
 - `secret` (Map of String, Sensitive) Secret environment variables (encrypted at rest)
@@ -104,7 +104,7 @@ resource "fpcloud_app" "web" {
 - `traffic` (Attributes List) Traffic routing configuration. Each block specifies a revision and its traffic percentage. Use '@latest' to route to the latest revision. (see [below for nested schema](#nestedatt--traffic))
 - `type` (String) Process type: 'web' (default) serves HTTP behind a Service, or 'worker' — a long-running process with no port, Service, ingress, URL or health checks. A worker is always-on only. Changing this replaces the app: it decides whether the app has an address at all.
 - `url_slug` (String) Optional vanity host override (ADR-040): sets the app's public host to '<url_slug>.app.<platform_domain>'. When empty, the host is derived from the app/project/org names. Globally unique, a DNS-1123 label, always-on mode only. Set to an empty string to clear it back to the derived host.
-- `volume_mounts` (Attributes List) Mount a ConfigMap or Secret as read-only files, or an emptyDir as writable scratch, at a container path. Create-only — the API has no update path and does not echo these back, so any change forces the app to be replaced. (see [below for nested schema](#nestedatt--volume_mounts))
+- `volume_mounts` (Attributes List) Mount a ConfigMap or Secret as read-only files, or an emptyDir as writable scratch, at a container path. Create-only — the API has no update path, so any change, including one made outside Terraform, forces the app to be replaced. (see [below for nested schema](#nestedatt--volume_mounts))
 
 ### Read-Only
 

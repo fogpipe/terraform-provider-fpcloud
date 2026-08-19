@@ -3,12 +3,12 @@
 page_title: "fpcloud_webhook Resource - fpcloud"
 subcategory: ""
 description: |-
-  Manages a GitHub webhook for auto-deploy on a Fogpipe application.
+  Manages a GitHub webhook for auto-deploy on a Fogpipe application. Cannot be imported: the HMAC secret is returned only when the webhook is created, so an import would produce a state without it and every signature check would depend on a value Terraform cannot know. Recreate the webhook under Terraform instead.
 ---
 
 # fpcloud_webhook (Resource)
 
-Manages a GitHub webhook for auto-deploy on a Fogpipe application.
+Manages a GitHub webhook for auto-deploy on a Fogpipe application. Cannot be imported: the HMAC secret is returned only when the webhook is created, so an import would produce a state without it and every signature check would depend on a value Terraform cannot know. Recreate the webhook under Terraform instead.
 
 ## Example Usage
 

@@ -81,6 +81,16 @@ resource "fpcloud_database" "test" {
 					resource.TestCheckResourceAttrSet("fpcloud_database.test", "status"),
 				),
 			},
+			{
+				// An existing database can be brought under Terraform by id
+				// (fogpipe/cloud-workspace#32). The password is returned only at
+				// creation, so import cannot carry it; status moves as the cluster
+				// provisions.
+				ResourceName:            "fpcloud_database.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"password", "status"},
+			},
 		},
 	})
 }

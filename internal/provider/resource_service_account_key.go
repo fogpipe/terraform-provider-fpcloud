@@ -42,7 +42,10 @@ func (r *ServiceAccountKeyResource) Metadata(_ context.Context, req resource.Met
 
 func (r *ServiceAccountKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a Fogpipe service account key.",
+		Description: "Manages a Fogpipe service account key. Cannot be imported: the key material is " +
+			"returned only when the key is created, so an import would produce a state whose " +
+			"`api_key` is empty while the key itself stays valid. Create a new key under Terraform " +
+			"and retire the old one instead.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Key ID.",

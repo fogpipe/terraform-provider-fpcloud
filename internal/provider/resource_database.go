@@ -6,6 +6,7 @@ import (
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
@@ -17,8 +18,9 @@ import (
 )
 
 var (
-	_ resource.Resource              = &DatabaseResource{}
-	_ resource.ResourceWithConfigure = &DatabaseResource{}
+	_ resource.Resource                = &DatabaseResource{}
+	_ resource.ResourceWithConfigure   = &DatabaseResource{}
+	_ resource.ResourceWithImportState = &DatabaseResource{}
 )
 
 // NewDatabaseResource returns a new database resource.
@@ -369,6 +371,14 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// ImportState imports a database by its id. Read rebuilds everything else from
+// the API; the password is returned only at creation, so an imported database
+// carries an empty one — use the injected DATABASE_URL or `fpcloud db connect`
+// for the live credential, as the attribute's description already says.
+func (r *DatabaseResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
 func (r *DatabaseResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {

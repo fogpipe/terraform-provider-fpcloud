@@ -68,3 +68,16 @@ Optional:
 - `enabled` (Boolean) Whether scheduled backups are enabled.
 - `retention` (String) Backup retention period (e.g. 30d).
 - `schedule` (String) Cron schedule for automated backups.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# Import by database id. The password is returned only at creation, so an
+# imported database carries an empty one — use the injected DATABASE_URL or
+# `fpcloud db connect` for the live credential.
+terraform import fpcloud_database.events 5881262f-2d2c-4e52-9a7b-1f9c0a6f3b1d
+```

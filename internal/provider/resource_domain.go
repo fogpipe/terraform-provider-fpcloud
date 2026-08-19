@@ -3,10 +3,12 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -15,8 +17,9 @@ import (
 )
 
 var (
-	_ resource.Resource              = &DomainResource{}
-	_ resource.ResourceWithConfigure = &DomainResource{}
+	_ resource.Resource                = &DomainResource{}
+	_ resource.ResourceWithConfigure   = &DomainResource{}
+	_ resource.ResourceWithImportState = &DomainResource{}
 )
 
 // NewDomainResource returns a new domain resource.
@@ -231,6 +234,23 @@ func (r *DomainResource) Read(ctx context.Context, req resource.ReadRequest, res
 
 	mapDomainToState(found, &state, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// ImportState imports a domain by an "app_id/domain" identifier — the two
+// values Read needs, since the API lists domains per app and has no lookup by
+// the domain's own id. Read then fills in the id and everything else.
+func (r *DomainResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	parts := strings.SplitN(req.ID, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		resp.Diagnostics.AddError(
+			"Error importing domain",
+			fmt.Sprintf("import identifier %q must be in the form \"app_id/domain\"", req.ID),
+		)
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("app_id"), parts[0])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("domain"), parts[1])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 }
 
 // Update handles the one mutable field: the path->app route table. Every other

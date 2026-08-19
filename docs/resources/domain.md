@@ -65,3 +65,15 @@ Required:
 Read-Only:
 
 - `app_name` (String) The backend app's name, resolved by the API for display.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# Import by "app_id/domain": the API lists domains per app, so the domain is
+# named by the app that serves it.
+terraform import fpcloud_domain.www 6c1f0a2e-9d3b-4b7e-8f2a-0e5d7c4a1b9f/www.example.com
+```

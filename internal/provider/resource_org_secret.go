@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -83,8 +84,14 @@ func (r *OrgSecretResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				ElementType: types.StringType,
 			},
 			"targets": schema.ListAttribute{
-				Description: "Project IDs to mirror this bundle's k8s Secret into. Mutable in place.",
+				// The default lives in the schema because the API treats no
+				// targets and an empty set as the same thing: without it a
+				// null config value comes back as an empty list after apply,
+				// which Terraform rejects as an inconsistent result.
+				Description: "Project IDs to mirror this bundle's k8s Secret into. Mutable in place. Defaults to none.",
 				Optional:    true,
+				Computed:    true,
+				Default:     listdefault.StaticValue(types.ListValueMust(types.StringType, nil)),
 				ElementType: types.StringType,
 			},
 			"created_at": schema.StringAttribute{

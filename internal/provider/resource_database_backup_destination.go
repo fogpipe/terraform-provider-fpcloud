@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -94,8 +95,14 @@ func (r *DatabaseBackupDestinationResource) Schema(_ context.Context, _ resource
 				Optional:    true,
 			},
 			"flat_layout": schema.BoolAttribute{
+				// The default lives in the schema because the API already
+				// treats absent as false: without it a null config value comes
+				// back false after apply, which Terraform rejects as an
+				// inconsistent result.
 				Description: "Skip the <project>/<database> nesting fpcloud otherwise adds after prefix, so objects land at prefix/ (bucket root when prefix is also unset). Defaults to false (today's nested layout).",
 				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
 			},
 			"role_arn": schema.StringAttribute{
 				Description: "aws: the IAM role ARN assumed via web identity.",

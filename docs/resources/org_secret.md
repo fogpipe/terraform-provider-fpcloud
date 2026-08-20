@@ -41,7 +41,7 @@ resource "fpcloud_org_secret" "shared_creds" {
 
 ### Optional
 
-- `targets` (List of String) Project IDs to mirror this bundle's k8s Secret into. Mutable in place.
+- `targets` (List of String) Project IDs to mirror this bundle's k8s Secret into. Mutable in place. Defaults to none.
 
 ### Read-Only
 

@@ -3,8 +3,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
@@ -14,8 +16,9 @@ import (
 )
 
 var (
-	_ resource.Resource              = &AppConfigResource{}
-	_ resource.ResourceWithConfigure = &AppConfigResource{}
+	_ resource.Resource                = &AppConfigResource{}
+	_ resource.ResourceWithConfigure   = &AppConfigResource{}
+	_ resource.ResourceWithImportState = &AppConfigResource{}
 )
 
 // NewAppConfigResource returns a new app config resource.
@@ -226,4 +229,22 @@ func mapAppConfigToState(cfg *client.AppConfig, state *AppConfigResourceModel) {
 		state.Value = types.StringValue(cfg.Value)
 	}
 	state.IsSecret = types.BoolValue(cfg.IsSecret)
+}
+
+// ImportState imports a config entry by an "app_id/key" identifier — the pair
+// Read keys on. A non-secret entry imports completely. A secret's plaintext is
+// never returned by the API, so it imports with a null value: the first apply
+// re-sends the configured value in place, which is the only honest option for
+// a value the provider cannot read.
+func (r *AppConfigResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	parts := strings.SplitN(req.ID, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		resp.Diagnostics.AddError(
+			"Error importing app config",
+			fmt.Sprintf("expected an import id of the form \"app_id/key\", got %q", req.ID),
+		)
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("app_id"), parts[0])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("key"), parts[1])...)
 }

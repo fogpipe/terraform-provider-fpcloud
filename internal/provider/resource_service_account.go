@@ -3,8 +3,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -13,8 +15,9 @@ import (
 )
 
 var (
-	_ resource.Resource              = &ServiceAccountResource{}
-	_ resource.ResourceWithConfigure = &ServiceAccountResource{}
+	_ resource.Resource                = &ServiceAccountResource{}
+	_ resource.ResourceWithConfigure   = &ServiceAccountResource{}
+	_ resource.ResourceWithImportState = &ServiceAccountResource{}
 )
 
 // NewServiceAccountResource returns a new service account resource.
@@ -211,4 +214,20 @@ func (r *ServiceAccountResource) Delete(ctx context.Context, req resource.Delete
 		}
 		resp.Diagnostics.AddError("Error deleting service account", err.Error())
 	}
+}
+
+// ImportState imports a service account by a "project_id/service_account_id"
+// identifier — the API lists service accounts per project and Read looks ours
+// up in that list, so both values are needed. Read fills in everything else.
+func (r *ServiceAccountResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	parts := strings.SplitN(req.ID, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		resp.Diagnostics.AddError(
+			"Error importing service account",
+			fmt.Sprintf("expected an import id of the form \"project_id/service_account_id\", got %q", req.ID),
+		)
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project_id"), parts[0])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[1])...)
 }

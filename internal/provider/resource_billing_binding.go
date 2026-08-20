@@ -3,8 +3,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -13,8 +15,9 @@ import (
 )
 
 var (
-	_ resource.Resource              = &BillingBindingResource{}
-	_ resource.ResourceWithConfigure = &BillingBindingResource{}
+	_ resource.Resource                = &BillingBindingResource{}
+	_ resource.ResourceWithConfigure   = &BillingBindingResource{}
+	_ resource.ResourceWithImportState = &BillingBindingResource{}
 )
 
 // NewBillingBindingResource returns a new billing binding resource.
@@ -216,4 +219,20 @@ func (r *BillingBindingResource) apply(m *BillingBindingResourceModel, b *client
 	m.MemberType = types.StringValue(b.MemberType)
 	m.Member = types.StringValue(b.Member)
 	m.CreatedAt = types.StringValue(b.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
+}
+
+// ImportState imports a binding by an "org_id/member" identifier — the pair the
+// server's grant upserts on, and what Read matches by (the id alone cannot
+// detect drift, see Read). Read fills in everything else.
+func (r *BillingBindingResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	parts := strings.SplitN(req.ID, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		resp.Diagnostics.AddError(
+			"Error importing billing binding",
+			fmt.Sprintf("expected an import id of the form \"org_id/member\", got %q", req.ID),
+		)
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("org_id"), parts[0])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("member"), parts[1])...)
 }

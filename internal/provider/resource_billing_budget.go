@@ -6,6 +6,7 @@ import (
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -14,8 +15,9 @@ import (
 )
 
 var (
-	_ resource.Resource              = &BillingBudgetResource{}
-	_ resource.ResourceWithConfigure = &BillingBudgetResource{}
+	_ resource.Resource                = &BillingBudgetResource{}
+	_ resource.ResourceWithConfigure   = &BillingBudgetResource{}
+	_ resource.ResourceWithImportState = &BillingBudgetResource{}
 )
 
 // NewBillingBudgetResource returns a new billing budget resource.
@@ -221,4 +223,10 @@ func (r *BillingBudgetResource) apply(ctx context.Context, m *BillingBudgetResou
 	list, d := types.ListValueFrom(ctx, types.Int64Type, vals)
 	diags.Append(d...)
 	m.Thresholds = list
+}
+
+// ImportState takes the organization id alone: an organization has at most one
+// budget, so the organization names it and the schema has no separate id.
+func (r *BillingBudgetResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("org_id"), req.ID)...)
 }

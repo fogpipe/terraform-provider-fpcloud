@@ -3,8 +3,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
@@ -18,8 +20,9 @@ import (
 const githubActionsIssuer = "https://token.actions.githubusercontent.com"
 
 var (
-	_ resource.Resource              = &OIDCFederationResource{}
-	_ resource.ResourceWithConfigure = &OIDCFederationResource{}
+	_ resource.Resource                = &OIDCFederationResource{}
+	_ resource.ResourceWithConfigure   = &OIDCFederationResource{}
+	_ resource.ResourceWithImportState = &OIDCFederationResource{}
 )
 
 // NewOIDCFederationResource returns a new OIDC federation trust binding resource.
@@ -212,4 +215,44 @@ func (r *OIDCFederationResource) apply(m *OIDCFederationResourceModel, b *client
 	m.SubjectPattern = types.StringValue(b.SubjectPattern)
 	m.TokenTTLSeconds = types.Int64Value(int64(b.TokenTTLSeconds))
 	m.CreatedAt = types.StringValue(b.CreatedAt.String())
+}
+
+// ImportState imports a trust binding by a "project/binding_id" identifier.
+// Read deliberately never touches service_account — the API returns the
+// resolved service-account id, which would drift from a config that spelled it
+// as an email — so import seeds it from the API once, as the resolved id.
+// Without that seed the attribute would import as null and the first plan
+// would propose replacement. A config adopting an imported binding should
+// therefore reference the service account by id.
+func (r *OIDCFederationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	parts := strings.SplitN(req.ID, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		resp.Diagnostics.AddError(
+			"Error importing OIDC federation binding",
+			fmt.Sprintf("expected an import id of the form \"project/binding_id\", got %q", req.ID),
+		)
+		return
+	}
+	bindings, err := r.client.ListTrustBindings(ctx, parts[0])
+	if err != nil {
+		resp.Diagnostics.AddError("Error importing OIDC federation binding", err.Error())
+		return
+	}
+	var found *client.TrustBinding
+	for _, b := range bindings {
+		if b.ID == parts[1] {
+			found = b
+			break
+		}
+	}
+	if found == nil {
+		resp.Diagnostics.AddError(
+			"Error importing OIDC federation binding",
+			fmt.Sprintf("project %q has no trust binding %q", parts[0], parts[1]),
+		)
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project"), parts[0])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), found.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("service_account"), found.ServiceAccountID)...)
 }

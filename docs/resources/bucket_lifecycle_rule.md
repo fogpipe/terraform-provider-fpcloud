@@ -60,3 +60,17 @@ The prefix is the rule's blast radius, not a label on it. It is the rule's key, 
 - `created_at` (String) Timestamp when the rule was created.
 - `id` (String) Lifecycle rule ID.
 - `updated_at` (String) Timestamp when the rule was last updated.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# Import the whole-bucket rule by "bucket_id", or a prefixed rule by
+# "bucket_id/prefix" — the prefix may itself contain slashes; everything after
+# the first "/" is the prefix.
+terraform import fpcloud_bucket_lifecycle_rule.all 8e2d5a7c-3f1b-4c9e-a6d8-0b7f5e3c1a9d
+terraform import fpcloud_bucket_lifecycle_rule.logs 8e2d5a7c-3f1b-4c9e-a6d8-0b7f5e3c1a9d/logs/archive/
+```

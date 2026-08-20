@@ -3,8 +3,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -13,8 +15,9 @@ import (
 )
 
 var (
-	_ resource.Resource              = &IAMBindingResource{}
-	_ resource.ResourceWithConfigure = &IAMBindingResource{}
+	_ resource.Resource                = &IAMBindingResource{}
+	_ resource.ResourceWithConfigure   = &IAMBindingResource{}
+	_ resource.ResourceWithImportState = &IAMBindingResource{}
 )
 
 // NewIAMBindingResource returns a new IAM binding resource.
@@ -191,4 +194,21 @@ func (r *IAMBindingResource) Delete(ctx context.Context, req resource.DeleteRequ
 		}
 		resp.Diagnostics.AddError("Error deleting IAM binding", err.Error())
 	}
+}
+
+// ImportState imports a binding by a "project_id/binding_id" identifier — the
+// API lists bindings per project and Read looks ours up in that list, so both
+// values are needed. Read fills in everything else, including the member spelled
+// the way the server canonicalized it.
+func (r *IAMBindingResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	parts := strings.SplitN(req.ID, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		resp.Diagnostics.AddError(
+			"Error importing IAM binding",
+			fmt.Sprintf("expected an import id of the form \"project_id/binding_id\", got %q", req.ID),
+		)
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project_id"), parts[0])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[1])...)
 }

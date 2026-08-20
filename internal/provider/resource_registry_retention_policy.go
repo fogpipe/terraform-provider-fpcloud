@@ -3,8 +3,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -14,8 +16,9 @@ import (
 )
 
 var (
-	_ resource.Resource              = &RegistryRetentionPolicyResource{}
-	_ resource.ResourceWithConfigure = &RegistryRetentionPolicyResource{}
+	_ resource.Resource                = &RegistryRetentionPolicyResource{}
+	_ resource.ResourceWithConfigure   = &RegistryRetentionPolicyResource{}
+	_ resource.ResourceWithImportState = &RegistryRetentionPolicyResource{}
 )
 
 // NewRegistryRetentionPolicyResource returns a new registry retention policy resource.
@@ -222,4 +225,25 @@ func (r *RegistryRetentionPolicyResource) apply(m *RegistryRetentionPolicyResour
 	m.Enabled = types.BoolValue(p.Enabled)
 	m.CreatedAt = types.StringValue(p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	m.UpdatedAt = types.StringValue(p.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
+}
+
+// ImportState imports a policy by "project_id" (the project-wide policy, whose
+// repo is empty) or "project_id/repo" (a per-repo one). Read looks the policy
+// up by repo within the project, and a repo path contains slashes of its own,
+// so everything after the first "/" is the repo. Read fills in everything else.
+func (r *RegistryRetentionPolicyResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	parts := strings.SplitN(req.ID, "/", 2)
+	if parts[0] == "" {
+		resp.Diagnostics.AddError(
+			"Error importing registry retention policy",
+			fmt.Sprintf("expected an import id of the form \"project_id\" or \"project_id/repo\", got %q", req.ID),
+		)
+		return
+	}
+	repo := ""
+	if len(parts) == 2 {
+		repo = parts[1]
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project_id"), parts[0])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("repo"), repo)...)
 }

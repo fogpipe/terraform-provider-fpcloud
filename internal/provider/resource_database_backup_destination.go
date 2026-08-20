@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -13,8 +14,9 @@ import (
 )
 
 var (
-	_ resource.Resource              = &DatabaseBackupDestinationResource{}
-	_ resource.ResourceWithConfigure = &DatabaseBackupDestinationResource{}
+	_ resource.Resource                = &DatabaseBackupDestinationResource{}
+	_ resource.ResourceWithConfigure   = &DatabaseBackupDestinationResource{}
+	_ resource.ResourceWithImportState = &DatabaseBackupDestinationResource{}
 )
 
 // NewDatabaseBackupDestinationResource returns a new backup-destination resource.
@@ -273,4 +275,13 @@ func optionalString(v string) types.String {
 		return types.StringNull()
 	}
 	return types.StringValue(v)
+}
+
+// ImportState takes the database id alone: a database has at most one backup
+// destination, and this resource's id is the database's. secret_access_key is
+// write-only and imports as null — the first apply re-sends the configured
+// value, which the server accepts as a rotation of the stored one.
+func (r *DatabaseBackupDestinationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("database_id"), req.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 }

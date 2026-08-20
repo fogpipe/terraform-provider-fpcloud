@@ -3,8 +3,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -13,8 +15,9 @@ import (
 )
 
 var (
-	_ resource.Resource              = &OrgMemberResource{}
-	_ resource.ResourceWithConfigure = &OrgMemberResource{}
+	_ resource.Resource                = &OrgMemberResource{}
+	_ resource.ResourceWithConfigure   = &OrgMemberResource{}
+	_ resource.ResourceWithImportState = &OrgMemberResource{}
 )
 
 // NewOrgMemberResource returns a new org member resource.
@@ -207,4 +210,46 @@ func (r *OrgMemberResource) Delete(ctx context.Context, req resource.DeleteReque
 			resp.Diagnostics.AddError("Error removing org member", err.Error())
 		}
 	}
+}
+
+// ImportState imports a membership by an "organization_id/binding_id"
+// identifier. Read never refreshes email — the invite is its only writer — so
+// import seeds it from the API: the invited address while the member is still
+// pending, the account's address once active. Without that seed the attribute
+// would import as null and the first plan would propose replacement.
+func (r *OrgMemberResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	parts := strings.SplitN(req.ID, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		resp.Diagnostics.AddError(
+			"Error importing org member",
+			fmt.Sprintf("expected an import id of the form \"organization_id/binding_id\", got %q", req.ID),
+		)
+		return
+	}
+	members, err := r.client.ListOrgMembers(ctx, parts[0])
+	if err != nil {
+		resp.Diagnostics.AddError("Error importing org member", err.Error())
+		return
+	}
+	var found *client.OrgMember
+	for _, m := range members {
+		if m.ID == parts[1] {
+			found = m
+			break
+		}
+	}
+	if found == nil {
+		resp.Diagnostics.AddError(
+			"Error importing org member",
+			fmt.Sprintf("organization %q has no member binding %q", parts[0], parts[1]),
+		)
+		return
+	}
+	email := found.InvitedEmail
+	if email == "" {
+		email = found.UserEmail
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("organization_id"), parts[0])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), found.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("email"), email)...)
 }

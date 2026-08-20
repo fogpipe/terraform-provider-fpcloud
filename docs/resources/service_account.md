@@ -30,3 +30,15 @@ Manages a Fogpipe service account.
 - `email` (String) Auto-generated email address for this service account.
 - `id` (String) Service account ID.
 - `status` (String) Current status of the service account.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# Import by "project_id/service_account_id": the API lists service accounts
+# per project, so the account is named by the project that holds it.
+terraform import fpcloud_service_account.deployer 6c1f0a2e-9d3b-4b7e-8f2a-0e5d7c4a1b9f/2a7e4c1d-5b8f-4e3a-9c6d-1f0b8a7e5d3c
+```

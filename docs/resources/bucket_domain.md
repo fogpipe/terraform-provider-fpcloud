@@ -51,3 +51,15 @@ output "site_url" {
 - `id` (String) The unique identifier of the domain.
 - `status` (String) The current status of the domain (pending_verification, issuing, active, failed).
 - `tls_status` (String) The TLS certificate status for the domain.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# Import by "bucket_id/domain": the API lists domains per bucket, so the
+# domain is named by the bucket that serves it.
+terraform import fpcloud_bucket_domain.www 8e2d5a7c-3f1b-4c9e-a6d8-0b7f5e3c1a9d/www.example.com
+```

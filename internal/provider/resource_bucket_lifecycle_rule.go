@@ -3,8 +3,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
@@ -15,8 +17,9 @@ import (
 )
 
 var (
-	_ resource.Resource              = &BucketLifecycleRuleResource{}
-	_ resource.ResourceWithConfigure = &BucketLifecycleRuleResource{}
+	_ resource.Resource                = &BucketLifecycleRuleResource{}
+	_ resource.ResourceWithConfigure   = &BucketLifecycleRuleResource{}
+	_ resource.ResourceWithImportState = &BucketLifecycleRuleResource{}
 )
 
 // NewBucketLifecycleRuleResource returns a new bucket lifecycle rule resource.
@@ -227,4 +230,25 @@ func (r *BucketLifecycleRuleResource) apply(m *BucketLifecycleRuleResourceModel,
 	m.AbortIncompleteUploadDays = types.Int64Value(int64(rule.AbortIncompleteUploadDays))
 	m.CreatedAt = types.StringValue(rule.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	m.UpdatedAt = types.StringValue(rule.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
+}
+
+// ImportState imports a rule by "bucket_id" (the whole-bucket rule, whose
+// prefix is empty) or "bucket_id/prefix". Read looks the rule up by prefix
+// within the bucket, and a prefix may contain slashes of its own, so everything
+// after the first "/" is the prefix. Read fills in everything else.
+func (r *BucketLifecycleRuleResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	parts := strings.SplitN(req.ID, "/", 2)
+	if parts[0] == "" {
+		resp.Diagnostics.AddError(
+			"Error importing bucket lifecycle rule",
+			fmt.Sprintf("expected an import id of the form \"bucket_id\" or \"bucket_id/prefix\", got %q", req.ID),
+		)
+		return
+	}
+	prefix := ""
+	if len(parts) == 2 {
+		prefix = parts[1]
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("bucket_id"), parts[0])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("prefix"), prefix)...)
 }

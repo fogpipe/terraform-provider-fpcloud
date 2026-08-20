@@ -45,3 +45,16 @@ resource "fpcloud_app_config" "stripe_key" {
 ### Read-Only
 
 - `id` (String) The unique identifier of the config entry.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# Import by "app_id/key". A non-secret entry imports completely; a secret's
+# plaintext is never returned by the API, so its value arrives null and the
+# first apply re-sends the configured value in place.
+terraform import fpcloud_app_config.database_url 9f3e6b1d-7a2c-4d8f-b5e9-1c0a8d6f4b2e/DATABASE_URL
+```

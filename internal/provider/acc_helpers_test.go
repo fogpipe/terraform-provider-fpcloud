@@ -120,3 +120,32 @@ func testAccCheckAppDestroy(s *terraform.State) error {
 	}
 	return nil
 }
+
+// testAccOrgID resolves the organization the acceptance key operates in, for
+// the org-scoped resources (secrets, billing) whose configs need a literal org
+// id. When FPCLOUD_ACC_SWEEP_ORG names the throwaway org — as CI does — that
+// name wins; otherwise a key that sees exactly one org uses it. Anything else
+// fails rather than guessing: these tests write real org state.
+func testAccOrgID(t *testing.T) string {
+	t.Helper()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("acceptance test, set TF_ACC=1")
+	}
+	orgs, err := testAccClient().ListOrgs(context.Background())
+	if err != nil {
+		t.Fatalf("listing orgs: %v", err)
+	}
+	if name := os.Getenv("FPCLOUD_ACC_SWEEP_ORG"); name != "" {
+		for _, o := range orgs {
+			if o.Name == name {
+				return o.ID
+			}
+		}
+		t.Fatalf("FPCLOUD_ACC_SWEEP_ORG=%q names no org this key can see", name)
+	}
+	if len(orgs) == 1 {
+		return orgs[0].ID
+	}
+	t.Fatalf("key sees %d orgs; set FPCLOUD_ACC_SWEEP_ORG to name the throwaway one", len(orgs))
+	return ""
+}

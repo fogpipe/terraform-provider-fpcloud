@@ -3,8 +3,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -13,8 +15,9 @@ import (
 )
 
 var (
-	_ resource.Resource              = &BucketDomainResource{}
-	_ resource.ResourceWithConfigure = &BucketDomainResource{}
+	_ resource.Resource                = &BucketDomainResource{}
+	_ resource.ResourceWithConfigure   = &BucketDomainResource{}
+	_ resource.ResourceWithImportState = &BucketDomainResource{}
 )
 
 // NewBucketDomainResource returns a new bucket-domain resource.
@@ -184,4 +187,20 @@ func mapBucketDomainToState(d *client.Domain, state *BucketDomainResourceModel) 
 	state.Status = types.StringValue(d.Status)
 	state.TLSStatus = types.StringValue(d.TLSStatus)
 	state.CreatedAt = types.StringValue(d.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
+}
+
+// ImportState imports a bucket domain by a "bucket_id/domain" identifier — the
+// API lists domains per bucket and Read looks ours up by hostname, so both
+// values are needed. Read fills in the id and everything else.
+func (r *BucketDomainResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	parts := strings.SplitN(req.ID, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		resp.Diagnostics.AddError(
+			"Error importing bucket domain",
+			fmt.Sprintf("expected an import id of the form \"bucket_id/domain\", got %q", req.ID),
+		)
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("bucket_id"), parts[0])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("domain"), parts[1])...)
 }

@@ -123,6 +123,33 @@ fpcloud runner create ci --min 1 --max 4 ...
   execute in (for example `--cpu 2 --memory 4Gi`). A builder, if you ask for
   one, is sized separately and adds to what the pool costs.
 
+### Runners draw on your project's resource caps
+
+Your pools run in a namespace of their own, and it is bounded by the same caps
+as the rest of your project — **2 CPU / 4Gi / 20 pods** by default (see [project
+resource caps](projects-and-access.md#project-resource-caps)). It is a second
+budget of that size, not a share of the one your apps and databases spend: CI
+neither takes capacity from your running services nor is starved by them.
+
+A runner reserves a tenth of its `--cpu` and half its `--memory` against that
+budget, so the default `2 CPU / 4Gi` runner reserves `200m` and `2Gi` — two of
+them fit the default caps at once, whatever `--max` says. Jobs beyond what fits
+wait for a free slot.
+
+A pool too large to run even once is refused when you ask for it, rather than
+accepted and left with jobs that never start:
+
+```console
+$ fpcloud runner create ci --cpu 8 --memory 32Gi
+Error: a pool of this size reserves 16Gi memory, more than this project's
+memory cap of 4Gi; shrink the pool or ask your operator to raise the cap
+```
+
+An existing pool that stops fitting — because its builder grew, or its project's
+caps were lowered — keeps its declaration and says the same thing on
+`fpcloud runner show <name>`. It is the pool you edit to fix it, so it is not
+taken away from you; its runners simply do not start until it fits again.
+
 A job that exceeds `--memory` is killed rather than slowed, and because the
 runner dies mid-job GitHub can take several minutes to notice — the run stalls
 with no further output and ends as cancelled. If a job stops producing output

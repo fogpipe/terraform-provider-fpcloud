@@ -48,6 +48,11 @@ ClusterInfo
 FKECredentials
 FKEToken
 GetDatabaseConnection
+# alert history (ADR-084) is the operator's "what fired, and for how long" read.
+# It is an observation of a time window that moves on every plan, and it names
+# nothing Terraform could own or converge on — a data source over it would be a
+# perpetual diff describing the past.
+AlertHistory
 # the project status document (#778) is the strongest case in this group: it is
 # an observation of live cluster state that changes between two consecutive
 # reads, so a data source over it would hand Terraform a value that never

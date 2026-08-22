@@ -167,6 +167,35 @@ Note      a runner was killed for exceeding its memory limit; raise the pool's
 The pool itself still reports `running` — the platform replaced the killed pod
 straight away, so what failed is the job that was on it, not the pool.
 
+## The image your job runs on
+
+A runner pod runs the **bare GitHub agent image plus a small, deliberate set of
+additions** — it is *not* GitHub's `ubuntu-latest`, which preinstalls hundreds
+of tools. A step that shells out to something missing fails with a plain
+`command not found`, and this is why.
+
+The platform's image is `ghcr.io/fogpipe/cloud-runner`, built from upstream's
+`ghcr.io/actions/actions-runner` and tracking its releases. On top of the agent
+it currently adds:
+
+- `xz-utils` — `tar -J`, `.xz` artifacts and nix cache actions all pipe
+  through `xz`
+
+Anything else your workflow needs, bake into an image of your own and point the
+pool at it:
+
+```bash
+fpcloud runner create ci --image ghcr.io/acme/runner:1
+```
+
+Two things that image must satisfy:
+
+- **Start `FROM ghcr.io/actions/actions-runner`** (or this platform's image).
+  The platform starts the container with the agent's own `/home/runner/run.sh`;
+  an image without it never comes up.
+- **Anonymously pullable.** Runner pods carry no registry credential, so a
+  private image fails as `ImagePullBackOff`, not as a permission message.
+
 ## Building container images
 
 There is no Docker daemon in a runner, and Docker-in-Docker is not available:

@@ -43,7 +43,7 @@ output "site_url" {
 ### Required
 
 - `bucket_id` (String) The bucket ID to attach this domain to.
-- `domain` (String) The custom domain name (e.g. www.example.com).
+- `domain` (String) The custom domain name (e.g. www.example.com). Stored lower-cased. A wildcard ("*.example.com") is refused — attach one to an app instead.
 
 ### Read-Only
 

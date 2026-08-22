@@ -66,8 +66,9 @@ func (r *BucketDomainResource) Schema(_ context.Context, _ resource.SchemaReques
 				},
 			},
 			"domain": schema.StringAttribute{
-				Description: "The custom domain name (e.g. www.example.com).",
-				Required:    true,
+				Description: "The custom domain name (e.g. www.example.com). Stored lower-cased. " +
+					"A wildcard (\"*.example.com\") is refused — attach one to an app instead.",
+				Required: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},

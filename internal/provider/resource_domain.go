@@ -86,10 +86,12 @@ func (r *DomainResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			},
 			"mode": schema.StringAttribute{
 				Description: "Attachment mode: \"verified\" (default — TXT ownership + DNS pointing + " +
-					"HTTP-01 cert), \"edge\" (any Host accepted, no verification/cert — TLS terminated " +
+					"HTTP-01 cert), \"edge\" (TXT ownership only, no cert — TLS terminated " +
 					"upstream), \"on_demand\" (DNS pointing only, HTTP-01 cert on attach — meant for an " +
 					"app's own backend attaching its end users' domains), or \"wildcard\" (a leading " +
-					"\"*.\" label, DNS-01 cert, requires a DNS-01 issuer configured on the platform). The " +
+					"\"*.\" label, DNS-01 cert, requires a DNS-01 issuer configured on the platform). " +
+					"A \"*.\" hostname requires the wildcard mode and the wildcard mode requires one, so " +
+					"either mismatch is refused. The " +
 					"API has no update path for this field, so changing it replaces the domain.",
 				Optional: true,
 				Computed: true,

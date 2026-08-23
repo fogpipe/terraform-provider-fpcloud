@@ -169,20 +169,14 @@ straight away, so what failed is the job that was on it, not the pool.
 
 ## The image your job runs on
 
-A runner pod runs the **bare GitHub agent image plus a small, deliberate set of
-additions** — it is *not* GitHub's `ubuntu-latest`, which preinstalls hundreds
-of tools. A step that shells out to something missing fails with a plain
-`command not found`, and this is why.
+A runner pod runs the **bare GitHub agent image** — upstream's
+`ghcr.io/actions/actions-runner`, tracking its releases. It is *not* GitHub's
+`ubuntu-latest`, which preinstalls hundreds of tools: a step that shells out to
+something the agent image does not carry (`xz`, `zstd`, most build tools) fails
+with a plain `command not found`, and this is why.
 
-The platform's image is `ghcr.io/fogpipe/cloud-runner`, built from upstream's
-`ghcr.io/actions/actions-runner` and tracking its releases. On top of the agent
-it currently adds:
-
-- `xz-utils` — `tar -J`, `.xz` artifacts and nix cache actions all pipe
-  through `xz`
-
-Anything else your workflow needs, bake into an image of your own and point the
-pool at it:
+Anything your workflow needs beyond the agent, bake into an image of your own
+and point the pool at it:
 
 ```bash
 fpcloud runner create ci --image ghcr.io/acme/runner:1

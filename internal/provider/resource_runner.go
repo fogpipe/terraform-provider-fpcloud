@@ -184,6 +184,13 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Description: "Installation id of your GitHub App on the organization, with `credential = \"app\"`. " +
 					"With `credential = \"platform\"` it comes from the project's GitHub connection.",
 				Optional: true,
+				// Computed because the second sentence above is a value the
+				// platform writes: under the platform credential the control
+				// plane resolves the installation from the project's GitHub
+				// connection and returns it. Optional alone declares that only
+				// the practitioner writes this, and the framework rejects the
+				// apply when a value appears where config had none.
+				Computed: true,
 			},
 			"github_app_private_key": schema.StringAttribute{
 				Description: "Your GitHub App's private key (PEM), with `credential = \"app\"`. Write-only — " +

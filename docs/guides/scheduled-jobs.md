@@ -180,6 +180,10 @@ fpcloud job logs sweep --run sweep-manual-1753500000
 `fpcloud job list` shows the last run's status inline, so a failing schedule is
 visible from the top-level list.
 
+A run's **output** comes from the platform's log store, which keeps 14 days — so
+a run whose outcome you can still see may be older than the lines it printed.
+Its status, exit code and timing are kept for as long as the run is.
+
 ## How long runs are kept
 
 History is bounded two ways at once, and a run is dropped when either bound is

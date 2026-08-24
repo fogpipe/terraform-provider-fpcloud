@@ -150,6 +150,13 @@ caps were lowered — keeps its declaration and says the same thing on
 `fpcloud runner show <name>`. It is the pool you edit to fix it, so it is not
 taken away from you; its runners simply do not start until it fits again.
 
+The runner and the builder are weighed together, so shrink them in one command
+when both have to give:
+
+```console
+$ fpcloud runner update ci --memory 2Gi --builder-memory 2Gi
+```
+
 A job that exceeds `--memory` is killed rather than slowed, and because the
 runner dies mid-job GitHub can take several minutes to notice — the run stalls
 with no further output and ends as cancelled. If a job stops producing output

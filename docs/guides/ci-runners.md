@@ -150,6 +150,13 @@ caps were lowered — keeps its declaration and says the same thing on
 `fpcloud runner show <name>`. It is the pool you edit to fix it, so it is not
 taken away from you; its runners simply do not start until it fits again.
 
+The runner and the builder are weighed together, so shrink them in one command
+when both have to give:
+
+```console
+$ fpcloud runner update ci --memory 2Gi --builder-memory 2Gi
+```
+
 A job that exceeds `--memory` is killed rather than slowed, and because the
 runner dies mid-job GitHub can take several minutes to notice — the run stalls
 with no further output and ends as cancelled. If a job stops producing output
@@ -166,6 +173,40 @@ Note      a runner was killed for exceeding its memory limit; raise the pool's
 
 The pool itself still reports `running` — the platform replaced the killed pod
 straight away, so what failed is the job that was on it, not the pool.
+
+## The image your job runs on
+
+A runner pod runs the **bare GitHub agent image plus a small, deliberate set of
+additions** — it is *not* GitHub's `ubuntu-latest`, which preinstalls hundreds
+of tools. A step that shells out to something missing fails with a plain
+`command not found`, and this is why.
+
+The platform's image is built from upstream's `ghcr.io/actions/actions-runner`
+and tracks its releases. On top of the agent it currently adds:
+
+- `xz-utils` — `tar -J`, `.xz` artifacts and nix cache actions all pipe
+  through `xz`
+
+Anything else your workflow needs, bake into an image of your own and point the
+pool at it:
+
+```bash
+fpcloud runner create ci --image ghcr.io/acme/runner:1
+```
+
+Two things that image must satisfy:
+
+- **Start `FROM ghcr.io/actions/actions-runner`** (or this platform's image).
+  The platform starts the container with the agent's own `/home/runner/run.sh`;
+  an image without it never comes up.
+- **Pullable by the pool.** A runner pod carries no ambient registry
+  credential. A **private** image is supported on exactly one host: the
+  platform registry, under your own project's path
+  (`registry.cloud.fogpipe.com/<org>/<project>/...`) — push it there and the
+  pool pulls it with a platform-managed credential scoped to that path. A
+  path outside your project is refused when the pool is created. On any other
+  registry the image must be anonymously pullable, or it fails as
+  `ImagePullBackOff`.
 
 ## Building container images
 

@@ -347,26 +347,22 @@ func (r *RunnerResource) Update(ctx context.Context, req resource.UpdateRequest,
 		updateReq.GitHubToken = &token
 	}
 
+	// The builder travels in the same patch as the runner's own size, because
+	// the project's caps weigh the two together — a plan that shrinks both is
+	// refused if it arrives as two requests. It is set only when the config
+	// changed, so an unrelated apply does not re-render every pool's pods.
+	if !plan.Builder.IsUnknown() && !plan.Builder.Equal(state.Builder) {
+		builder := runnerBuilderFromModel(ctx, plan.Builder, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		updateReq.Builder, updateReq.NoBuilder = builder, builder == nil
+	}
+
 	runner, err := r.client.UpdateRunner(ctx, state.ID.ValueString(), updateReq)
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating runner", err.Error())
 		return
-	}
-
-	// The builder is its own call — the patch above cannot say "remove it" —
-	// and it is made only when the config changed, so an unrelated apply does
-	// not re-render every pool's pods.
-	if !plan.Builder.IsUnknown() && !plan.Builder.Equal(state.Builder) {
-		rebuilt, err := r.client.UpdateRunnerBuilder(ctx, state.ID.ValueString(),
-			runnerBuilderFromModel(ctx, plan.Builder, &resp.Diagnostics))
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		if err != nil {
-			resp.Diagnostics.AddError("Error updating runner builder", err.Error())
-			return
-		}
-		runner = rebuilt
 	}
 
 	r.apply(ctx, &plan, runner, &resp.Diagnostics)

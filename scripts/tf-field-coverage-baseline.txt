@@ -50,6 +50,17 @@ Runner.instances
 # reading one level finer: it changes with GitHub's queue rather than with
 # anything declared, so an attribute over it is drift on every plan.
 
+# --- moved to the organization, still in the last release ---------------
+# A project carries no ceiling any more: a tenant decides how many projects it
+# has, so bounding each one bounded a number the tenant could raise by creating
+# another. The ceiling is `fpcloud_org`'s max_* attributes. This gate reads the
+# released client, so the old fields read as gaps until v0.144.0 ships — the
+# entries go then (fogpipe/cloud-workspace#152).
+Project.max_cpu
+Project.max_memory
+Project.max_pods
+Project.max_storage
+
 # --- the same state, spelled declaratively somewhere else ---------------
 # `backup.enabled` is where a database says whether it is backed up. This is
 # the server echoing that decision back inverted, so an attribute for it

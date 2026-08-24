@@ -10,7 +10,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -33,10 +32,6 @@ type ProjectResourceModel struct {
 	DisplayName   types.String `tfsdk:"display_name"`
 	Org           types.String `tfsdk:"org"`
 	Egress        types.String `tfsdk:"egress"`
-	MaxCPU        types.String `tfsdk:"max_cpu"`
-	MaxMemory     types.String `tfsdk:"max_memory"`
-	MaxPods       types.Int64  `tfsdk:"max_pods"`
-	MaxStorage    types.String `tfsdk:"max_storage"`
 	AdoptExisting types.Bool   `tfsdk:"adopt_existing"`
 	Status        types.String `tfsdk:"status"`
 	CreatedAt     types.String `tfsdk:"created_at"`
@@ -89,42 +84,6 @@ func (r *ProjectResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Description: "Egress policy: \"restricted\" (default), \"https\", or \"all\".",
 				Optional:    true,
 				Computed:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"max_cpu": schema.StringAttribute{
-				Description: "Operator-only CPU cap for the project's namespace ResourceQuota (e.g. \"4\"). " +
-					"Server-defaulted; only an operator or org owner may raise it.",
-				Optional: true,
-				Computed: true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"max_memory": schema.StringAttribute{
-				Description: "Operator-only memory cap for the project's namespace ResourceQuota (e.g. \"8Gi\"). " +
-					"Server-defaulted; only an operator or org owner may raise it.",
-				Optional: true,
-				Computed: true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"max_pods": schema.Int64Attribute{
-				Description: "Operator-only pod-count cap for the project's namespace ResourceQuota. " +
-					"Server-defaulted; only an operator or org owner may raise it.",
-				Optional: true,
-				Computed: true,
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.UseStateForUnknown(),
-				},
-			},
-			"max_storage": schema.StringAttribute{
-				Description: "Operator-only storage cap for the project's namespace ResourceQuota (e.g. \"100Gi\"). " +
-					"Server-defaulted; only an operator or org owner may raise it.",
-				Optional: true,
-				Computed: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -205,41 +164,8 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 		}
 	}
 
-	// Resource caps are operator-only and not accepted at create — apply any the
-	// user explicitly set via a follow-up quota update.
-	if maxCPU, maxMemory, maxPods, maxStorage, any := plan.quotaCaps(); any {
-		updated, qerr := r.client.UpdateProjectQuota(ctx, project.ID, maxCPU, maxMemory, maxPods, maxStorage)
-		if qerr != nil {
-			resp.Diagnostics.AddError("Error setting project resource caps", qerr.Error())
-			return
-		}
-		project = updated
-	}
-
 	r.apply(&plan, project)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
-}
-
-// quotaCaps returns the operator-only caps the user explicitly set (nil for any
-// left unset/computed), plus whether at least one is present.
-func (m *ProjectResourceModel) quotaCaps() (maxCPU, maxMemory *string, maxPods *int, maxStorage *string, any bool) {
-	if !m.MaxCPU.IsNull() && !m.MaxCPU.IsUnknown() {
-		v := m.MaxCPU.ValueString()
-		maxCPU, any = &v, true
-	}
-	if !m.MaxMemory.IsNull() && !m.MaxMemory.IsUnknown() {
-		v := m.MaxMemory.ValueString()
-		maxMemory, any = &v, true
-	}
-	if !m.MaxPods.IsNull() && !m.MaxPods.IsUnknown() {
-		v := int(m.MaxPods.ValueInt64())
-		maxPods, any = &v, true
-	}
-	if !m.MaxStorage.IsNull() && !m.MaxStorage.IsUnknown() {
-		v := m.MaxStorage.ValueString()
-		maxStorage, any = &v, true
-	}
-	return maxCPU, maxMemory, maxPods, maxStorage, any
 }
 
 // findProjectByName resolves a project by name, scoped to org when provided
@@ -316,20 +242,6 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 		r.apply(&plan, project)
 	}
 
-	if plan.MaxCPU.ValueString() != state.MaxCPU.ValueString() ||
-		plan.MaxMemory.ValueString() != state.MaxMemory.ValueString() ||
-		plan.MaxPods.ValueInt64() != state.MaxPods.ValueInt64() ||
-		plan.MaxStorage.ValueString() != state.MaxStorage.ValueString() {
-		if maxCPU, maxMemory, maxPods, maxStorage, any := plan.quotaCaps(); any {
-			project, err := r.client.UpdateProjectQuota(ctx, id, maxCPU, maxMemory, maxPods, maxStorage)
-			if err != nil {
-				resp.Diagnostics.AddError("Error updating project resource caps", err.Error())
-				return
-			}
-			r.apply(&plan, project)
-		}
-	}
-
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -396,10 +308,6 @@ func (r *ProjectResource) apply(m *ProjectResourceModel, project *client.Project
 	m.DisplayName = types.StringValue(project.DisplayName)
 	m.Status = types.StringValue(project.Status)
 	m.Egress = types.StringValue(project.Egress)
-	m.MaxCPU = types.StringValue(project.MaxCPU)
-	m.MaxMemory = types.StringValue(project.MaxMemory)
-	m.MaxPods = types.Int64Value(int64(project.MaxPods))
-	m.MaxStorage = types.StringValue(project.MaxStorage)
 	m.CreatedAt = types.StringValue(project.CreatedAt.String())
 	m.UpdatedAt = types.StringValue(project.UpdatedAt.String())
 }

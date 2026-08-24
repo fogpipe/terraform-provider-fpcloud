@@ -16,6 +16,15 @@ Manages a Fogpipe organization. name is immutable (changing it forces a new orga
 resource "fpcloud_org" "acme" {
   name         = "acme"
   display_name = "Acme Corporation"
+
+  # Operator-only resource ceiling, shared by every project this org owns.
+  # Server-defaulted; only an operator may raise it. A project has no ceiling of
+  # its own — you decide how many projects you have, so bounding each one
+  # bounded a number you could raise by creating another.
+  max_cpu     = "8"
+  max_memory  = "16Gi"
+  max_pods    = 50
+  max_storage = "100Gi"
 }
 ```
 
@@ -31,6 +40,10 @@ resource "fpcloud_org" "acme" {
 - `adopt_existing` (Boolean) When true, if an organization with this name already exists, adopt it into Terraform state on create instead of failing with a 409 conflict. Defaults to false, so create never silently takes ownership of an organization it did not create.
 - `display_name` (String) Human-readable display name. Defaults to the name. Mutable in place.
 - `fke_enabled` (Boolean) Whether this org is entitled to FKE (tenant kubeconfig) access. Mutable in place, but the API only lets a caller with administrate rights on the platform operator org set this — an ordinary org owner setting it themselves gets a 403; have an operator apply it, or set it via a provider configured with operator credentials.
+- `max_cpu` (String) Operator-only CPU ceiling for the organization, shared by every project it owns (e.g. "8"). Server-defaulted; only an operator may raise it. A project has no ceiling of its own — a tenant decides how many projects it has, so bounding each one bounded a number the tenant could raise by creating another.
+- `max_memory` (String) Operator-only memory ceiling for the organization, shared by every project it owns (e.g. "16Gi"). Server-defaulted; only an operator may raise it. A project has no ceiling of its own — a tenant decides how many projects it has, so bounding each one bounded a number the tenant could raise by creating another.
+- `max_pods` (Number) Operator-only pod-count ceiling for the organization, shared by every project it owns (e.g. 40). Server-defaulted; only an operator may raise it. A project has no ceiling of its own — a tenant decides how many projects it has, so bounding each one bounded a number the tenant could raise by creating another.
+- `max_storage` (String) Operator-only storage ceiling for the organization, shared by every project it owns (e.g. "100Gi"). Server-defaulted; only an operator may raise it. A project has no ceiling of its own — a tenant decides how many projects it has, so bounding each one bounded a number the tenant could raise by creating another.
 
 ### Read-Only
 

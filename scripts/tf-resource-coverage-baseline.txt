@@ -82,9 +82,10 @@ ListOrgUsage
 
 # Deleted from pkg/client, and still in the last release. This gate reads the
 # released client, so a method the provider stopped calling reads as a gap
-# until the release catches up — the entry goes when v0.144.0 ships, and
+# until the release catches up — these entries go when v0.144.0 ships, and
 # fogpipe/cloud-workspace#152 covers the gate seeing a release late.
 UpdateRunnerBuilder
+UpdateProjectQuota
 
 # price books (ADR-090) — which book an org is billed against is assigned by
 # the operator, not declared by the org: it grants nothing, so there is no

@@ -48,11 +48,6 @@ ClusterInfo
 FKECredentials
 FKEToken
 GetDatabaseConnection
-# alert history (ADR-084) is the operator's "what fired, and for how long" read.
-# It is an observation of a time window that moves on every plan, and it names
-# nothing Terraform could own or converge on — a data source over it would be a
-# perpetual diff describing the past.
-AlertHistory
 # the project status document (#778) is the strongest case in this group: it is
 # an observation of live cluster state that changes between two consecutive
 # reads, so a data source over it would hand Terraform a value that never
@@ -80,14 +75,30 @@ ListJobs
 # "list all X" convenience (see above) — runner pools are looked up singularly
 ListRunners
 
-# operator-only escalation, deliberately not declarable by a tenant's Terraform:
-# handing an app a Kubernetes identity is granted out-of-band, like fke_enabled
-SetAppKubeServiceAccount
-
 # metered usage (#675) — read-only observability. Usage is produced by the
 # platform, not declared: there is no desired state for "what this app consumed"
 ListProjectUsage
 ListOrgUsage
+
+# Deleted from pkg/client, and still in the last release. This gate reads the
+# released client, so a method the provider stopped calling reads as a gap
+# until the release catches up — the entry goes when v0.144.0 ships, and
+# fogpipe/cloud-workspace#152 covers the gate seeing a release late.
+UpdateRunnerBuilder
+
+# price books (ADR-090) — which book an org is billed against is assigned by
+# the operator, not declared by the org: it grants nothing, so there is no
+# entitlement for a plan to converge on, and a tenant able to write it would
+# be choosing its own prices. The rates themselves are published by the
+# platform, so reading them is reading someone else's desired state.
+OrgPrices
+OrgPriceBook
+UpdateOrgPriceBook
+
+# website versions (ADR-050) — a version is a record of what the site served,
+# created by a deploy rather than declared. Terraform cannot make one exist,
+# and the list moves every time anyone publishes.
+ListWebsiteVersions
 
 # billing reads (#109/#111) — same reasoning one level up: an estimate is a
 # computation over usage that has not finished accruing, and an invoice is a

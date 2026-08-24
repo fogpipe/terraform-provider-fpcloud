@@ -45,6 +45,16 @@ Runner.problems
 # A pool's live failures (#851) are a diagnostic that changes while nothing
 # in the config does; `fpcloud runner show` and the console are where they
 # belong.
+Runner.instances
+# Which runners are up and what job each is serving is the same kind of
+# reading one level finer: it changes with GitHub's queue rather than with
+# anything declared, so an attribute over it is drift on every plan.
+
+# --- the same state, spelled declaratively somewhere else ---------------
+# `backup.enabled` is where a database says whether it is backed up. This is
+# the server echoing that decision back inverted, so an attribute for it
+# would be a second way to say one thing, and the two could disagree.
+Database.backups_disabled
 
 # --- derived by the platform, addressable by nothing --------------------
 App.kube_service_account

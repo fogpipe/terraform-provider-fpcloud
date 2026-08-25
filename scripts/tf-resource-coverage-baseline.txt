@@ -86,6 +86,16 @@ ListOrgUsage
 # fogpipe/cloud-workspace#152 covers the gate seeing a release late.
 UpdateRunnerBuilder
 UpdateProjectQuota
+CreateOrg
+
+# organization writes (ADR-093, ADR-094) — an org is granted by an operator
+# together with its first owner, so there is no fpcloud_org resource for these
+# to hang on: a tenant able to declare an org in Terraform could raise its own
+# ceiling by declaring a second. The FKE entitlement is the operator's to grant
+# for the same reason, and renaming is a one-line write on something Terraform
+# does not own. fpcloud_org is a data source instead.
+UpdateOrgDisplayName
+UpdateOrgFKE
 
 # price books (ADR-090) — which book an org is billed against is assigned by
 # the operator, not declared by the org: it grants nothing, so there is no

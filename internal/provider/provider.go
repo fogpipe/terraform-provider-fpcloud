@@ -107,7 +107,6 @@ func (p *FogpipeProvider) Configure(ctx context.Context, req provider.ConfigureR
 
 func (p *FogpipeProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		NewOrgResource,
 		NewProjectResource,
 		NewOIDCFederationResource,
 		NewAppResource,
@@ -138,6 +137,7 @@ func (p *FogpipeProvider) Resources(_ context.Context) []func() resource.Resourc
 
 func (p *FogpipeProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
+		NewOrgDataSource,
 		NewProjectDataSource,
 		NewAppDataSource,
 		NewDatabaseDataSource,

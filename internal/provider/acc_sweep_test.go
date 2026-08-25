@@ -54,7 +54,7 @@ func sweepAccOrg(ctx context.Context) error {
 	}
 	var org *client.Organization
 	for _, o := range orgs {
-		if o.Name == orgName {
+		if o.ShortID == orgName || strings.EqualFold(o.DisplayName, orgName) {
 			org = o
 		}
 	}
@@ -83,7 +83,7 @@ func TestSweepAccOrg(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v1/orgs":
-			_ = json.NewEncoder(w).Encode([]client.Organization{{ID: "org-1", Name: "tf-acc"}})
+			_ = json.NewEncoder(w).Encode([]client.Organization{{ID: "org-1", DisplayName: "tf-acc"}})
 		case r.URL.Path == "/api/v1/orgs/org-1/projects":
 			_ = json.NewEncoder(w).Encode([]client.Project{
 				{ID: "old", Name: "tfaold-1", Status: "active", CreatedAt: time.Now().Add(-3 * time.Hour)},

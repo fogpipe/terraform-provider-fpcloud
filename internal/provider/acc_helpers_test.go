@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
@@ -137,7 +138,7 @@ func testAccOrgID(t *testing.T) string {
 	}
 	if name := os.Getenv("FPCLOUD_ACC_SWEEP_ORG"); name != "" {
 		for _, o := range orgs {
-			if o.Name == name {
+			if o.ShortID == name || strings.EqualFold(o.DisplayName, name) {
 				return o.ID
 			}
 		}

@@ -80,22 +80,16 @@ ListRunners
 ListProjectUsage
 ListOrgUsage
 
-# Deleted from pkg/client, and still in the last release. This gate reads the
-# released client, so a method the provider stopped calling reads as a gap
-# until the release catches up — these entries go when v0.144.0 ships, and
-# fogpipe/cloud-workspace#152 covers the gate seeing a release late.
-UpdateRunnerBuilder
-UpdateProjectQuota
-CreateOrg
-
 # organization writes (ADR-093, ADR-094) — an org is granted by an operator
 # together with its first owner, so there is no fpcloud_org resource for these
 # to hang on: a tenant able to declare an org in Terraform could raise its own
-# ceiling by declaring a second. The FKE entitlement is the operator's to grant
-# for the same reason, and renaming is a one-line write on something Terraform
-# does not own. fpcloud_org is a data source instead.
+# ceiling by declaring a second. The ceiling and the FKE entitlement are the
+# operator's to set for the same reason — a tenant that could write its own
+# ceiling has no ceiling — and renaming is a one-line write on something
+# Terraform does not own. fpcloud_org is a data source instead.
 UpdateOrgDisplayName
 UpdateOrgFKE
+UpdateOrgQuota
 
 # price books (ADR-090) — which book an org is billed against is assigned by
 # the operator, not declared by the org: it grants nothing, so there is no

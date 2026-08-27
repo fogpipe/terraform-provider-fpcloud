@@ -16,9 +16,6 @@ BucketKey.can_write
 # The binding names its member as a type and an id, which is what the API
 # takes. `member` is the joined form the CLI prints.
 IAMBinding.member
-# A project names its parent as `org`, taking the name or the id the way every
-# other reference in the provider does.
-Project.organization_id
 # The resource this binds to is `project_id` — the provider has one binding
 # resource per scope rather than one carrying a discriminator.
 IAMBinding.resource_id

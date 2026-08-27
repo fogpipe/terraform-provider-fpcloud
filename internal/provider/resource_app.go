@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -621,6 +622,15 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		}
 	}
 
+	// An app created with a release command is gated on it before it serves, so
+	// the apply waits for the same verdict a deploy does.
+	if len(plan.ReleaseCommand.Elements()) > 0 {
+		if err := awaitRelease(ctx, r.client, app.ID); err != nil {
+			resp.Diagnostics.AddError("Error running release command", err.Error())
+			return
+		}
+	}
+
 	// Reconcile scaling after create. min/max scale are sent only when the user
 	// set them (they have no static default now — see the schema), so an unset
 	// value picks up the API's mode-appropriate default without a plan-vs-apply
@@ -727,6 +737,38 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// awaitRelease blocks until the app's newest deployment leaves the release gate
+// (ADR-042), and fails the apply if the gate did. The gate runs in the
+// background so a migration can outlive an HTTP timeout, which means an apply
+// that did not wait would report success while the release command was still
+// running — or had already failed and left the previous version serving.
+func awaitRelease(ctx context.Context, c *client.Client, appID string) error {
+	deadline := time.Now().Add(30 * time.Minute)
+	for {
+		deps, err := c.ListDeployments(ctx, appID)
+		if err != nil {
+			return err
+		}
+		if len(deps) > 0 {
+			switch deps[0].Status {
+			case "deploying", "releasing":
+			case "failed":
+				return fmt.Errorf("the release command failed; `fpcloud app deployments %s` has its output", appID)
+			default:
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for the release command to finish; `fpcloud app deployments %s` has its state", appID)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
 func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state AppResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -771,6 +813,12 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		if err != nil {
 			resp.Diagnostics.AddError("Error deploying app", err.Error())
 			return
+		}
+		if len(plan.ReleaseCommand.Elements()) > 0 {
+			if err := awaitRelease(ctx, r.client, appID); err != nil {
+				resp.Diagnostics.AddError("Error running release command", err.Error())
+				return
+			}
 		}
 		app = deployed
 	}

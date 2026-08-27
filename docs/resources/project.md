@@ -16,7 +16,7 @@ Manages a Fogpipe project. A project maps 1:1 to a Kubernetes namespace.
 resource "fpcloud_project" "production" {
   name         = "my-production-app"
   display_name = "My Production App" # optional; mutable cosmetic label
-  org          = "fogpipe"           # optional; defaults to the API key's organization
+  org          = "fogpipe"           # optional; uuid, opaque id or readable name — defaults to the API key's organization
   egress       = "restricted"        # restricted (default) | https | all
 }
 ```
@@ -33,12 +33,13 @@ resource "fpcloud_project" "production" {
 - `adopt_existing` (Boolean) When true, if a project with this name already exists in the target organization, adopt it into Terraform state on create instead of failing with a 409 conflict. Defaults to false, so create never silently takes ownership of a project it did not create.
 - `display_name` (String) Human-readable display name (mutable cosmetic label). Defaults to the name.
 - `egress` (String) Egress policy: "restricted" (default), "https", or "all".
-- `org` (String) Organization (ID or name) the project belongs to. Defaults to the API key's organization. Changing it forces a new project.
+- `org` (String) The organization the project belongs to, by uuid, opaque id or readable name — whichever the configuration finds convenient. Defaults to the API key's organization. It records the reference as written and forces nothing on its own: a different spelling of the same organization is not a change, and only a different organization replaces the project.
 
 ### Read-Only
 
 - `created_at` (String) Timestamp when the project was created.
 - `id` (String) Project ID.
+- `organization_id` (String) The organization's frozen id. This is what a plan compares — the project is replaced when it changes, never when `org` is merely spelled differently.
 - `status` (String) The project's own state: `active`, `suspended`, or `deleting`. A suspended project keeps its resources and refuses changes to them, so a plan that reads `active` here is a plan that can apply.
 - `updated_at` (String) Timestamp when the project was last updated.
 

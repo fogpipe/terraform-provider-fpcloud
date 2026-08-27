@@ -129,6 +129,13 @@ func testAccCheckAppDestroy(s *terraform.State) error {
 // fails rather than guessing: these tests write real org state.
 func testAccOrgID(t *testing.T) string {
 	t.Helper()
+	return testAccOrg(t).ID
+}
+
+// testAccOrg is the same organization, whole — for a test that needs more than
+// one of the spellings the platform answers to.
+func testAccOrg(t *testing.T) *client.Organization {
+	t.Helper()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("acceptance test, set TF_ACC=1")
 	}
@@ -139,14 +146,14 @@ func testAccOrgID(t *testing.T) string {
 	if name := os.Getenv("FPCLOUD_ACC_SWEEP_ORG"); name != "" {
 		for _, o := range orgs {
 			if o.ShortID == name || strings.EqualFold(o.DisplayName, name) {
-				return o.ID
+				return o
 			}
 		}
 		t.Fatalf("FPCLOUD_ACC_SWEEP_ORG=%q names no org this key can see", name)
 	}
 	if len(orgs) == 1 {
-		return orgs[0].ID
+		return orgs[0]
 	}
 	t.Fatalf("key sees %d orgs; set FPCLOUD_ACC_SWEEP_ORG to name the throwaway one", len(orgs))
-	return ""
+	return nil
 }

@@ -18,6 +18,7 @@ import (
 var (
 	_ resource.Resource                = &ProjectResource{}
 	_ resource.ResourceWithImportState = &ProjectResource{}
+	_ resource.ResourceWithModifyPlan  = &ProjectResource{}
 )
 
 // ProjectResource defines the resource implementation.
@@ -27,15 +28,16 @@ type ProjectResource struct {
 
 // ProjectResourceModel describes the resource data model.
 type ProjectResourceModel struct {
-	ID            types.String `tfsdk:"id"`
-	Name          types.String `tfsdk:"name"`
-	DisplayName   types.String `tfsdk:"display_name"`
-	Org           types.String `tfsdk:"org"`
-	Egress        types.String `tfsdk:"egress"`
-	AdoptExisting types.Bool   `tfsdk:"adopt_existing"`
-	Status        types.String `tfsdk:"status"`
-	CreatedAt     types.String `tfsdk:"created_at"`
-	UpdatedAt     types.String `tfsdk:"updated_at"`
+	ID             types.String `tfsdk:"id"`
+	Name           types.String `tfsdk:"name"`
+	DisplayName    types.String `tfsdk:"display_name"`
+	Org            types.String `tfsdk:"org"`
+	OrganizationID types.String `tfsdk:"organization_id"`
+	Egress         types.String `tfsdk:"egress"`
+	AdoptExisting  types.Bool   `tfsdk:"adopt_existing"`
+	Status         types.String `tfsdk:"status"`
+	CreatedAt      types.String `tfsdk:"created_at"`
+	UpdatedAt      types.String `tfsdk:"updated_at"`
 }
 
 // NewProjectResource returns a new project resource.
@@ -74,10 +76,23 @@ func (r *ProjectResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"org": schema.StringAttribute{
-				Description: "Organization (ID or name) the project belongs to. Defaults to the API key's organization. Changing it forces a new project.",
-				Optional:    true,
+				Description: "The organization the project belongs to, by uuid, opaque id or readable name — " +
+					"whichever the configuration finds convenient. Defaults to the API key's organization. " +
+					"It records the reference as written and forces nothing on its own: a different spelling " +
+					"of the same organization is not a change, and only a different organization replaces " +
+					"the project.",
+				Optional: true,
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"organization_id": schema.StringAttribute{
+				Description: "The organization's frozen id. This is what a plan compares — the project is " +
+					"replaced when it changes, never when `org` is merely spelled differently.",
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"egress": schema.StringAttribute{
@@ -300,9 +315,17 @@ func (r *ProjectResource) ImportState(ctx context.Context, req resource.ImportSt
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), project.ID)...)
 }
 
-// apply copies API-returned fields onto the model. The org is write-only at
-// create (the API never echoes it back), so it is left untouched on the model.
+// apply copies API-returned fields onto the model. The reference in `org` is
+// left as the configuration wrote it — the organization the project is actually
+// in is `organization_id`, which the API returns and a plan compares. A project
+// that arrived without one (an import, or a create against the key's default
+// org) gets the frozen id as its reference, so the attribute is never empty and
+// the first plan that names an org converges on it.
 func (r *ProjectResource) apply(m *ProjectResourceModel, project *client.Project) {
+	m.OrganizationID = types.StringValue(project.OrganizationID)
+	if m.Org.IsNull() || m.Org.IsUnknown() || m.Org.ValueString() == "" {
+		m.Org = types.StringValue(project.OrganizationID)
+	}
 	m.ID = types.StringValue(project.ID)
 	m.Name = types.StringValue(project.Name)
 	m.DisplayName = types.StringValue(project.DisplayName)
@@ -310,4 +333,54 @@ func (r *ProjectResource) apply(m *ProjectResourceModel, project *client.Project
 	m.Egress = types.StringValue(project.Egress)
 	m.CreatedAt = types.StringValue(project.CreatedAt.String())
 	m.UpdatedAt = types.StringValue(project.UpdatedAt.String())
+}
+
+// ModifyPlan decides whether a changed `org` is a changed organization. The
+// attribute holds a reference a person wrote, and the platform answers to a
+// uuid, an opaque id and a readable name alike — so comparing the strings makes
+// a rename, or a rewrite onto the id every derivation uses, indistinguishable
+// from moving the project somewhere else. It is the same project, and replacing
+// it takes its apps, its databases and its buckets with it.
+//
+// So the spelling is resolved, once, and only when it changed: the frozen id it
+// resolves to is what decides. An unchanged reference costs no request, which is
+// what keeps a routine plan from needing to read the organization at all.
+func (r *ProjectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Nothing to compare against on create, and nothing to plan on destroy.
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var state, config ProjectResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if config.Org.IsNull() || config.Org.IsUnknown() {
+		return
+	}
+	if config.Org.ValueString() == state.Org.ValueString() {
+		return
+	}
+
+	org, err := r.client.GetOrg(ctx, config.Org.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("org"),
+			"Error resolving organization",
+			fmt.Sprintf("%q could not be resolved to an organization, so the plan cannot tell a "+
+				"renamed organization from a different one: %s", config.Org.ValueString(), err),
+		)
+		return
+	}
+
+	if org.ID == state.OrganizationID.ValueString() {
+		// Same organization, spelled differently. The new spelling is recorded
+		// in place; nothing about the project moves.
+		return
+	}
+
+	resp.RequiresReplace = path.Paths{path.Root("org")}
 }

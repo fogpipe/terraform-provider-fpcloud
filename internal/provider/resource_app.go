@@ -738,6 +738,31 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	var app *client.App
 	appID := state.ID.ValueString()
 
+	// Update the container command/args/release command if any changed. A
+	// non-nil pointer (including an empty slice) replaces the value; an empty
+	// slice clears the override back to the image defaults (or drops the
+	// release phase).
+	//
+	// Before the image, never after: a deploy runs the release command the app
+	// carries when the deploy is created (ADR-042). Sent afterwards, the apply
+	// that introduces a release command is the one deploy that does not run it
+	// — and reports success, having rolled out new code past the migration that
+	// was added to gate it.
+	if !plan.Command.Equal(state.Command) || !plan.Args.Equal(state.Args) || !plan.ReleaseCommand.Equal(state.ReleaseCommand) {
+		command := stringListToSlice(ctx, plan.Command, &resp.Diagnostics)
+		args := stringListToSlice(ctx, plan.Args, &resp.Diagnostics)
+		releaseCommand := stringListToSlice(ctx, plan.ReleaseCommand, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		updated, err := r.client.UpdateAppCommand(ctx, appID, &command, &args, &releaseCommand)
+		if err != nil {
+			resp.Diagnostics.AddError("Error updating app command", err.Error())
+			return
+		}
+		app = updated
+	}
+
 	// Deploy new image if it changed.
 	if plan.Image.ValueString() != state.Image.ValueString() {
 		deployed, err := r.client.DeployApp(ctx, appID, client.DeployRequest{
@@ -780,25 +805,6 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			return
 		}
 		app = rebound
-	}
-
-	// Update the container command/args/release command if any changed. A
-	// non-nil pointer (including an empty slice) replaces the value; an empty
-	// slice clears the override back to the image defaults (or drops the
-	// release phase).
-	if !plan.Command.Equal(state.Command) || !plan.Args.Equal(state.Args) || !plan.ReleaseCommand.Equal(state.ReleaseCommand) {
-		command := stringListToSlice(ctx, plan.Command, &resp.Diagnostics)
-		args := stringListToSlice(ctx, plan.Args, &resp.Diagnostics)
-		releaseCommand := stringListToSlice(ctx, plan.ReleaseCommand, &resp.Diagnostics)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		updated, err := r.client.UpdateAppCommand(ctx, appID, &command, &args, &releaseCommand)
-		if err != nil {
-			resp.Diagnostics.AddError("Error updating app command", err.Error())
-			return
-		}
-		app = updated
 	}
 
 	// Apply a changed security context. Updated in place rather than replacing the

@@ -36,6 +36,14 @@ resource "fpcloud_app" "test" {
   command         = ["sleep"]
   args            = ["infinity"]
   release_command = [%[4]s]
+
+  # busybox declares no user, and the platform refuses a root image on deploy
+  # (cloud-platform#737) — the same explicit opt-out the other busybox tests
+  # here take, so this one stays about the release command.
+  security_context = {
+    run_as_user     = 1000
+    run_as_non_root = false
+  }
 }
 `, projName, appName, image, release)
 	}

@@ -59,7 +59,12 @@ func sweepAccOrg(ctx context.Context) error {
 		}
 	}
 	if org == nil {
-		return fmt.Errorf("the API key does not belong to org %q; refusing to sweep or to run", orgName)
+		// Name what the key does see. An org answers to its short_id and its
+		// display_name, and the display name is mutable (ADR-094) — so the
+		// ordinary way this fails is a rename, and a refusal that reports only
+		// what it looked for cannot be told from a revoked key without holding
+		// the credential it is complaining about.
+		return fmt.Errorf("the API key does not belong to org %q; it sees %s. refusing to sweep or to run", orgName, orgSpellings(orgs))
 	}
 	projects, err := c.ListProjectsInOrg(ctx, org.ID)
 	if err != nil {
@@ -76,6 +81,20 @@ func sweepAccOrg(ctx context.Context) error {
 		fmt.Fprintf(os.Stderr, "acceptance sweep: deleting %s, left behind %s ago\n", p.Name, time.Since(p.CreatedAt).Round(time.Minute))
 	}
 	return nil
+}
+
+// orgSpellings renders every org the key can see as the two spellings the
+// sweep matches on, so a failure names the value FPCLOUD_ACC_SWEEP_ORG should
+// hold. A key that sees nothing says so rather than rendering an empty list.
+func orgSpellings(orgs []*client.Organization) string {
+	if len(orgs) == 0 {
+		return "no orgs at all"
+	}
+	spellings := make([]string, 0, len(orgs))
+	for _, o := range orgs {
+		spellings = append(spellings, fmt.Sprintf("%s (%q)", o.ShortID, o.DisplayName))
+	}
+	return strings.Join(spellings, ", ")
 }
 
 func TestSweepAccOrg(t *testing.T) {
@@ -108,8 +127,13 @@ func TestSweepAccOrg(t *testing.T) {
 	}
 
 	t.Setenv("FPCLOUD_ACC_SWEEP_ORG", "someone-elses-org")
-	if err := sweepAccOrg(context.Background()); err == nil || len(deleted) != 0 {
+	err := sweepAccOrg(context.Background())
+	if err == nil || len(deleted) != 0 {
 		t.Fatalf("an org the key cannot see must refuse: err=%v deleted=%v", err, deleted)
+	}
+	// And the refusal has to be diagnosable from the log alone, without the key.
+	if !strings.Contains(err.Error(), `"tf-acc"`) {
+		t.Fatalf("the refusal must name the spellings the key does see, got: %v", err)
 	}
 
 	t.Setenv("FPCLOUD_ACC_SWEEP_ORG", "tf-acc")

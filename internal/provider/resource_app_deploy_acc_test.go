@@ -45,6 +45,11 @@ resource "fpcloud_app" "test" {
   command    = ["sleep"]
   args       = ["infinity"]
 
+  # Small enough that three replicas fit under the acceptance org's ceiling
+  # (ADR-092) — the default 500m puts the third one over it.
+  cpu_limit    = "100m"
+  memory_limit = "128Mi"
+
   security_context = {
     run_as_user     = 1000
     run_as_non_root = false

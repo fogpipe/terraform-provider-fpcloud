@@ -332,13 +332,15 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			"env": schema.MapAttribute{
 				Optional:    true,
 				ElementType: types.StringType,
-				Description: "Environment variables (plaintext)",
+				Description: "Environment variables (plaintext). Set as part of the create, so a release " +
+					"command on a new app reads them on its first run.",
 			},
 			"secret": schema.MapAttribute{
 				Optional:    true,
 				Sensitive:   true,
 				ElementType: types.StringType,
-				Description: "Secret environment variables (encrypted at rest)",
+				Description: "Secret environment variables (encrypted at rest). Set as part of the create, " +
+					"like env, so a release command that reads one is not gated before it arrives.",
 			},
 			"replicas": schema.Int64Attribute{
 				Description: "Fixed replica count for always-on apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.",
@@ -514,9 +516,9 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		return
 	}
 
-	// env and secret are both written through the config API below — never as the
-	// create request's env_vars. Sending them there too would store secrets in
-	// plaintext and leave a second copy that later updates can't reach.
+	// env and secret ride the create request (ADR-112): an app created with a
+	// release command is gated on it before it serves, so config written after
+	// the create call arrives after the migration that reads it has already run.
 	var envMap, secretMap map[string]string
 
 	if !plan.Env.IsNull() && !plan.Env.IsUnknown() {
@@ -565,6 +567,8 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		HealthCheckInterval: int(plan.HealthCheckInterval.ValueInt64()),
 		HealthCheckRetries:  int(plan.HealthCheckRetries.ValueInt64()),
 		Probes:              probes,
+		EnvVars:             envMap,
+		Secrets:             secretMap,
 	}
 	if !plan.ServiceAccount.IsNull() && !plan.ServiceAccount.IsUnknown() {
 		createReq.ServiceAccount = plan.ServiceAccount.ValueString()
@@ -608,20 +612,6 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 			return
 		}
 		app = bound
-	}
-
-	// Store env and secret values as app configs via the API.
-	for k, v := range envMap {
-		if _, err := r.client.SetConfig(ctx, app.ID, k, v, false); err != nil {
-			resp.Diagnostics.AddError("Error setting env config", fmt.Sprintf("key %q: %s", k, err.Error()))
-			return
-		}
-	}
-	for k, v := range secretMap {
-		if _, err := r.client.SetConfig(ctx, app.ID, k, v, true); err != nil {
-			resp.Diagnostics.AddError("Error setting secret config", fmt.Sprintf("key %q: %s", k, err.Error()))
-			return
-		}
 	}
 
 	// An app created with a release command is gated on it before it serves, so

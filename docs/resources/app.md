@@ -81,7 +81,7 @@ resource "fpcloud_app" "web" {
 - `cpu_limit` (String) CPU limit (e.g. 500m). Defaults to 500m.
 - `database` (String) Database (name or id) this app's unprefixed DATABASE_URL points at. Leave unset when the project has a single database — that one is used. With several, DATABASE_URL is omitted unless this names one; each database is always injected as '<NAME>_DATABASE_URL' regardless. Set to an empty string to clear the binding.
 - `display_name` (String) Human-readable display name (mutable cosmetic label). Defaults to the name.
-- `env` (Map of String) Environment variables (plaintext)
+- `env` (Map of String) Environment variables (plaintext). Set as part of the create, so a release command on a new app reads them on its first run.
 - `health_check_interval` (Number) Health check interval in seconds. Defaults to 10.
 - `health_check_path` (String) HTTP path for health checks. Defaults to '/' on a web app; not valid on a worker. Set a custom path (e.g. '/healthz') to enable startup probes.
 - `health_check_retries` (Number) Health check failure threshold. Defaults to 3.
@@ -96,7 +96,7 @@ resource "fpcloud_app" "web" {
 - `release_command` (List of String) Command run once per deploy — from the exact image being deployed, with the app's env/secrets — before the new version goes live; a failure aborts the deploy (e.g. DB migrations). A single element containing spaces runs via 'sh -c'; use multiple elements for exec form. Changed alongside the image, it is sent as part of that deploy and gates it, so the apply that introduces a migration is the apply that runs it. Read back from the API, so a change made outside Terraform shows as drift.
 - `replicas` (Number) Fixed replica count for always-on apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.
 - `routes` (Attributes List) Per-path visibility carve-outs. A route marked internal is withheld from the external ingress — on the app's own URL and on every custom domain attached to it — while staying reachable at the app's in-cluster address, so a scheduled job calling it keeps working. External requests are refused at the edge. Matching is by path prefix on segment boundaries ('/internal/' covers '/internal/sync' but not '/internalx'). Always-on apps with ingress = "all" only. (see [below for nested schema](#nestedatt--routes))
-- `secret` (Map of String, Sensitive) Secret environment variables (encrypted at rest)
+- `secret` (Map of String, Sensitive) Secret environment variables (encrypted at rest). Set as part of the create, like env, so a release command that reads one is not gated before it arrives.
 - `security_context` (Attributes) Opt-in pod/container hardening. When set, the container is locked to the PSS-restricted baseline (drop ALL capabilities, no privilege escalation, RuntimeDefault seccomp) plus the run-as identity below. Updated in place: removing the block clears it, which is how an app that once needed root returns to the platform default. (see [below for nested schema](#nestedatt--security_context))
 - `service_account` (String) Service account email to attach as workload identity. The app will receive credentials to call the Fogpipe API as this service account.
 - `storage` (String) Persistent volume size (e.g. '50Gi'). Opt-in and always-on mode only. Grow-only — the volume can never shrink.

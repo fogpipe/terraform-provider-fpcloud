@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -273,6 +274,18 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
+	// A dependent resource is entitled to a database it can use, and depends_on
+	// is satisfied by this create returning — so it returns when the database is
+	// running, not when its row exists. Waiting here is what makes an app's first
+	// migration meet its declared extensions rather than a permission error
+	// (fogpipe/cloud-workspace#219).
+	if ready, werr := awaitDatabaseRunning(ctx, r.client, db.ID); werr != nil {
+		resp.Diagnostics.AddError("Error waiting for the database", werr.Error())
+		return
+	} else if ready != nil {
+		db = ready
+	}
+
 	// instances has no create-time field on the API, so reconcile it in place
 	// right after create when the user asked for more than the default single
 	// instance.
@@ -494,5 +507,33 @@ func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 		state.Password = types.StringValue(db.Password)
 	} else if state.Password.IsNull() || state.Password.IsUnknown() {
 		state.Password = types.StringValue("")
+	}
+}
+
+// awaitDatabaseRunning blocks until the database leaves provisioning. A
+// database is not running until the operator has installed every extension it
+// declares (ADR-072), so this is also the wait for those.
+func awaitDatabaseRunning(ctx context.Context, c *client.Client, id string) (*client.Database, error) {
+	deadline := time.Now().Add(20 * time.Minute)
+	for {
+		db, err := c.GetDatabase(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		switch db.Status {
+		case "provisioning", "":
+		case "failed":
+			return nil, fmt.Errorf("the database failed to provision; `fpcloud db get %s` has its state", id)
+		default:
+			return db, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timed out waiting for the database to finish provisioning; `fpcloud db get %s` has its state", id)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
 	}
 }

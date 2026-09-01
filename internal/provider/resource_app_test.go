@@ -37,8 +37,8 @@ resource "fpcloud_app" "test" {
   max_scale    = 5
   cpu_limit    = "250m"
   memory_limit = "256Mi"
-}
-`, projName, appName),
+%[3]s}
+`, projName, appName, accRootImageOptOut),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("fpcloud_app.test", "id"),
 					resource.TestCheckResourceAttr("fpcloud_app.test", "name", appName),

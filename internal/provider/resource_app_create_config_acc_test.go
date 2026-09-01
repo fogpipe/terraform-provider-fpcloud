@@ -41,8 +41,8 @@ resource "fpcloud_app" "test" {
   secret = {
     API_TOKEN = "s3cr3t"
   }
-}
-`, projName, appName)
+%[3]s}
+`, projName, appName, accRootImageOptOut)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,

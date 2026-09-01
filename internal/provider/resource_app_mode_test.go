@@ -59,6 +59,6 @@ resource "fpcloud_app" "test" {
   name       = %[2]q
   image      = "nginx:latest"
   ingress    = "internal"
-%[3]s}
-`, projectName, appName, modeLine)
+%[3]s%[4]s}
+`, projectName, appName, modeLine, accRootImageOptOut)
 }

@@ -37,6 +37,18 @@ func accName(tag string) string {
 	return "tfa" + tag + "-" + acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 }
 
+// accRootImageOptOut is the security context a test app needs when its image
+// declares no user. The platform refuses a root image at create as well as at
+// deploy (cloud-workspace#228), so a config that leaves this out fails on the
+// image rather than on the resource the test was written to exercise. Tests
+// that are themselves about security_context spell it out inline instead.
+const accRootImageOptOut = `
+  security_context = {
+    run_as_user     = 1000
+    run_as_non_root = false
+  }
+`
+
 // testAccAppScaffold renders a real project + always-on public app that
 // dependent-resource acceptance tests (app_config, webhook, domain) can attach
 // to. Referencing real IDs — rather than literal "test-app"/"test-project"
@@ -55,8 +67,8 @@ resource "fpcloud_app" "scaffold" {
   name       = %[2]q
   image      = "nginx:latest"
   ingress    = "all"
-}
-`, projectName, appName)
+%[3]s}
+`, projectName, appName, accRootImageOptOut)
 }
 
 // testAccClient builds an API client from the same environment variables the

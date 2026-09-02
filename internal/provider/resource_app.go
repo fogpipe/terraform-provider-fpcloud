@@ -769,7 +769,6 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
-	var app *client.App
 	appID := state.ID.ValueString()
 
 	deployingImage := plan.Image.ValueString() != state.Image.ValueString()
@@ -799,12 +798,11 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			}
 			releaseCommand = &v
 		}
-		updated, err := r.client.UpdateAppCommand(ctx, appID, &command, &args, releaseCommand)
+		_, err := r.client.UpdateAppCommand(ctx, appID, &command, &args, releaseCommand)
 		if err != nil {
 			resp.Diagnostics.AddError("Error updating app command", err.Error())
 			return
 		}
-		app = updated
 	}
 
 	// Deploy new image if it changed.
@@ -817,7 +815,7 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			}
 			deployReq.ReleaseCommand = &v
 		}
-		deployed, err := r.client.DeployApp(ctx, appID, deployReq)
+		_, err := r.client.DeployApp(ctx, appID, deployReq)
 		if err != nil {
 			resp.Diagnostics.AddError("Error deploying app", err.Error())
 			return
@@ -828,39 +826,35 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 				return
 			}
 		}
-		app = deployed
 	}
 
 	// Update the cosmetic display name if it changed.
 	if plan.DisplayName.ValueString() != state.DisplayName.ValueString() {
-		renamed, err := r.client.UpdateAppDisplayName(ctx, appID, plan.DisplayName.ValueString())
+		_, err := r.client.UpdateAppDisplayName(ctx, appID, plan.DisplayName.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError("Error updating app display name", err.Error())
 			return
 		}
-		app = renamed
 	}
 
 	// Update the vanity host override if it changed. An empty string clears it
 	// back to the derived host (the API accepts a non-nil pointer to "").
 	if plan.URLSlug.ValueString() != state.URLSlug.ValueString() {
-		reslugged, err := r.client.UpdateAppURLSlug(ctx, appID, plan.URLSlug.ValueString())
+		_, err := r.client.UpdateAppURLSlug(ctx, appID, plan.URLSlug.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError("Error updating app URL slug", err.Error())
 			return
 		}
-		app = reslugged
 	}
 
 	// Update the database binding if it changed. An empty string clears it back
 	// to the default (the project's sole database, or none when it has several).
 	if plan.Database.ValueString() != state.Database.ValueString() {
-		rebound, err := r.client.SetAppDatabase(ctx, appID, plan.Database.ValueString())
+		_, err := r.client.SetAppDatabase(ctx, appID, plan.Database.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError("Error updating app database binding", err.Error())
 			return
 		}
-		app = rebound
 	}
 
 	// Apply a changed security context. Updated in place rather than replacing the
@@ -873,23 +867,21 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		hardened, err := r.client.SetAppSecurityContext(ctx, appID, sc)
+		_, err := r.client.SetAppSecurityContext(ctx, appID, sc)
 		if err != nil {
 			resp.Diagnostics.AddError("Error updating app security context", err.Error())
 			return
 		}
-		app = hardened
 	}
 
 	// Switch hosting mode if it changed, before scaling — replicas is only valid
 	// on an always-on app, so scaling below needs the post-switch mode.
 	if plan.Mode.ValueString() != state.Mode.ValueString() {
-		switched, err := r.client.SwitchMode(ctx, appID, plan.Mode.ValueString())
+		_, err := r.client.SwitchMode(ctx, appID, plan.Mode.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError("Error switching app mode", err.Error())
 			return
 		}
-		app = switched
 	}
 
 	// Route carve-outs are validated against the app's mode and ingress, so this
@@ -898,7 +890,7 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	// An unknown plan value is not a request to change anything — sending it would
 	// serialize to no routes and silently clear the carve-outs the app already has.
 	if !plan.Routes.IsUnknown() && !plan.Routes.Equal(state.Routes) {
-		rerouted, err := r.client.UpdateAppRoutes(ctx, appID, routesFromModel(ctx, plan.Routes, &resp.Diagnostics))
+		_, err := r.client.UpdateAppRoutes(ctx, appID, routesFromModel(ctx, plan.Routes, &resp.Diagnostics))
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -906,7 +898,6 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			resp.Diagnostics.AddError("Error updating app routes", err.Error())
 			return
 		}
-		app = rerouted
 	}
 
 	// Probes are validated against the app's mode, so like routes above this runs
@@ -914,7 +905,7 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	// request to change anything — sending it would clear the overrides the app
 	// already has back to the shared health check.
 	if !plan.Probes.IsUnknown() && !plan.Probes.Equal(state.Probes) {
-		reprobed, err := r.client.UpdateAppProbes(ctx, appID, probesFromModel(ctx, plan.Probes, &resp.Diagnostics))
+		_, err := r.client.UpdateAppProbes(ctx, appID, probesFromModel(ctx, plan.Probes, &resp.Diagnostics))
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -922,7 +913,6 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			resp.Diagnostics.AddError("Error updating app probes", err.Error())
 			return
 		}
-		app = reprobed
 	}
 
 	// Update scaling if any scaling attributes changed.
@@ -945,22 +935,20 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		if plan.Mode.ValueString() != "serverless" {
 			scaleReq.Replicas = &replicas
 		}
-		scaled, err := r.client.ScaleApp(ctx, appID, scaleReq)
+		_, err := r.client.ScaleApp(ctx, appID, scaleReq)
 		if err != nil {
 			resp.Diagnostics.AddError("Error scaling app", err.Error())
 			return
 		}
-		app = scaled
 	}
 
 	// Grow persistent storage if the requested size changed (grow-only, enforced server-side).
 	if plan.Storage.ValueString() != state.Storage.ValueString() && plan.Storage.ValueString() != "" {
-		grown, err := r.client.UpdateAppStorage(ctx, appID, plan.Storage.ValueString())
+		_, err := r.client.UpdateAppStorage(ctx, appID, plan.Storage.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError("Error updating app storage", err.Error())
 			return
 		}
-		app = grown
 	}
 
 	// Sync env vars: compute diff between old and new env/secret maps and update configs.
@@ -1040,14 +1028,17 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
-	// If neither deploy nor scale happened, re-read to get current state.
-	if app == nil {
-		fetched, err := r.client.GetApp(ctx, appID)
-		if err != nil {
-			resp.Diagnostics.AddError("Error reading app", err.Error())
-			return
-		}
-		app = fetched
+	// Read the settled app and write THAT, rather than whichever call above
+	// happened to run last. Every one of them answers with the app as it stood
+	// mid-request — SwitchMode returns it while the new revision is still
+	// rolling out — so the response that reached state depended on which
+	// attributes the config changed, and a mode switch recorded a half-applied
+	// app whose computed attributes never matched what the API then served
+	// (fogpipe/cloud-workspace#226).
+	app, err := r.client.GetApp(ctx, appID)
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading app", err.Error())
+		return
 	}
 
 	r.setModelFromApp(&plan, app, &resp.Diagnostics)

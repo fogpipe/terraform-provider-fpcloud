@@ -57,7 +57,7 @@ resource "fpcloud_domain" "shop" {
 <a id="nestedatt--routes"></a>
 ### Nested Schema for `routes`
 
-Required:
+Optional:
 
 - `app_id` (String) The app serving this prefix. Must be always-on and in the domain's project, and cannot be the domain's own app.
 - `path` (String) Path prefix served by this backend, e.g. '/api/'. Must start with '/'; '/' alone is rejected (the domain's own app already serves it).

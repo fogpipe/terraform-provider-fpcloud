@@ -443,7 +443,8 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					Attributes: map[string]schema.Attribute{
 						"path": schema.StringAttribute{
 							Description: "Path prefix to carve out, e.g. '/internal/'. Must start with '/'; '/' alone is rejected (use ingress = \"internal\" to make every path cluster-only).",
-							Required:    true,
+							Optional:    true,
+							Computed:    true,
 						},
 						"visibility": schema.StringAttribute{
 							Description: "'internal' (not externally routable) or 'public'. Defaults to 'internal'.",

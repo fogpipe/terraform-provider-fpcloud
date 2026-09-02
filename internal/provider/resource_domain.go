@@ -113,11 +113,13 @@ func (r *DomainResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					Attributes: map[string]schema.Attribute{
 						"path": schema.StringAttribute{
 							Description: "Path prefix served by this backend, e.g. '/api/'. Must start with '/'; '/' alone is rejected (the domain's own app already serves it).",
-							Required:    true,
+							Optional:    true,
+							Computed:    true,
 						},
 						"app_id": schema.StringAttribute{
 							Description: "The app serving this prefix. Must be always-on and in the domain's project, and cannot be the domain's own app.",
-							Required:    true,
+							Optional:    true,
+							Computed:    true,
 						},
 						"app_name": schema.StringAttribute{
 							Description: "The backend app's name, resolved by the API for display.",

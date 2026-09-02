@@ -166,12 +166,9 @@ Optional:
 <a id="nestedatt--routes"></a>
 ### Nested Schema for `routes`
 
-Required:
-
-- `path` (String) Path prefix to carve out, e.g. '/internal/'. Must start with '/'; '/' alone is rejected (use ingress = "internal" to make every path cluster-only).
-
 Optional:
 
+- `path` (String) Path prefix to carve out, e.g. '/internal/'. Must start with '/'; '/' alone is rejected (use ingress = "internal" to make every path cluster-only).
 - `visibility` (String) 'internal' (not externally routable) or 'public'. Defaults to 'internal'.
 
 
@@ -190,7 +187,7 @@ Optional:
 <a id="nestedatt--traffic"></a>
 ### Nested Schema for `traffic`
 
-Required:
+Optional:
 
 - `percent` (Number) Traffic percentage (0-100). All percentages must sum to 100.
 - `revision` (String) Revision name or '@latest' to route to the latest revision.

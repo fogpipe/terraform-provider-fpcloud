@@ -17,7 +17,7 @@ resource "fpcloud_project" "production" {
   name         = "my-production-app"
   display_name = "My Production App" # optional; mutable cosmetic label
   org          = "fogpipe"           # optional; uuid, opaque id or readable name — defaults to the API key's organization
-  egress       = "restricted"        # restricted (default) | https | all (tcp 25/465 never leave)
+  egress       = "restricted"        # restricted (default) | https | all (tcp 25 never leaves)
 }
 ```
 
@@ -32,7 +32,7 @@ resource "fpcloud_project" "production" {
 
 - `adopt_existing` (Boolean) When true, if a project with this name already exists in the target organization, adopt it into Terraform state on create instead of failing with a 409 conflict. Defaults to false, so create never silently takes ownership of a project it did not create.
 - `display_name` (String) Human-readable display name (mutable cosmetic label). Defaults to the name.
-- `egress` (String) Egress policy: "restricted" (default), "https" (TCP 443 anywhere), or "all" (every port the host network carries). TCP 25 and 465 are dropped upstream of the platform on every mode, so mail submission goes over 587.
+- `egress` (String) Egress policy: "restricted" (default), "https" (TCP 443 anywhere), or "all" (any address, any port). TCP 25 is refused on every mode, so mail goes through a relay on 587 or 465 rather than direct to MX.
 - `org` (String) The organization the project belongs to, by uuid, opaque id or readable name — whichever the configuration finds convenient. Defaults to the API key's organization. It records the reference as written and forces nothing on its own: a different spelling of the same organization is not a change, and only a different organization replaces the project.
 
 ### Read-Only

@@ -46,7 +46,12 @@ Runner.instances
 # Which runners are up and what job each is serving is the same kind of
 # reading one level finer: it changes with GitHub's queue rather than with
 # anything declared, so an attribute over it is drift on every plan.
-
+Runner.admitted_runners
+# What a bucket currently holds is a measurement of the data plane, which the
+# tenant writes to without Terraform: an attribute over it would move on every
+# refresh and never converge on anything a config could state.
+Bucket.object_count
+Bucket.used_bytes
 
 # --- the same state, spelled declaratively somewhere else ---------------
 # `backup.enabled` is where a database says whether it is backed up. This is

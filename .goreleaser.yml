@@ -30,6 +30,14 @@ builds:
 archives:
   - formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # A provider speaks gRPC and has no subcommand to print its notices from, so
+    # the archive is the only thing that reaches whoever runs `tofu init` — and
+    # the licences of the modules compiled in oblige whoever distributes the
+    # binary, which is us, through the registry.
+    files:
+      - LICENSE
+      - NOTICE
+      - THIRD_PARTY_LICENSES.md
 
 checksum:
   extra_files:

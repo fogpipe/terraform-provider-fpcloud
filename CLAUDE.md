@@ -78,6 +78,23 @@ Regenerate docs (`just docs`) and commit them before a release if the schema
 moved; GoReleaser signs and publishes on the tag, and the registry refuses an
 unsigned version.
 
+## A dependency is attributed before it ships
+
+`THIRD_PARTY_LICENSES.md` is generated from the binary's own import graph and
+goreleaser puts it in the zip the registry serves, beside `LICENSE` and
+`NOTICE`. MIT, BSD, ISC, Apache-2.0 and MPL-2.0 all grant redistribution *on
+the condition* that their notice travels with the binary, and `tofu init`
+is a distribution.
+
+- **Regenerate after any dependency change**: `just licenses`. CI runs
+  `--check`, so a module added without attributing it fails the build.
+- **The archive is the only path.** A provider speaks gRPC and has no
+  subcommand to print notices from, which is why this differs from the CLI's
+  embedded copy — same script, same file, delivered by the only route there is.
+- The set comes from `go list -deps` over `.`, so the acceptance-test machinery
+  (`terraform-exec`, `hc-install`, `go-crypto`, `circl`) is correctly absent: it
+  is compiled into no released binary.
+
 ## Testing
 
 `just test` is unit-only. `just testacc` runs the acceptance suite against a

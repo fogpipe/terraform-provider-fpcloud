@@ -63,3 +63,12 @@ tf-resource-coverage *args:
 # reviewed ones are accepted via scripts/tf-field-coverage-baseline.txt.
 tf-field-coverage *args:
     deno run --allow-read --allow-write --allow-run --allow-env scripts/tf-field-coverage.ts {{args}}
+
+# Regenerate the third-party attribution the release archive carries. Run after
+# any dependency change; CI fails on a stale file.
+licenses:
+    deno run --allow-read --allow-write --allow-run --allow-env scripts/third-party-licenses.ts
+
+# Fail if the archived attribution no longer matches what the binary links
+licenses-check:
+    deno run --allow-read --allow-run --allow-env scripts/third-party-licenses.ts --check

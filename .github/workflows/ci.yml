@@ -70,3 +70,10 @@ jobs:
 
       - name: every client field has a schema attribute (or is baselined)
         run: deno run --allow-read --allow-run --allow-env scripts/tf-field-coverage.ts
+
+      # The archive carries the notices its dependencies' licences require, and
+      # a generated file goes stale on the next `go get` — a stale attribution
+      # being the same breach wearing a fix. Regenerating here is what makes
+      # adding a dependency without attributing it fail the build.
+      - name: third-party licenses are attributed
+        run: deno run --allow-read --allow-run --allow-env scripts/third-party-licenses.ts --check

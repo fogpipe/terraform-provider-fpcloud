@@ -458,14 +458,28 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Optional:    true,
 				Computed:    true,
 				NestedObject: schema.NestedAttributeObject{
+					// Optional+Computed rather than Required, because the whole
+					// attribute is Optional+Computed and the API fills it in. On
+					// a config that never writes a traffic block, Terraform's
+					// proposed new state descends into the element the provider
+					// read back and nulls every nested attribute the config does
+					// not supply — a Required one has nowhere to take a value
+					// from. That difference from prior state can never be
+					// reconciled, and it marks every other config-null computed
+					// attribute unknown, so the plan is non-empty forever
+					// (fogpipe/cloud-workspace#226). Only a serverless app has
+					// traffic at all, which is why the mode switch was where it
+					// showed.
 					Attributes: map[string]schema.Attribute{
 						"revision": schema.StringAttribute{
 							Description: "Revision name or '@latest' to route to the latest revision.",
-							Required:    true,
+							Optional:    true,
+							Computed:    true,
 						},
 						"percent": schema.Int64Attribute{
 							Description: "Traffic percentage (0-100). All percentages must sum to 100.",
-							Required:    true,
+							Optional:    true,
+							Computed:    true,
 						},
 						"url": schema.StringAttribute{
 							Description: "URL for this traffic target (computed by Knative).",

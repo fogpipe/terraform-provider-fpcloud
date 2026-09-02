@@ -96,7 +96,7 @@ func (r *ProjectResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"egress": schema.StringAttribute{
-				Description: "Egress policy: \"restricted\" (default), \"https\", or \"all\".",
+				Description: "Egress policy: \"restricted\" (default), \"https\" (TCP 443 anywhere), or \"all\" (every port the host network carries). TCP 25 and 465 are dropped upstream of the platform on every mode, so mail submission goes over 587.",
 				Optional:    true,
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{

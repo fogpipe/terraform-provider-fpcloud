@@ -40,6 +40,10 @@ DeleteRegistryTag
 # read-only observability — not something you reference as TF resource state
 GetAppLogs
 GetAppVersion
+# workload events (#126) — warnings the cluster emitted about pods that exist
+# right now. They age out of the cluster on their own, so a data source over
+# them returns a different set on every read and settles for nobody
+ListWorkloadEvents
 ListDeployments
 GetDeployment
 ListRevisions

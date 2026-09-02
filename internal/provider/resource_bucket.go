@@ -80,12 +80,12 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"quota_max_size": schema.Int64Attribute{
-				Description: "Maximum total size in bytes (unset = the platform default; 0 = unlimited, which only an operator may declare). It is a reservation against the organization's object-storage ceiling, so a size the ceiling cannot hold is refused. Mutable in place.",
+				Description: "Maximum total size in bytes; unset takes the platform default. It is a reservation against the organization's object-storage ceiling, so a size the ceiling cannot hold is refused — and so is 0, which is not a size. Mutable in place.",
 				Optional:    true,
 				Computed:    true,
 			},
 			"quota_max_objects": schema.Int64Attribute{
-				Description: "Maximum number of objects (unset = the platform default; 0 = unlimited, which only an operator may declare). Reserved against the organization's object-count ceiling the same way as quota_max_size. Mutable in place.",
+				Description: "Maximum number of objects; unset takes the platform default. Reserved against the organization's object-count ceiling the same way as quota_max_size, and 0 is refused for the same reason. Mutable in place.",
 				Optional:    true,
 				Computed:    true,
 			},
@@ -179,10 +179,8 @@ func (r *BucketResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 
 	// An unset quota is sent as absent rather than as zero: absent takes the
-	// platform default and 0 is unlimited, which only an operator may declare
-	// (ADR-128). Read off ValueInt64 the two were the same request, which is
-	// why the documented "0 = unlimited; unset = the server default" was never
-	// true through this resource.
+	// platform default, and zero is not a size and is refused (ADR-129). Read
+	// off ValueInt64 the two were the same request.
 	bucket, err := r.client.CreateBucket(ctx, plan.Project.ValueString(), client.CreateBucketRequest{
 		Name:            plan.Name.ValueString(),
 		QuotaMaxSize:    optionalInt64(plan.QuotaMaxSize),
@@ -366,7 +364,7 @@ func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 
 // optionalInt64 is a nullable/unknown TF number as a pointer, so an attribute
 // the config left out reaches the API as absent rather than as zero. The two
-// mean different things on a bucket quota (ADR-128).
+// mean different things on a bucket quota (ADR-128, ADR-129).
 func optionalInt64(v types.Int64) *int64 {
 	if v.IsNull() || v.IsUnknown() {
 		return nil

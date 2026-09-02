@@ -3,7 +3,7 @@ module github.com/fogpipe/terraform-provider-fpcloud
 go 1.26.1
 
 require (
-	github.com/fogpipe/cloud-cli v0.156.1-0.20260902180913-a14af768c509
+	github.com/fogpipe/cloud-cli v0.157.1-0.20260902185543-1885e1658ffc
 	github.com/hashicorp/terraform-plugin-framework v1.19.0
 	github.com/hashicorp/terraform-plugin-go v0.31.0
 	github.com/hashicorp/terraform-plugin-testing v1.15.0

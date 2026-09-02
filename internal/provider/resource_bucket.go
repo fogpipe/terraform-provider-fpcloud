@@ -80,12 +80,12 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"quota_max_size": schema.Int64Attribute{
-				Description: "Maximum total size in bytes (0 = unlimited; unset = the server default). Mutable in place.",
+				Description: "Maximum total size in bytes (unset = the platform default; 0 = unlimited, which only an operator may declare). It is a reservation against the organization's object-storage ceiling, so a size the ceiling cannot hold is refused. Mutable in place.",
 				Optional:    true,
 				Computed:    true,
 			},
 			"quota_max_objects": schema.Int64Attribute{
-				Description: "Maximum number of objects (0 = unlimited; unset = the server default). Mutable in place.",
+				Description: "Maximum number of objects (unset = the platform default; 0 = unlimited, which only an operator may declare). Reserved against the organization's object-count ceiling the same way as quota_max_size. Mutable in place.",
 				Optional:    true,
 				Computed:    true,
 			},
@@ -178,10 +178,15 @@ func (r *BucketResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
+	// An unset quota is sent as absent rather than as zero: absent takes the
+	// platform default and 0 is unlimited, which only an operator may declare
+	// (ADR-128). Read off ValueInt64 the two were the same request, which is
+	// why the documented "0 = unlimited; unset = the server default" was never
+	// true through this resource.
 	bucket, err := r.client.CreateBucket(ctx, plan.Project.ValueString(), client.CreateBucketRequest{
 		Name:            plan.Name.ValueString(),
-		QuotaMaxSize:    plan.QuotaMaxSize.ValueInt64(),
-		QuotaMaxObjects: plan.QuotaMaxObjects.ValueInt64(),
+		QuotaMaxSize:    optionalInt64(plan.QuotaMaxSize),
+		QuotaMaxObjects: optionalInt64(plan.QuotaMaxObjects),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating bucket", err.Error())
@@ -357,4 +362,15 @@ func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 	m.URLSlug = types.StringValue(bucket.URLSlug)
 	m.WebsiteURL = types.StringValue(bucket.WebsiteURL)
 	m.GlobalAlias = types.StringValue(bucket.GlobalAlias)
+}
+
+// optionalInt64 is a nullable/unknown TF number as a pointer, so an attribute
+// the config left out reaches the API as absent rather than as zero. The two
+// mean different things on a bucket quota (ADR-128).
+func optionalInt64(v types.Int64) *int64 {
+	if v.IsNull() || v.IsUnknown() {
+		return nil
+	}
+	out := v.ValueInt64()
+	return &out
 }

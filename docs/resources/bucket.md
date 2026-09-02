@@ -17,7 +17,7 @@ resource "fpcloud_bucket" "assets" {
   project = fpcloud_project.production.id
   name    = "assets"
 
-  quota_max_size    = 10737418240 # 10 GiB in bytes (0 = unlimited)
+  quota_max_size    = 10737418240 # 10 GiB in bytes; reserved against the org ceiling
   quota_max_objects = 100000      # 0 = unlimited
 }
 
@@ -61,8 +61,8 @@ resource "fpcloud_app" "uploader" {
 
 ### Optional
 
-- `quota_max_objects` (Number) Maximum number of objects (0 = unlimited; unset = the server default). Mutable in place.
-- `quota_max_size` (Number) Maximum total size in bytes (0 = unlimited; unset = the server default). Mutable in place.
+- `quota_max_objects` (Number) Maximum number of objects (unset = the platform default; 0 = unlimited, which only an operator may declare). Reserved against the organization's object-count ceiling the same way as quota_max_size. Mutable in place.
+- `quota_max_size` (Number) Maximum total size in bytes (unset = the platform default; 0 = unlimited, which only an operator may declare). It is a reservation against the organization's object-storage ceiling, so a size the ceiling cannot hold is refused. Mutable in place.
 - `url_slug` (String) Vanity website host label: the site moves to <url_slug>.web.<platform domain>. Globally unique; empty reverts to the derived host. Mutable in place.
 - `website_enabled` (Boolean) Serve the bucket as a public static website. Enabling makes the bucket's objects world-readable over HTTP. Mutable in place.
 - `website_error_document` (String) Document served on a miss (e.g. 404.html; set it to the index document for SPA fallback).

@@ -33,7 +33,13 @@ type OrgDataSourceModel struct {
 	MaxMemory  types.String `tfsdk:"max_memory"`
 	MaxPods    types.Int64  `tfsdk:"max_pods"`
 	MaxStorage types.String `tfsdk:"max_storage"`
-	CreatedAt  types.String `tfsdk:"created_at"`
+	// The axes bounded in the control plane rather than by a ResourceQuota
+	// (ADR-128): what the organization's bucket quotas may sum to, and what its
+	// projects may hold in the registry.
+	MaxObjectStorage   types.String `tfsdk:"max_object_storage"`
+	MaxObjects         types.Int64  `tfsdk:"max_objects"`
+	MaxRegistryStorage types.String `tfsdk:"max_registry_storage"`
+	CreatedAt          types.String `tfsdk:"created_at"`
 }
 
 // NewOrgDataSource returns a new OrgDataSource.
@@ -80,7 +86,19 @@ func (d *OrgDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, re
 				Computed:    true,
 			},
 			"max_storage": schema.StringAttribute{
-				Description: "The organization's storage ceiling, shared by every project it owns.",
+				Description: "The organization's persistent-volume ceiling, shared by every project it owns.",
+				Computed:    true,
+			},
+			"max_object_storage": schema.StringAttribute{
+				Description: "The organization's object-storage ceiling. Every bucket quota in the organization is a reservation against it, so a bucket the ceiling cannot hold is refused.",
+				Computed:    true,
+			},
+			"max_objects": schema.Int64Attribute{
+				Description: "The organization's object-count ceiling, summed the same way as max_object_storage.",
+				Computed:    true,
+			},
+			"max_registry_storage": schema.StringAttribute{
+				Description: "The organization's container-registry ceiling. Registry storage accrues on push rather than being declared, so it is enforced at the push against the last measurement.",
 				Computed:    true,
 			},
 			"created_at": schema.StringAttribute{
@@ -141,6 +159,9 @@ func (d *OrgDataSource) Read(ctx context.Context, req datasource.ReadRequest, re
 	data.MaxMemory = types.StringValue(org.MaxMemory)
 	data.MaxPods = types.Int64Value(int64(org.MaxPods))
 	data.MaxStorage = types.StringValue(org.MaxStorage)
+	data.MaxObjectStorage = types.StringValue(org.MaxObjectStorage)
+	data.MaxObjects = types.Int64Value(org.MaxObjects)
+	data.MaxRegistryStorage = types.StringValue(org.MaxRegistryStorage)
 	data.CreatedAt = types.StringValue(org.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

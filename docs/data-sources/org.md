@@ -42,5 +42,8 @@ output "org_cpu_ceiling" {
 - `fke_enabled` (Boolean) Whether the organization is entitled to FKE (tenant kubeconfig) access. Operator-granted.
 - `max_cpu` (String) The organization's CPU ceiling, shared by every project it owns.
 - `max_memory` (String) The organization's memory ceiling, shared by every project it owns.
+- `max_object_storage` (String) The organization's object-storage ceiling. Every bucket quota in the organization is a reservation against it, so a bucket the ceiling cannot hold is refused.
+- `max_objects` (Number) The organization's object-count ceiling, summed the same way as max_object_storage.
 - `max_pods` (Number) The organization's pod-count ceiling, shared by every project it owns.
-- `max_storage` (String) The organization's storage ceiling, shared by every project it owns.
+- `max_registry_storage` (String) The organization's container-registry ceiling. Registry storage accrues on push rather than being declared, so it is enforced at the push against the last measurement.
+- `max_storage` (String) The organization's persistent-volume ceiling, shared by every project it owns.

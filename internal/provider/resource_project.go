@@ -240,22 +240,35 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 	// egress, display_name, and the operator-only caps are the mutable fields;
 	// name and org force replacement.
 	if plan.Egress.ValueString() != state.Egress.ValueString() {
-		project, err := r.client.UpdateProjectEgress(ctx, id, plan.Egress.ValueString())
-		if err != nil {
+		if _, err := r.client.UpdateProjectEgress(ctx, id, plan.Egress.ValueString()); err != nil {
 			resp.Diagnostics.AddError("Error updating project egress", err.Error())
 			return
 		}
-		r.apply(&plan, project)
 	}
 
 	if plan.DisplayName.ValueString() != state.DisplayName.ValueString() {
-		project, err := r.client.UpdateProjectDisplayName(ctx, id, plan.DisplayName.ValueString())
-		if err != nil {
+		if _, err := r.client.UpdateProjectDisplayName(ctx, id, plan.DisplayName.ValueString()); err != nil {
 			resp.Diagnostics.AddError("Error updating project display name", err.Error())
 			return
 		}
-		r.apply(&plan, project)
 	}
+
+	// Read the settled project and write THAT, rather than whichever call above
+	// happened to run last. Every computed attribute is unknown in the plan, and
+	// only a value read back from the API makes it known — so an update that
+	// calls nothing here is exactly the one that must still read.
+	//
+	// An org respelling is that update (ADR-108): `org` is recorded as written
+	// and nothing about the project changes, so neither branch above fires and
+	// the plan's unknowns went to state verbatim — which Terraform refuses as
+	// "provider returned invalid result object after apply", on created_at,
+	// status and updated_at (fogpipe/cloud-workspace#250).
+	project, err := r.client.GetProject(ctx, id)
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading project", err.Error())
+		return
+	}
+	r.apply(&plan, project)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }

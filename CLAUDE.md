@@ -115,7 +115,7 @@ resources.
 - `go build ./...`, `go test ./...`, `gofmt` — CI gates all three.
 - A `t.Skip` is guarded on an input the environment can supply, never on an open
   issue: `internal/suite` refuses an unconditional one, so a test that must stop
-  running is deleted rather than parked (ADR-126).
+  running is deleted rather than parked (ADR-127).
 - Dependency versions track the platform's, `pkg/client` above all. A bare
   `go mod tidy` resolves to latest and drags the server's graph forward through
   this module.

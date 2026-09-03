@@ -142,7 +142,7 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed: true,
 			},
 			"website_url": schema.StringAttribute{
-				Description: "The URL the website is served at (present when the website is enabled).",
+				Description: "The URL the website is served at (present when the website is enabled): the platform host while it is served, or the oldest active custom domain once one exists — an active domain replaces the platform host (ADR-130).",
 				Computed:    true,
 			},
 			"global_alias": schema.StringAttribute{

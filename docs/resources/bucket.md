@@ -77,7 +77,7 @@ resource "fpcloud_app" "uploader" {
 - `region` (String) S3 region for the bucket.
 - `secret_access_key` (String, Sensitive) S3 secret access key for the bucket's initial access key. Returned only on creation — an imported bucket leaves this empty.
 - `status` (String) Current status of the bucket.
-- `website_url` (String) The URL the website is served at (present when the website is enabled).
+- `website_url` (String) The URL the website is served at (present when the website is enabled): the platform host while it is served, or the oldest active custom domain once one exists — an active domain replaces the platform host (ADR-130).
 
 ## Import
 

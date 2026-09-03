@@ -494,7 +494,7 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Computed:    true,
 			},
 			"url": schema.StringAttribute{
-				Description: "URL where the app is accessible.",
+				Description: "URL where the app is accessible: the platform host while it is served, or the oldest active custom domain once one exists — an active domain replaces the platform host (ADR-130), so this changes when a domain activates or is removed.",
 				Computed:    true,
 			},
 			"created_at": schema.StringAttribute{

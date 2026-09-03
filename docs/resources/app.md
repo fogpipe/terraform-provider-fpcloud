@@ -112,7 +112,7 @@ resource "fpcloud_app" "web" {
 - `id` (String) App ID.
 - `status` (String) Current status of the app.
 - `updated_at` (String) Timestamp when the app was last updated.
-- `url` (String) URL where the app is accessible.
+- `url` (String) URL where the app is accessible: the platform host while it is served, or the oldest active custom domain once one exists — an active domain replaces the platform host (ADR-130), so this changes when a domain activates or is removed.
 
 <a id="nestedatt--probes"></a>
 ### Nested Schema for `probes`

@@ -54,7 +54,7 @@ func cliConfigDir() string {
 	return filepath.Join(home, ".fpcloud")
 }
 
-// cliOIDCToken shells out to `fpcloud get-token` and returns the Google OIDC
+// cliOIDCToken shells out to `fpcloud get-token` and returns the OIDC
 // id-token the CLI login caches — transparently refreshed by the CLI from its
 // stored refresh token. This is the gcloud-ADC model: the provider can't refresh
 // itself (the OAuth client is baked into the fpcloud binary, not here), so it

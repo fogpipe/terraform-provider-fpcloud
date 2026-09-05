@@ -51,6 +51,8 @@ ListAudit
 ClusterInfo
 FKECredentials
 FKEToken
+OrgFKECredentials
+OrgFKEToken
 GetDatabaseConnection
 # the project status document (#778) is the strongest case in this group: it is
 # an observation of live cluster state that changes between two consecutive

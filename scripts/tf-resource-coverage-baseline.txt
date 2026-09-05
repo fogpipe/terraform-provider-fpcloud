@@ -8,6 +8,7 @@
 # auth / identity — not infrastructure state
 ProvisionUser
 GetMe
+AuthConfig
 
 # imperative one-shot actions — not declarative resource state
 CreateBackup

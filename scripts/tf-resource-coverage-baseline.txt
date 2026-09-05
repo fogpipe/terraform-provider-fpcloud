@@ -9,6 +9,7 @@
 ProvisionUser
 GetMe
 AuthConfig
+AuthSecurity
 
 # imperative one-shot actions — not declarative resource state
 CreateBackup

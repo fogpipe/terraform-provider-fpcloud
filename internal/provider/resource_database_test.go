@@ -20,10 +20,24 @@ func TestDatabaseResourceSchemaMutableAttrs(t *testing.T) {
 	provider.NewDatabaseResource().Schema(context.Background(), fwresource.SchemaRequest{}, &resp)
 	attrs := resp.Schema.Attributes
 
-	for _, name := range []string{"cpu", "memory", "storage", "instances", "pooler"} {
+	for _, name := range []string{"cpu", "memory", "storage", "pooler"} {
 		if _, ok := attrs[name]; !ok {
 			t.Errorf("fpcloud_database schema missing mutable attribute %q", name)
 		}
+	}
+
+	// instances is reported and never set (ADR-136). A client-side default is
+	// what would plan a replica away on the next apply, so the attribute must
+	// carry neither a default nor a way to configure one.
+	inst, ok := attrs["instances"].(schema.Int64Attribute)
+	if !ok {
+		t.Fatalf("instances attribute missing or not an Int64Attribute")
+	}
+	if inst.Optional || inst.Required {
+		t.Errorf("instances must be computed-only, but is configurable")
+	}
+	if inst.Default != nil {
+		t.Errorf("instances must carry no client-side default")
 	}
 
 	v, ok := attrs["version"].(schema.StringAttribute)

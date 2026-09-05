@@ -43,7 +43,6 @@ resource "fpcloud_database" "main" {
 - `display_name` (String) Human-readable display name (mutable cosmetic label). Defaults to the name.
 - `engine` (String) The database engine (e.g. postgres).
 - `extensions` (Set of String) Curated Postgres extensions installed in the database. The platform installs them, because an untrusted extension needs superuser to install and a managed database hands out none. Needs Postgres 18 or later. Mutable in place; adding or removing one restarts the database.
-- `instances` (Number) Number of Postgres instances (1 = single, >1 = HA replicas). Mutable in place. Defaults to 1, which is what a database is created with.
 - `memory` (String) Memory request/limit (e.g. "512Mi", "2Gi"). Mutable in place. Defaults to "512Mi".
 - `pooler` (Boolean) Whether a PgBouncer connection pooler is provisioned (injects DATABASE_POOL_URL). Mutable in place.
 - `storage` (String) Persistent volume size (e.g. "10Gi"). Mutable in place but grow-only — the API rejects a shrink. Defaults to "10Gi".
@@ -54,8 +53,9 @@ resource "fpcloud_database" "main" {
 - `created_at` (String) The time the database was created.
 - `host` (String) Cluster-internal hostname of the database's primary. Not reachable from outside the cluster — an app in the same project gets DATABASE_URL injected, and `fpcloud db connect` tunnels in from a workstation.
 - `id` (String) The unique identifier of the database.
+- `instances` (Number) Number of Postgres instances the platform runs this database as. Read-only: replication across nodes is what the platform promises, not a size the tenant buys (ADR-136). A client-side default here is what would delete a replica on the next apply.
 - `password` (String, Sensitive) Password for `username`, available only at creation. CloudNativePG owns the role and rotates it out of band, so this is a snapshot that will go stale — treat the injected DATABASE_URL or `fpcloud db connect` as the live credential.
-- `plan` (String) Legacy size tier, derived by the server from cpu/memory (e.g. "starter", "custom"). Read-only — size the database with cpu/memory/storage/instances instead.
+- `plan` (String) Legacy size tier, derived by the server from cpu/memory (e.g. "starter", "custom"). Read-only — size the database with cpu/memory/storage instead.
 - `port` (Number) The database port.
 - `status` (String) The current status of the database.
 - `username` (String) The database username.

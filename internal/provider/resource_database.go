@@ -11,7 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -127,7 +126,7 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			},
 			"plan": schema.StringAttribute{
 				Description: "Legacy size tier, derived by the server from cpu/memory (e.g. \"starter\", \"custom\"). " +
-					"Read-only — size the database with cpu/memory/storage/instances instead.",
+					"Read-only — size the database with cpu/memory/storage instead.",
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -157,11 +156,11 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Default:  stringdefault.StaticString("10Gi"),
 			},
 			"instances": schema.Int64Attribute{
-				Description: "Number of Postgres instances (1 = single, >1 = HA replicas). Mutable in place. " +
-					"Defaults to 1, which is what a database is created with.",
-				Optional: true,
+				Description: "Number of Postgres instances the platform runs this database as. " +
+					"Read-only: replication across nodes is what the platform promises, not a size " +
+					"the tenant buys (ADR-136). A client-side default here is what would delete a " +
+					"replica on the next apply.",
 				Computed: true,
-				Default:  int64default.StaticInt64(1),
 			},
 			"pooler": schema.BoolAttribute{
 				Description: "Whether a PgBouncer connection pooler is provisioned (injects DATABASE_POOL_URL). Mutable in place.",
@@ -284,18 +283,6 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	} else if ready != nil {
 		db = ready
-	}
-
-	// instances has no create-time field on the API, so reconcile it in place
-	// right after create when the user asked for more than the default single
-	// instance.
-	if !plan.Instances.IsNull() && !plan.Instances.IsUnknown() && plan.Instances.ValueInt64() > 1 {
-		updated, uerr := r.client.UpdateDatabase(ctx, db.ID, databaseUpdateReq(&plan))
-		if uerr != nil {
-			resp.Diagnostics.AddError("Error setting database instances after creation", uerr.Error())
-			return
-		}
-		db = updated
 	}
 
 	mapDatabaseToState(db, &plan)
@@ -424,10 +411,6 @@ func databaseUpdateReq(plan *DatabaseResourceModel) client.UpdateDatabaseRequest
 		Storage:     plan.Storage.ValueString(),
 		Version:     plan.Version.ValueString(),
 		Pooler:      &pooler,
-	}
-	if !plan.Instances.IsNull() && !plan.Instances.IsUnknown() {
-		instances := plan.Instances.ValueInt64()
-		req.Instances = &instances
 	}
 	// Unknown means the config says nothing and there is no prior state to keep,
 	// which is the one case the API must be left to decide.

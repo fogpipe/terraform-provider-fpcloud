@@ -39,6 +39,13 @@ jobs:
       - name: test
         run: go test ./... -count=1
 
+      # Symbol-level: red for a vulnerability on a path this code calls, quiet
+      # for one in a module it merely carries. A fresh advisory turns main red
+      # with no commit behind it, which is when the bump is owed
+      # (fogpipe/cloud-workspace#340).
+      - name: no vulnerability on a path the code calls
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
       - name: gofmt
         run: |
           unformatted="$(gofmt -l .)"

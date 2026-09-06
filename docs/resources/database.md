@@ -54,7 +54,7 @@ resource "fpcloud_database" "main" {
 - `host` (String) Cluster-internal hostname of the database's primary. Not reachable from outside the cluster — an app in the same project gets DATABASE_URL injected, and `fpcloud db connect` tunnels in from a workstation.
 - `id` (String) The unique identifier of the database.
 - `instances` (Number) Number of Postgres instances the platform runs this database as. Read-only: replication across nodes is what the platform promises, not a size the tenant buys (ADR-136). A client-side default here is what would delete a replica on the next apply.
-- `password` (String, Sensitive) Password for `username`, available only at creation. CloudNativePG owns the role and rotates it out of band, so this is a snapshot that will go stale — treat the injected DATABASE_URL or `fpcloud db connect` as the live credential.
+- `password` (String, Sensitive) Password for `username`, returned only at creation and kept in state from then on: the platform provisions it and stores no copy, so a later read has none. An imported database has no password in state; read it live with `fpcloud db connect`.
 - `plan` (String) Legacy size tier, derived by the server from cpu/memory (e.g. "starter", "custom"). Read-only — size the database with cpu/memory/storage instead.
 - `port` (Number) The database port.
 - `status` (String) The current status of the database.

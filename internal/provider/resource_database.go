@@ -195,9 +195,9 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Computed:    true,
 			},
 			"password": schema.StringAttribute{
-				Description: "Password for `username`, available only at creation. CloudNativePG owns the " +
-					"role and rotates it out of band, so this is a snapshot that will go stale — treat the " +
-					"injected DATABASE_URL or `fpcloud db connect` as the live credential.",
+				Description: "Password for `username`, returned only at creation and kept in state from then " +
+					"on: the platform provisions it and stores no copy, so a later read has none. An imported " +
+					"database has no password in state; read it live with `fpcloud db connect`.",
 				Computed:  true,
 				Sensitive: true,
 			},
@@ -483,9 +483,9 @@ func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 	state.Host = types.StringValue(db.Host)
 	state.Port = types.Int64Value(int64(db.Port))
 	state.Username = types.StringValue(db.Username)
-	// Password is returned only on create; CNPG rotates the app role out of band,
-	// so on any later read there is nothing to refresh it from and the last known
-	// value is kept rather than being blanked.
+	// Password is returned only on create — the platform keeps no copy
+	// (fogpipe/cloud-workspace#265) — so a later read has nothing to refresh it
+	// from and the value in state is kept rather than being blanked.
 	if db.Password != "" {
 		state.Password = types.StringValue(db.Password)
 	} else if state.Password.IsNull() || state.Password.IsUnknown() {

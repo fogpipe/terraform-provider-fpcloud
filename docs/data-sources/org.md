@@ -47,3 +47,5 @@ output "org_cpu_ceiling" {
 - `max_pods` (Number) The organization's pod-count ceiling, shared by every project it owns.
 - `max_registry_storage` (String) The organization's container-registry ceiling. Registry storage accrues on push rather than being declared, so it is enforced at the push against the last measurement.
 - `max_storage` (String) The organization's persistent-volume ceiling, shared by every project it owns.
+- `registry_measured_at` (String) When `used_registry_bytes` was measured. Null until a measurement exists, which is not the same as holding nothing.
+- `used_registry_bytes` (Number) Registry storage the organization's projects were last measured to hold, in bytes — the spend `max_registry_storage` is enforced against. Null until a measurement exists.

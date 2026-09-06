@@ -47,6 +47,11 @@ from your shell. Double quotes would expand it locally to an empty string and
 store the header as `Bearer `, and the self-call would 401 on every fire. The
 token stays in one place.
 
+It also stays out of the run history: a run's output prints the request as you
+configured it — `$CRON_TOKEN`, never its value — so a token in a header, the
+body or a query string (`--http-target '/internal/sweep?token=$CRON_TOKEN'`) is
+expanded only for the request that is sent.
+
 The job reaches `/internal/sweep` from inside the cluster, but on a public app
 (`--ingress all`) that path is also served on your public hostname. Keep it off
 the edge:

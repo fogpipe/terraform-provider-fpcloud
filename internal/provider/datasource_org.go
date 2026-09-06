@@ -39,6 +39,11 @@ type OrgDataSourceModel struct {
 	MaxObjectStorage   types.String `tfsdk:"max_object_storage"`
 	MaxObjects         types.Int64  `tfsdk:"max_objects"`
 	MaxRegistryStorage types.String `tfsdk:"max_registry_storage"`
+	// Spend against the registry ceiling: what the organization's projects
+	// were last measured to hold, and when (fogpipe/cloud-workspace#284). Null
+	// until a measurement exists — never measured is not zero.
+	UsedRegistryBytes  types.Int64  `tfsdk:"used_registry_bytes"`
+	RegistryMeasuredAt types.String `tfsdk:"registry_measured_at"`
 	CreatedAt          types.String `tfsdk:"created_at"`
 }
 
@@ -99,6 +104,14 @@ func (d *OrgDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, re
 			},
 			"max_registry_storage": schema.StringAttribute{
 				Description: "The organization's container-registry ceiling. Registry storage accrues on push rather than being declared, so it is enforced at the push against the last measurement.",
+				Computed:    true,
+			},
+			"used_registry_bytes": schema.Int64Attribute{
+				Description: "Registry storage the organization's projects were last measured to hold, in bytes — the spend `max_registry_storage` is enforced against. Null until a measurement exists.",
+				Computed:    true,
+			},
+			"registry_measured_at": schema.StringAttribute{
+				Description: "When `used_registry_bytes` was measured. Null until a measurement exists, which is not the same as holding nothing.",
 				Computed:    true,
 			},
 			"created_at": schema.StringAttribute{
@@ -162,6 +175,11 @@ func (d *OrgDataSource) Read(ctx context.Context, req datasource.ReadRequest, re
 	data.MaxObjectStorage = types.StringValue(org.MaxObjectStorage)
 	data.MaxObjects = types.Int64Value(org.MaxObjects)
 	data.MaxRegistryStorage = types.StringValue(org.MaxRegistryStorage)
+	data.UsedRegistryBytes, data.RegistryMeasuredAt = types.Int64Null(), types.StringNull()
+	if !org.RegistryMeasuredAt.IsZero() {
+		data.UsedRegistryBytes = types.Int64Value(org.UsedRegistryBytes)
+		data.RegistryMeasuredAt = types.StringValue(org.RegistryMeasuredAt.Format("2006-01-02T15:04:05Z07:00"))
+	}
 	data.CreatedAt = types.StringValue(org.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

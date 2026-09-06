@@ -83,7 +83,7 @@ func (p *FogpipeProvider) Configure(ctx context.Context, req provider.ConfigureR
 	if apiKey == "" {
 		resp.Diagnostics.AddError(
 			"Missing credentials",
-			"The provider found no credentials. Log in with the fpcloud CLI (`fpcloud login` or `fpcloud auth login`), set FPCLOUD_API_KEY, or set api_key in the provider configuration.",
+			"The provider found no credentials. Log in with the fpcloud CLI (`fpcloud login`), set FPCLOUD_API_KEY, or set api_key in the provider configuration.",
 		)
 		return
 	}

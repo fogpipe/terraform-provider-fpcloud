@@ -88,6 +88,7 @@ resource "fpcloud_runner" "own_app" {
 - `memory` (String) Memory limit for the runner, e.g. "4Gi". A job that exceeds it is killed rather than slowed, and GitHub can take several minutes to notice, so a run that stalls with no output and ends as cancelled is usually this.
 - `min_runners` (Number) Runners kept idle and ready. Defaults to 0 — the pool scales to zero and a job waits a few seconds for its pod.
 - `runner_group` (String) GitHub runner group the pool joins. Defaults to `Default`.
+- `services` (Attributes List) Containers to run beside every job in this pool, reachable on `127.0.0.1` from your steps. This is how a workflow gets a database or a cache here: a job's own `services:` block does not work, because GitHub serves one by running the job inside a container and there is no container mode on these runners. Declared on the pool, they also coexist with `builder`, which a container mode would not. The set is replaced whole, and every service counts towards your organization's ceiling for as long as a job is running. (see [below for nested schema](#nestedatt--services))
 
 ### Read-Only
 
@@ -106,6 +107,21 @@ Optional:
 
 - `cpu` (String) CPU limit for the builder, e.g. "1". Defaults to the platform's, which is not the runner's size.
 - `memory` (String) Memory limit for the builder, e.g. "2Gi". Defaults to the platform's, which is not the runner's size.
+
+
+<a id="nestedatt--services"></a>
+### Nested Schema for `services`
+
+Required:
+
+- `image` (String) Image to run, e.g. `postgres:18-alpine`.
+- `name` (String) Container name in the job pod: a DNS-1123 label, unique within the pool. It names nothing on the network — the containers share one.
+
+Optional:
+
+- `cpu` (String) CPU limit for this container, e.g. "500m". Defaults to the platform's own, which is not the runner's size — a database beside a job has nothing to do with how big the job is.
+- `env` (Map of String) Environment for the container. NOT a secret store: it is stored and read back as written, and it configures a container that lives for one job and is reachable from nothing but that job's own pod — which is what GitHub does with `services.*.env` too. A credential to anything that outlives the job does not belong here.
+- `memory` (String) Memory limit for this container, e.g. "1Gi". Defaults to the platform's own.
 
 ## Import
 

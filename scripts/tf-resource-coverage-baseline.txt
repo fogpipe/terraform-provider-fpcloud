@@ -6,8 +6,31 @@
 # groups as documentation and let a fresh entry land ungrouped at the bottom.
 
 # auth / identity — not infrastructure state
-ProvisionUser
 GetMe
+# --- one-shot operations and cross-project reads (fogpipe/cloud-workspace#306
+#     bumped the client and surfaced these; each is a reviewed exclusion) -----
+# The database tunnel's connection details (ADR-045, ADR-154): a credential
+# minted per call and valid for that call. There is no state to converge on.
+databaseConnection
+# A pool recycle (#145) is an operation with a lifetime, not a state. `apply`
+# has no way to say "restart now and not again", so an attribute over it would
+# either recycle on every apply or sit as permanent drift. `fpcloud runner
+# restart` is the surface.
+RestartRunner
+# `runner check` (#774) answers a question about text the caller supplies. It
+# creates nothing, changes nothing and has no id — there is no resource for it
+# to be.
+CheckRunnerWorkflows
+# Machine identities at the ORG (#138). The service-account resource is scoped
+# to a project, which is where a config declares one; a data source over the
+# org's whole set would return identities no config in this state owns, and
+# creating one there is `fpadmin`'s.
+CreateOrgServiceAccount
+ListOrgServiceAccounts
+# Who did what inside a database tunnel (ADR-163), read from the log store for
+# its retention. An observation of the past, and one that moves between two
+# consecutive plans.
+DatabaseAuditLog
 AuthConfig
 AuthSecurity
 
@@ -56,7 +79,6 @@ FKECredentials
 FKEToken
 OrgFKECredentials
 OrgFKEToken
-GetDatabaseConnection
 # the project status document (#778) is the strongest case in this group: it is
 # an observation of live cluster state that changes between two consecutive
 # reads, so a data source over it would hand Terraform a value that never

@@ -47,6 +47,7 @@ type RunnerResourceModel struct {
 	CPU             types.String `tfsdk:"cpu"`
 	Memory          types.String `tfsdk:"memory"`
 	Builder         types.Object `tfsdk:"builder"`
+	Services        types.List   `tfsdk:"services"`
 	Credential      types.String `tfsdk:"credential"`
 
 	GitHubAppID             types.String `tfsdk:"github_app_id"`
@@ -168,6 +169,50 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					},
 				},
 			},
+			"services": schema.ListNestedAttribute{
+				Description: "Containers to run beside every job in this pool, reachable on `127.0.0.1` " +
+					"from your steps. This is how a workflow gets a database or a cache here: a job's own " +
+					"`services:` block does not work, because GitHub serves one by running the job inside " +
+					"a container and there is no container mode on these runners. Declared on the pool, " +
+					"they also coexist with `builder`, which a container mode would not. The set is " +
+					"replaced whole, and every service counts towards your organization's ceiling for as " +
+					"long as a job is running.",
+				Optional: true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"name": schema.StringAttribute{
+							Description: "Container name in the job pod: a DNS-1123 label, unique within the pool. " +
+								"It names nothing on the network — the containers share one.",
+							Required: true,
+						},
+						"image": schema.StringAttribute{
+							Description: "Image to run, e.g. `postgres:18-alpine`.",
+							Required:    true,
+						},
+						"env": schema.MapAttribute{
+							Description: "Environment for the container. NOT a secret store: it is stored and " +
+								"read back as written, and it configures a container that lives for one job " +
+								"and is reachable from nothing but that job's own pod — which is what GitHub " +
+								"does with `services.*.env` too. A credential to anything that outlives the " +
+								"job does not belong here.",
+							ElementType: types.StringType,
+							Optional:    true,
+						},
+						"cpu": schema.StringAttribute{
+							Description: "CPU limit for this container, e.g. \"500m\". Defaults to the platform's " +
+								"own, which is not the runner's size — a database beside a job has nothing to " +
+								"do with how big the job is.",
+							Optional: true,
+							Computed: true,
+						},
+						"memory": schema.StringAttribute{
+							Description: "Memory limit for this container, e.g. \"1Gi\". Defaults to the platform's own.",
+							Optional:    true,
+							Computed:    true,
+						},
+					},
+				},
+			},
 			"credential": schema.StringAttribute{
 				Description: "How the pool authenticates: `platform` (default) uses the Fogpipe GitHub App " +
 					"and takes its account from the project's GitHub connection, so nothing else is set here; " +
@@ -262,6 +307,7 @@ func (r *RunnerResource) Create(ctx context.Context, req resource.CreateRequest,
 		CPU:                     plan.CPU.ValueString(),
 		Memory:                  plan.Memory.ValueString(),
 		Builder:                 runnerBuilderFromModel(ctx, plan.Builder, &resp.Diagnostics),
+		Services:                runnerServicesFromModel(ctx, plan.Services, &resp.Diagnostics),
 		Credential:              plan.Credential.ValueString(),
 		GitHubAppID:             plan.GitHubAppID.ValueString(),
 		GitHubAppInstallationID: plan.GitHubAppInstallationID.ValueString(),
@@ -375,6 +421,19 @@ func (r *RunnerResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 		updateReq.Builder, updateReq.NoBuilder = builder, builder == nil
 	}
+	// Same reasoning, same request: the set is replaced whole, and an empty
+	// list is how a config says "none" — which is why this sends a non-nil
+	// pointer to a possibly-empty slice rather than nil for both cases.
+	if !plan.Services.IsUnknown() && !plan.Services.Equal(state.Services) {
+		services := runnerServicesFromModel(ctx, plan.Services, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if services == nil {
+			services = []client.RunnerService{}
+		}
+		updateReq.Services = &services
+	}
 
 	runner, err := r.client.UpdateRunner(ctx, state.ID.ValueString(), updateReq)
 	if err != nil {
@@ -428,6 +487,7 @@ func (r *RunnerResource) apply(ctx context.Context, m *RunnerResourceModel, runn
 	m.MinRunners = types.Int64Value(int64(runner.MinRunners))
 	m.MaxRunners = types.Int64Value(int64(runner.MaxRunners))
 	setRunnerBuilderOnModel(m, runner.Builder, diags)
+	setRunnerServicesOnModel(ctx, m, runner.Services, diags)
 	m.Credential = types.StringValue(runner.Credential)
 	m.Image = optionalString(runner.Image)
 	m.CPU = optionalString(runner.CPU)
@@ -441,6 +501,88 @@ func (r *RunnerResource) apply(ctx context.Context, m *RunnerResourceModel, runn
 	labels, d := types.ListValueFrom(ctx, types.StringType, runner.Labels)
 	diags.Append(d...)
 	m.Labels = labels
+}
+
+// runnerServiceAttrTypes is one service block's shape, needed to build a
+// correctly typed null list when a pool declares none.
+func runnerServiceAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"name":   types.StringType,
+		"image":  types.StringType,
+		"env":    types.MapType{ElemType: types.StringType},
+		"cpu":    types.StringType,
+		"memory": types.StringType,
+	}
+}
+
+type runnerServiceModel struct {
+	Name   types.String `tfsdk:"name"`
+	Image  types.String `tfsdk:"image"`
+	Env    types.Map    `tfsdk:"env"`
+	CPU    types.String `tfsdk:"cpu"`
+	Memory types.String `tfsdk:"memory"`
+}
+
+// runnerServicesFromModel converts the configured blocks into client services.
+// A null or unknown list is a pool that declares none; an empty list is a pool
+// that declares none ON PURPOSE, and the update path needs those to differ.
+func runnerServicesFromModel(ctx context.Context, list types.List, diags *diag.Diagnostics) []client.RunnerService {
+	if list.IsNull() || list.IsUnknown() {
+		return nil
+	}
+	var models []runnerServiceModel
+	diags.Append(list.ElementsAs(ctx, &models, false)...)
+	if diags.HasError() {
+		return nil
+	}
+	out := make([]client.RunnerService, 0, len(models))
+	for _, m := range models {
+		svc := client.RunnerService{
+			Name:   m.Name.ValueString(),
+			Image:  m.Image.ValueString(),
+			CPU:    m.CPU.ValueString(),
+			Memory: m.Memory.ValueString(),
+		}
+		if !m.Env.IsNull() && !m.Env.IsUnknown() {
+			env := map[string]string{}
+			diags.Append(m.Env.ElementsAs(ctx, &env, false)...)
+			svc.Env = env
+		}
+		out = append(out, svc)
+	}
+	return out
+}
+
+// setRunnerServicesOnModel writes the API's services back. The sizes are
+// Computed, so what a pool costs is readable from `terraform show` rather than
+// inferred from a default nobody wrote down — the same reason the builder's are.
+func setRunnerServicesOnModel(ctx context.Context, m *RunnerResourceModel, services []client.RunnerService, diags *diag.Diagnostics) {
+	elemType := types.ObjectType{AttrTypes: runnerServiceAttrTypes()}
+	if len(services) == 0 {
+		m.Services = types.ListNull(elemType)
+		return
+	}
+	values := make([]attr.Value, 0, len(services))
+	for _, svc := range services {
+		env := types.MapNull(types.StringType)
+		if len(svc.Env) > 0 {
+			v, d := types.MapValueFrom(ctx, types.StringType, svc.Env)
+			diags.Append(d...)
+			env = v
+		}
+		obj, d := types.ObjectValue(runnerServiceAttrTypes(), map[string]attr.Value{
+			"name":   types.StringValue(svc.Name),
+			"image":  types.StringValue(svc.Image),
+			"env":    env,
+			"cpu":    types.StringValue(svc.CPU),
+			"memory": types.StringValue(svc.Memory),
+		})
+		diags.Append(d...)
+		values = append(values, obj)
+	}
+	list, d := types.ListValue(elemType, values)
+	diags.Append(d...)
+	m.Services = list
 }
 
 // runnerBuilderAttrTypes is the builder block's shape, needed to build a null

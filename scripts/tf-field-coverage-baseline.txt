@@ -51,6 +51,12 @@ Runner.queue
 # jobs, read live from the listener. The same reading as instances, from the
 # other side of the queue.
 Runner.admitted_runners
+# The recycle record (#145): asked for, in progress, finished. It is an
+# operation with a lifetime, not a state a config can hold — `terraform apply`
+# has no way to say "restart now and not again", and an attribute over the
+# stamp would either re-restart on every apply or be permanent drift. The
+# restart is `fpcloud runner restart`.
+Runner.restart
 # What a bucket currently holds is a measurement of the data plane, which the
 # tenant writes to without Terraform: an attribute over it would move on every
 # refresh and never converge on anything a config could state.
@@ -103,3 +109,10 @@ OrgMember.updated_at
 Runner.created_at
 Runner.updated_at
 ServiceAccount.updated_at
+
+# A service account belongs to the project the resource already names, and the
+# org is that project's (#138 gives a machine identity the org's name so two
+# tenants cannot mint the same one). Terraform states the project; deriving the
+# org from it is the platform's, and an attribute over it would be a second
+# place to write down one fact.
+ServiceAccount.organization_id

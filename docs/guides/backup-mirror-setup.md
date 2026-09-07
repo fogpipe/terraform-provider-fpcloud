@@ -25,7 +25,7 @@ its schedule — there is no WAL and no point-in-time restore from it.
 |---|---|---|
 | `aws` | **keyless** — an IAM role your account lets the platform's identity assume | An S3 bucket in your AWS account |
 | `s3` | a static access key + secret, stored encrypted and never returned | Any S3-compatible store: Cloudflare R2, Backblaze B2, Hetzner Object Storage, Garage, a GCS bucket through its S3-compatible endpoint |
-| `gcp` | keyless — Workload Identity Federation | Accepted by every configuration surface, but **no backup can run against it yet** (`fogpipe/cloud-workspace#369`). Use `s3` with an HMAC key against GCS in the meantime. |
+| `gcp` | **keyless** — Workload Identity Federation, impersonating a service account you name | A Google Cloud Storage bucket in your project |
 
 ## 1. Set the destination
 
@@ -52,6 +52,14 @@ fpcloud db backup destination set mydb \
   --secret-access-key <R2_SECRET_ACCESS_KEY> \
   --schedule '0 4 * * *'
 
+# keyless GCP
+fpcloud db backup destination set mydb \
+  --provider gcp \
+  --bucket my-db-backups \
+  --wif-provider projects/123456789/locations/global/workloadIdentityPools/fpcloud/providers/fpcloud-oidc \
+  --service-account fpcloud-backup@my-project.iam.gserviceaccount.com \
+  --schedule '0 4 * * *'
+
 fpcloud db backup destination show mydb    # the config, the last run, never the secret
 fpcloud db backup destination unset mydb   # stop; the bucket and what is in it are yours and untouched
 ```
@@ -73,6 +81,15 @@ resource "fpcloud_database_backup_destination" "offsite" {
   schedule      = "0 4 * * *"
 }
 
+resource "fpcloud_database_backup_destination" "gcs" {
+  database_id     = fpcloud_database.main.id
+  provider_type   = "gcp"
+  bucket          = "my-db-backups"
+  wif_provider    = "projects/123456789/locations/global/workloadIdentityPools/fpcloud/providers/fpcloud-oidc"
+  service_account = "fpcloud-backup@my-project.iam.gserviceaccount.com"
+  schedule        = "0 4 * * *"
+}
+
 resource "fpcloud_database_backup_destination" "r2" {
   database_id       = fpcloud_database.main.id
   provider_type     = "s3"
@@ -89,11 +106,11 @@ resource "fpcloud_database_backup_destination" "r2" {
 In the console, the same form is the **Backup destination (bring your own
 bucket)** section of a database's page, with the last run beside it.
 
-## 2. Let the platform in (AWS only)
+## 2. Let the platform in (AWS and GCP)
 
-The `s3` provider needs nothing here: the key is the credential. For `aws`, your
-account has to trust the identity the platform presents. It is a JWT from the
-issuer `https://oidc.cloud.fogpipe.com` whose subject names exactly one
+The `s3` provider needs nothing here: the key is the credential. For `aws` and
+`gcp`, your account has to trust the identity the platform presents. It is a JWT
+from the issuer `https://oidc.cloud.fogpipe.com` whose subject names exactly one
 database:
 
 ```
@@ -140,6 +157,64 @@ formality — STS fetches the issuer's keys over TLS. If a run fails on the
 exchange, compare the `Identity` the CLI printed against the policy's `sub`,
 byte for byte: that and the audience are the only two things it checks.
 
+### GCP
+
+Google's side is a workload-identity pool that trusts the same issuer, and a
+service account the pool's principal may impersonate. The backup writes as that
+service account, so the bucket grant goes on it and nothing else changes.
+
+```bash
+ISSUER=https://oidc.cloud.fogpipe.com
+PROJECT=my-project
+POOL=fpcloud
+PROVIDER=fpcloud-oidc
+BUCKET=my-db-backups
+SUB='backup:k3f/prod/mydb'
+SA="fpcloud-backup@${PROJECT}.iam.gserviceaccount.com"
+
+# once per project: a pool, and a provider that trusts the issuer
+gcloud iam workload-identity-pools create "$POOL" --location=global \
+  --project="$PROJECT" --display-name="Fogpipe Cloud"
+gcloud iam workload-identity-pools providers create-oidc "$PROVIDER" \
+  --location=global --project="$PROJECT" --workload-identity-pool="$POOL" \
+  --issuer-uri="$ISSUER" \
+  --attribute-mapping="google.subject=assertion.sub" \
+  --attribute-condition="assertion.sub == \"${SUB}\""
+
+# the identity the backup writes as, and the bucket it may write to
+gcloud iam service-accounts create fpcloud-backup --project="$PROJECT"
+gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
+  --member="serviceAccount:${SA}" --role=roles/storage.objectAdmin
+
+# let exactly that subject impersonate it
+POOL_ID="$(gcloud iam workload-identity-pools describe "$POOL" --location=global \
+  --project="$PROJECT" --format='value(name)')"
+gcloud iam service-accounts add-iam-policy-binding "$SA" --project="$PROJECT" \
+  --role=roles/iam.workloadIdentityUser \
+  --member="principal://iam.googleapis.com/${POOL_ID}/subject/${SUB}"
+
+# what --wif-provider takes
+gcloud iam workload-identity-pools providers describe "$PROVIDER" --location=global \
+  --project="$PROJECT" --workload-identity-pool="$POOL" --format='value(name)'
+```
+
+`--wif-provider` takes that resource path
+(`projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`)
+and `--service-account` the service-account email. The attribute condition is
+what pins the trust to one database; widen it to
+`assertion.sub.startsWith("backup:k3f/prod/")` to cover a project, and bind
+`principalSet://…/attribute.../…` instead of `principal://…/subject/…` if you do.
+
+The platform exchanges the token at `sts.googleapis.com` and then impersonates
+the service account, so a failure names which half refused: `invalid_target`
+means the pool or provider path is wrong, an `unauthorized_client` or a subject
+mismatch means the attribute condition does not admit the `Identity` the CLI
+printed, and a `403` on the object means the bucket binding is missing.
+
+**The bucket must already exist.** The backup never creates or probes it — the
+grant above is deliberately object-level, and a bucket check would ask for a
+permission it does not include.
+
 ## 3. Run it, and read the result
 
 ```bash
@@ -156,10 +231,15 @@ A destination with a schedule is also part of the platform's **restore drill**:
 periodically the latest dump in your bucket is restored over a scratch copy of
 your database and asked a question, the same way the platform's own archives
 are. A dump that uploaded cleanly and does not `pg_restore` — a truncated
-object, an archive a client older than your server wrote — is found there and
-raised to the platform's operators, rather than on the day you reach for it.
-On-demand-only destinations are not drilled: a dump you took by hand is one
-you can test by hand.
+object, an archive a client older than your server wrote — is found there
+rather than on the day you reach for it. The outcome is yours to read:
+`destination show` prints **Restore Proved** — when your dump was last
+restored and answered a query, or what the latest attempt failed with — the
+console's destination panel says the same, and the provider resource carries
+it as `last_restored_at`, `last_restore_attempt_at` and `last_restore_error`.
+It is a reading, not a button: the drill runs on the platform's own rotation,
+one database per interval. On-demand-only destinations are not drilled: a dump
+you took by hand is one you can test by hand, and the reading says so.
 
 ## What is in your bucket
 

@@ -23,9 +23,13 @@ Once per project, connect the GitHub account your runners will serve:
 fpcloud github connect
 ```
 
-This opens GitHub and asks you to authorize as yourself. Fogpipe then records
-the account against this project. That is the entire setup: nothing to copy, no
-key to handle, and no organization name to type.
+This opens GitHub and asks you to authorize as yourself, then waits and prints
+the outcome — connected, or refused and why. Fogpipe records the account
+against this project. That is the entire setup: nothing to copy, no key to
+handle, and no organization name to type. `--no-wait` prints the link and
+returns at once; the outcome is recorded either way, and `fpcloud github
+status` reads it back, including the reason for a refusal and the install link
+it carries.
 
 Only accounts **you administer** can be connected — an owner of the
 organization, or your own user account. Being a member is not enough, because
@@ -35,7 +39,8 @@ does not control.
 
 If the **Fogpipe** app is not installed on the account yet, connecting tells you
 and gives you the link. If you administer more than one account with it
-installed, say which:
+installed, say which — a named account is checked before the browser opens, so
+a missing installation is reported there and then:
 
 ```bash
 fpcloud github connect --account acme
@@ -74,6 +79,24 @@ jobs would land in whichever project's runners GitHub happened to pick.
 
 `fpcloud runner create` prints the exact label, and `fpcloud runner show <name>`
 repeats it, so you never have to assemble it yourself.
+
+`runner show` also says what the pool is doing: **Busy** is runners executing
+a job beside the most the pool may run at once (`3 of 4`), one line per busy
+runner names the job and repository it serves, and **Waiting** is GitHub's own
+count of jobs handed to the pool that no runner has started — read off the
+pool's listener, never reconstructed. That last number is the whole
+diagnosis: a pool with nothing waiting is idle, a pool with jobs waiting and
+every runner busy is undersized, and a pool with jobs waiting and no runner
+busy cannot schedule (see `--max` and the org ceiling below). A queue the
+platform could not read is reported as unreadable, and `runner list` and
+`project status` show it as `?` — never as an empty queue.
+
+The same per-account registration is the pool's reach: a workflow in a
+repository **outside** the connected account never sees it. Naming the label
+there is not an error on either side — the job queues, waiting for a runner
+GitHub will never offer it. Both commands say which account the label works
+in, and `fpcloud app webhook setup` warns when the repository it is given is
+outside it.
 
 ## Bringing your own credential
 
@@ -291,6 +314,29 @@ reach GitHub, actions and toolchains without you opening your project's egress.
 And they **cannot** reach your project's own services by their in-cluster names:
 a job that needs your database or your app should go through its public
 address, or bring its own service container.
+
+## Restarting a pool
+
+```bash
+fpcloud runner restart ci            # drain: running jobs finish, then every runner is new
+fpcloud runner restart ci --force    # now: running jobs are killed
+fpcloud runner restart ci --no-wait  # accepted; `runner show` reports the rest
+```
+
+A pool that has stopped taking work — a listener wedged on GitHub, a runner
+that will never finish — is recycled with `restart`, not by deleting anything.
+The platform accepts the request and carries it out: the pool's runners are
+replaced and its listener with them. **Draining is the default**: a runner in
+the middle of a job finishes it first, and because an ephemeral runner serves
+exactly one job the drain ends with the longest running job rather than never.
+While it waits, the command and `runner show` say which jobs it is waiting on,
+so a restart held by a twelve-minute job is not mistaken for a hang.
+
+`--force` is for the pool that a drain cannot recover — one wedged on a runner
+that will never finish. It replaces every runner now and kills whatever they
+are running; GitHub does not re-offer a job whose runner died, so the jobs are
+lost, not retried. It asks before it does that. The safe action is the one you
+get without typing anything.
 
 ## Removing a pool
 

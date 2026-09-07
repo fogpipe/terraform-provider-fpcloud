@@ -65,6 +65,32 @@ Dropping one is still ours: the platform owns what it installed, so
 `drop extension pg_statecharts` under your own role is refused. A migration tool
 that reverts as far as its first change will stop there.
 
+## Removing one
+
+An extension you leave out of the set is **uninstalled**, not just unmounted:
+the platform runs the `drop extension` you cannot, and only then takes the
+image away.
+
+```bash
+fpcloud db update events --extension semver \
+  --cpu 500m --memory 1Gi --storage 10Gi     # pg_statecharts is dropped
+```
+
+`drop extension` takes what the extension created along with it — for
+`pg_statecharts`, the `fsm` schema and every state machine in it. The CLI asks
+before it does that (`--yes` skips the prompt), and the console asks in the same
+place; Terraform does not ask at all, so a removed element of `extensions` is
+applied as written.
+
+**Anything of yours that depends on it refuses the removal.** A column typed on
+the extension's type, an index using its operator class, a view calling its
+function: the removal is refused and the objects are named, so drop them
+yourself and remove the extension afterwards. Nothing is ever cascaded away on
+your behalf.
+
+If the drop fails, nothing is unmounted — the database is left exactly as it
+was, with the extension installed and working.
+
 ## What is available
 
 | Extension | Version | Provides |
@@ -105,7 +131,7 @@ for an extension.
 ## What it costs
 
 Adding or removing an extension is a **restart-class** change: the database
-rolls its pods to pick up the new mount, the same as a version or resource
+rolls its pods to pick up the mount change, the same as a version or resource
 change. Everything else about the database is unchanged — backups, restore,
 point-in-time recovery and failover all behave exactly as they do without
 extensions, because the database itself is still the image we operate.

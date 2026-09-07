@@ -38,6 +38,18 @@ func TestAccAppResource_mode(t *testing.T) {
 					resource.TestCheckResourceAttr("fpcloud_app.test", "mode", "serverless"),
 				),
 			},
+			// Step 3: back to always-on. Traffic is a Knative concept and an
+			// always-on app has none, so the state the switch leaves behind
+			// carries none either — a kept split planned its own removal on
+			// every run until the app was tainted (fogpipe/cloud-workspace#13).
+			// The framework's post-apply plan check is the assertion.
+			{
+				Config: testAccAppConfigMode(projectName, appName, "always-on"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("fpcloud_app.test", "mode", "always-on"),
+					resource.TestCheckNoResourceAttr("fpcloud_app.test", "traffic.0.revision"),
+				),
+			},
 		},
 	})
 }

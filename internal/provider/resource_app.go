@@ -1446,7 +1446,13 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 // becoming a diff between null and [].
 func stringListFromAPI(prior types.List, vals []string) types.List {
 	if len(vals) == 0 {
-		if !prior.IsNull() && !prior.IsUnknown() {
+		// An explicit `[]` in the config and the API's "nothing" are the same
+		// value, and only that one survives. A prior with elements does not:
+		// keeping it read an app whose release command had been cleared
+		// outside Terraform as still carrying the configured one, so the
+		// drift was invisible to plan and every deploy from then on skipped
+		// the migration (fogpipe/cloud-workspace#348).
+		if !prior.IsNull() && !prior.IsUnknown() && len(prior.Elements()) == 0 {
 			return prior
 		}
 		return types.ListNull(types.StringType)

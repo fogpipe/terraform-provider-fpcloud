@@ -40,6 +40,11 @@ func TestStringListFromAPI(t *testing.T) {
 	if got := stringListFromAPI(tfStrings(t, "old"), []string{"new"}); !got.Equal(tfStrings(t, "new")) {
 		t.Fatalf("the API's value wins over the prior, got %v", got)
 	}
+	// A value cleared outside Terraform is drift, not the prior
+	// (fogpipe/cloud-workspace#348).
+	if got := stringListFromAPI(tfStrings(t, "migrate"), nil); !got.IsNull() {
+		t.Fatalf("a prior with elements must not survive an empty answer, got %v", got)
+	}
 }
 
 func TestSetVolumeMountsOnModel(t *testing.T) {

@@ -35,7 +35,7 @@ leaves the cluster, never touches your public hostname, and needs no egress rule
 Authenticate it with a value your app already has:
 
 ```sh
-fpcloud config set CRON_TOKEN=s3cr3t --app api
+fpcloud app env set api CRON_TOKEN=s3cr3t
 fpcloud job create sweep --app api --schedule "*/15 * * * *" \
   --http-target /internal/sweep \
   --header 'Authorization: Bearer $CRON_TOKEN'

@@ -94,20 +94,18 @@ ListOrgUsage
 # to hang on: a tenant able to declare an org in Terraform could raise its own
 # ceiling by declaring a second. The ceiling and the FKE entitlement are the
 # operator's to set for the same reason — a tenant that could write its own
-# ceiling has no ceiling — and renaming is a one-line write on something
+# ceiling has no ceiling — and are no longer in pkg/client at all (ADR-089,
+# fogpipe/cloud-workspace#121); renaming is a one-line write on something
 # Terraform does not own. fpcloud_org is a data source instead.
 UpdateOrgDisplayName
-UpdateOrgFKE
-UpdateOrgQuota
 
 # price books (ADR-090) — which book an org is billed against is assigned by
 # the operator, not declared by the org: it grants nothing, so there is no
 # entitlement for a plan to converge on, and a tenant able to write it would
-# be choosing its own prices. The rates themselves are published by the
-# platform, so reading them is reading someone else's desired state.
+# be choosing its own prices; assigning it is fpadmin's and no longer in
+# pkg/client (ADR-089). The rates themselves are published by the platform,
+# so reading them is reading someone else's desired state.
 OrgPrices
-OrgPriceBook
-UpdateOrgPriceBook
 
 # website versions (ADR-050) — a version is a record of what the site served,
 # created by a deploy rather than declared. Terraform cannot make one exist,

@@ -36,11 +36,12 @@ type BucketResourceModel struct {
 	AccessKeyID     types.String `tfsdk:"access_key_id"`
 	SecretAccessKey types.String `tfsdk:"secret_access_key"`
 
+	PublicRead           types.Bool   `tfsdk:"public_read"`
 	WebsiteEnabled       types.Bool   `tfsdk:"website_enabled"`
 	WebsiteIndexDocument types.String `tfsdk:"website_index_document"`
 	WebsiteErrorDocument types.String `tfsdk:"website_error_document"`
 	URLSlug              types.String `tfsdk:"url_slug"`
-	WebsiteURL           types.String `tfsdk:"website_url"`
+	URL                  types.String `tfsdk:"url"`
 	GlobalAlias          types.String `tfsdk:"global_alias"`
 }
 
@@ -119,9 +120,19 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"public_read": schema.BoolAttribute{
+				Description: "Serve the bucket's objects to anyone with the URL, without a signature. " +
+					"This is the property a website needs and can be had without one: an asset origin " +
+					"is public_read and nothing else, with no index document and no versioned publishing. " +
+					"Setting website_enabled sets this; clearing this clears website_enabled, because a " +
+					"site nobody can read is not a site. Mutable in place.",
+				Optional: true,
+				Computed: true,
+			},
 			"website_enabled": schema.BoolAttribute{
-				Description: "Serve the bucket as a public static website. Enabling makes the bucket's " +
-					"objects world-readable over HTTP. Mutable in place.",
+				Description: "Add the static-website serving conventions to a public bucket: an index " +
+					"document for a directory request, an error document for a miss, and eligibility for " +
+					"SPA fallback and versioned publishing. Implies public_read. Mutable in place.",
 				Optional: true,
 				Computed: true,
 			},
@@ -141,8 +152,8 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Optional: true,
 				Computed: true,
 			},
-			"website_url": schema.StringAttribute{
-				Description: "The URL the website is served at (present when the website is enabled): the platform host while it is served, or the oldest active custom domain once one exists — an active domain replaces the platform host (ADR-130).",
+			"url": schema.StringAttribute{
+				Description: "Where the bucket answers, present whenever public_read is set: the platform host while it is served, or the oldest active custom domain once one exists — an active domain replaces the platform host (ADR-130).",
 				Computed:    true,
 			},
 			"global_alias": schema.StringAttribute{
@@ -185,6 +196,7 @@ func (r *BucketResource) Create(ctx context.Context, req resource.CreateRequest,
 		Name:            plan.Name.ValueString(),
 		QuotaMaxSize:    optionalInt64(plan.QuotaMaxSize),
 		QuotaMaxObjects: optionalInt64(plan.QuotaMaxObjects),
+		PublicRead:      optionalBool(plan.PublicRead),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating bucket", err.Error())
@@ -254,6 +266,21 @@ func (r *BucketResource) Update(ctx context.Context, req resource.UpdateRequest,
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating bucket quota", err.Error())
 		return
+	}
+
+	// Public reads before the conventions: turning the website on sets it
+	// anyway, and turning reads off would undo a website the same plan asked
+	// for (ADR-161). An unset optional+computed attribute is unknown in the
+	// plan — treat it as "keep the current value", not as a change to false.
+	public := plan.PublicRead.ValueBool()
+	if plan.PublicRead.IsUnknown() {
+		public = state.PublicRead.ValueBool()
+	}
+	if public != state.PublicRead.ValueBool() {
+		if bucket, err = r.client.SetBucketPublicRead(ctx, state.ID.ValueString(), public); err != nil {
+			resp.Diagnostics.AddError("Error updating bucket public read", err.Error())
+			return
+		}
 	}
 
 	// An unset optional+computed attribute is unknown in the plan — treat it as
@@ -354,17 +381,29 @@ func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 	if bucket.AccessKeyID != "" {
 		m.AccessKeyID = types.StringValue(bucket.AccessKeyID)
 	}
+	m.PublicRead = types.BoolValue(bucket.PublicRead)
 	m.WebsiteEnabled = types.BoolValue(bucket.WebsiteEnabled)
 	m.WebsiteIndexDocument = types.StringValue(bucket.WebsiteIndexDocument)
 	m.WebsiteErrorDocument = types.StringValue(bucket.WebsiteErrorDocument)
 	m.URLSlug = types.StringValue(bucket.URLSlug)
-	m.WebsiteURL = types.StringValue(bucket.WebsiteURL)
+	m.URL = types.StringValue(bucket.URL)
 	m.GlobalAlias = types.StringValue(bucket.GlobalAlias)
 }
 
 // optionalInt64 is a nullable/unknown TF number as a pointer, so an attribute
 // the config left out reaches the API as absent rather than as zero. The two
 // mean different things on a bucket quota (ADR-128, ADR-129).
+// optionalBool sends a flag only when the config states one: an unset
+// optional+computed attribute is unknown, and sending false for it would take a
+// bucket private that nobody asked to change.
+func optionalBool(v types.Bool) *bool {
+	if v.IsNull() || v.IsUnknown() {
+		return nil
+	}
+	out := v.ValueBool()
+	return &out
+}
+
 func optionalInt64(v types.Int64) *int64 {
 	if v.IsNull() || v.IsUnknown() {
 		return nil

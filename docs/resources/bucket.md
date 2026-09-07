@@ -61,10 +61,11 @@ resource "fpcloud_app" "uploader" {
 
 ### Optional
 
+- `public_read` (Boolean) Serve the bucket's objects to anyone with the URL, without a signature. This is the property a website needs and can be had without one: an asset origin is public_read and nothing else, with no index document and no versioned publishing. Setting website_enabled sets this; clearing this clears website_enabled, because a site nobody can read is not a site. Mutable in place.
 - `quota_max_objects` (Number) Maximum number of objects; unset takes the platform default. Reserved against the organization's object-count ceiling the same way as quota_max_size, and 0 is refused for the same reason. Mutable in place.
 - `quota_max_size` (Number) Maximum total size in bytes; unset takes the platform default. It is a reservation against the organization's object-storage ceiling, so a size the ceiling cannot hold is refused — and so is 0, which is not a size. Mutable in place.
 - `url_slug` (String) Vanity website host label: the site moves to <url_slug>.web.<platform domain>. Globally unique; empty reverts to the derived host. Mutable in place.
-- `website_enabled` (Boolean) Serve the bucket as a public static website. Enabling makes the bucket's objects world-readable over HTTP. Mutable in place.
+- `website_enabled` (Boolean) Add the static-website serving conventions to a public bucket: an index document for a directory request, an error document for a miss, and eligibility for SPA fallback and versioned publishing. Implies public_read. Mutable in place.
 - `website_error_document` (String) Document served on a miss (e.g. 404.html; set it to the index document for SPA fallback).
 - `website_index_document` (String) Document served for a directory request (defaults to index.html when the website is enabled).
 
@@ -77,7 +78,7 @@ resource "fpcloud_app" "uploader" {
 - `region` (String) S3 region for the bucket.
 - `secret_access_key` (String, Sensitive) S3 secret access key for the bucket's initial access key. Returned only on creation — an imported bucket leaves this empty.
 - `status` (String) Current status of the bucket.
-- `website_url` (String) The URL the website is served at (present when the website is enabled): the platform host while it is served, or the oldest active custom domain once one exists — an active domain replaces the platform host (ADR-130).
+- `url` (String) Where the bucket answers, present whenever public_read is set: the platform host while it is served, or the oldest active custom domain once one exists — an active domain replaces the platform host (ADR-130).
 
 ## Import
 

@@ -49,6 +49,29 @@ resource "fpcloud_database" "events" {
 }
 ```
 
+## Where an extension lives
+
+An extension installs into `public` unless you say otherwise:
+
+```bash
+fpcloud db update events --extension vector:extensions \
+  --cpu 500m --memory 1Gi --storage 10Gi
+```
+
+The schema is created if it is not there, and what the extension puts in it is
+yours to use, the same as in `public`.
+
+This matters for a dump from somewhere that used a different layout — Supabase
+installs every extension into a schema called `extensions`, so its dump
+references `extensions.vector` by name. Asking for the extension in that schema
+means the dump loads unedited ([migrating from
+Supabase](migrating-from-supabase.md)).
+
+Choose it at install: the platform installs an untrusted extension as a
+superuser you never hold, so moving one afterwards is not something your role
+can do. Changing the schema of an extension you already have means removing it
+and asking for it again, which drops what it created.
+
 **Your migrations do not change.** Once the platform has installed an extension,
 your own `create extension if not exists semver` runs as a no-op under your
 ordinary role and succeeds, so a schema that already carries that line keeps

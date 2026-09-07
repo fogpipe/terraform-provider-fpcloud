@@ -99,7 +99,7 @@ Each job gets one verdict:
 |---|---|
 | `runs` | the label names a pool in this project, and the job asks for nothing the pool cannot serve |
 | `queues` | no pool here serves that label — the job waits with nothing to pick it up |
-| `refused` | the label matches a pool, but the job declares `container:` or `services:`, which these runners do not serve |
+| `refused` | the label matches a pool, but the job declares `container:` or `services:`. A `services:` block moves to the pool — see **Service containers** below |
 | `github` | a GitHub-hosted label (`ubuntu-latest` and friends): it runs, on GitHub's minutes rather than on your pool |
 | `undetermined` | `runs-on` is an expression, or the job calls a reusable workflow, so which runner it picks is not in this file |
 
@@ -295,8 +295,68 @@ buildx's remote driver:
     tags: registry.cloud.fogpipe.com/acme/api:${{ github.sha }}
 ```
 
-Because the pod is per-job, no build cache is shared between jobs — every build
-starts cold.
+### Your existing build scripts work as they are
+
+If your build already lives in a shell script that calls `docker`, it does not
+need rewriting. A runner with a builder carries a `docker` command that speaks
+to the builder instead of to a daemon:
+
+```bash
+docker build --platform linux/amd64 -t registry.cloud.fogpipe.com/acme/api:v1 .
+docker push registry.cloud.fogpipe.com/acme/api:v1
+```
+
+Both work unchanged. There is no local image store to push *from*, so `push`
+completes the build you already asked for, publishing it — that is a cache hit
+against the builder rather than a second build, and the image is the one your
+`build` described. `docker build --push` in one step does the same thing more
+directly, and `docker tag` names a build again before pushing it.
+
+Anything that genuinely needs a daemon — `docker run`, `ps`, `images`, `pull`,
+`compose` — is **refused with a message saying why**, not quietly ignored. A
+job that needs to run the image it just built should run the build's test stage
+inside the `Dockerfile`, or pull the pushed image in a later job.
+
+`docker buildx …` works too, and `buildctl` is there if you would rather use
+BuildKit's own client.
+
+### A cache that outlives the job
+
+The pod is per-job, so nothing on its filesystem survives — but a cache does not
+have to live on the filesystem. BuildKit can keep its layer cache in a registry,
+and you already have one: the cache is an ordinary repository in your project,
+alongside your images.
+
+```bash
+CACHE="$(fpcloud registry repo-path buildcache)"
+
+docker buildx build \
+  --cache-from "type=registry,ref=$CACHE" \
+  --cache-to   "type=registry,ref=$CACHE,mode=max,ignore-error=true" \
+  --push -t "$(fpcloud registry repo-path api):$GITHUB_SHA" .
+```
+
+`fpcloud registry repo-path` prints the path your project pushes to, so nothing
+has to be typed twice or kept in step with a rename. In a workflow, the
+`fogpipe/cloud-actions/build-cache` action derives the same reference and hands
+it back as an output.
+
+Three things follow from it being an ordinary repository, and none of them is a
+special case:
+
+- It is **yours**, on your project's own path, and no other project can read or
+  write it.
+- It **counts against your organization's registry storage**, like any image,
+  and a push is refused when there is no room left. `fpcloud registry repos
+  list` shows what it holds.
+- You can have **several** — one per image you build — because they are separate
+  repositories. Deleting one touches nothing else.
+
+`ignore-error=true` on the export is deliberate: a cache is an optimisation, and
+a registry that will not take it should cost you a cold build rather than a
+failed one.
+
+Without a cache, every build starts cold, because the pod is per-job.
 
 The builder is a second container in the same pod, with its own size and its own
 cost:
@@ -347,7 +407,61 @@ Two things follow from that. Runner pods are allowed outbound HTTPS, so they
 reach GitHub, actions and toolchains without you opening your project's egress.
 And they **cannot** reach your project's own services by their in-cluster names:
 a job that needs your database or your app should go through its public
-address, or bring its own service container.
+address, or use a **service container** on the pool (below).
+
+## Service containers
+
+A workflow that needs a database beside it declares it on the **pool**, not in
+the workflow:
+
+```bash
+fpcloud runner create ci \
+  --service postgres=postgres:18-alpine \
+  --service-env postgres=POSTGRES_PASSWORD=hunter2 \
+  --service-env postgres=POSTGRES_DB=app \
+  --service-memory postgres=1Gi
+```
+
+Every job the pool runs then gets that container beside it, and reaches it on
+**`127.0.0.1`** on whatever port the image listens on — there is no port to
+publish, because there is no network boundary between the containers of a pod:
+
+```yaml
+jobs:
+  test:
+    runs-on: acme-ci
+    steps:
+      - uses: actions/checkout@v5
+      - run: psql postgres://postgres:hunter2@127.0.0.1/app -c 'select 1'
+```
+
+A pool can carry up to five, each with its own `--service-cpu` and
+`--service-memory`. Unset, a service gets its own default (500m / 1Gi) rather
+than a copy of the runner's size — its appetite has nothing to do with how big
+the job is. All of them count towards your organization's ceiling for as long as
+a job is running, because all of them are in the pod.
+
+`fpcloud runner update <pool> --service …` replaces the whole set, and
+`--no-services` removes them.
+
+### Why not `services:` in the workflow
+
+GitHub serves a job's own `services:` block by running the job **inside a
+container**, which needs a runner container mode this platform does not run —
+the same reason there is no Docker daemon here. So a `services:` block does not
+work and will not; `fpcloud runner check` reports it as `refused` and points
+here.
+
+The pool is also the only place the two can coexist. A container mode would run
+your steps in a separate pod, which puts the image builder out of reach — so a
+pool could have service containers or `docker build`, never both.
+
+**A service's environment is not a secret store.** It is stored and shown as
+written, and it configures a container that lives for one job and is reachable
+from nothing but that job's own pod. That is the same thing GitHub does with
+`services.*.env`, which sits in plaintext in your repository. A credential to
+anything that outlives the job does not belong there — put it in the workflow's
+own secrets and pass it to the step.
 
 ## Restarting a pool
 

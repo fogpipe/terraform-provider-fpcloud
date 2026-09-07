@@ -71,11 +71,17 @@ that reverts as far as its first change will stop there.
 |-----------|---------|----------|
 | `semver` | 0.41.0 | A semantic-version type with comparison operators and indexing |
 | `pg_statecharts` | 0.0.0 | State machines in SQL, interpreted from statechart definitions |
+| `vector` | 0.8.6 | Vector similarity search (pgvector): the `vector` type, distance operators, HNSW and IVFFlat indexes |
 
 Asking for anything else is refused at create, with the list of what is
 available — a database never reports an extension it does not have. Dependencies
 come along automatically: `pg_statecharts` needs `ltree`, and you do not have to
 name it.
+
+Some of these are already inside the database image — `vector` is — and still
+need asking for: what the platform does for you is the `CREATE EXTENSION` that
+superuser gates, whether or not the files are on disk. The platform installs a
+curated extension into the `public` schema.
 
 The catalog is curated rather than open. If you need an extension that is not
 here, ask — adding one is a build we own, not something you have to package.

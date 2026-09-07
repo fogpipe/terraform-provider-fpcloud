@@ -1074,12 +1074,18 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 
 	r.setModelFromApp(&plan, app, &resp.Diagnostics)
 
-	// Read current traffic if not already set by the update above.
+	// Read current traffic if not already set by the update above. A read
+	// that fails is an empty set, as it is on Create: the attribute is
+	// computed and unknown in the plan, and leaving it that way is an
+	// "invalid result object" on every apply that reaches here — which an
+	// adopting apply does on its first run, and then passes on the second,
+	// reading as a flake rather than a defect (fogpipe/cloud-workspace#257).
 	if plan.Traffic.IsNull() || plan.Traffic.IsUnknown() {
 		targets, err := r.client.GetTraffic(ctx, appID)
-		if err == nil {
-			r.setTrafficOnModel(ctx, &plan, targets, &resp.Diagnostics)
+		if err != nil {
+			targets = nil
 		}
+		r.setTrafficOnModel(ctx, &plan, targets, &resp.Diagnostics)
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)

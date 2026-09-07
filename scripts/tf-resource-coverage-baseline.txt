@@ -21,12 +21,6 @@ RestartRunner
 # creates nothing, changes nothing and has no id — there is no resource for it
 # to be.
 CheckRunnerWorkflows
-# Machine identities at the ORG (#138). The service-account resource is scoped
-# to a project, which is where a config declares one; a data source over the
-# org's whole set would return identities no config in this state owns, and
-# creating one there is `fpadmin`'s.
-CreateOrgServiceAccount
-ListOrgServiceAccounts
 # Who did what inside a database tunnel (ADR-163), read from the log store for
 # its retention. An observation of the past, and one that moves between two
 # consecutive plans.

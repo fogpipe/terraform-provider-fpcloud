@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	_ resource.Resource                = &ServiceAccountResource{}
-	_ resource.ResourceWithConfigure   = &ServiceAccountResource{}
-	_ resource.ResourceWithImportState = &ServiceAccountResource{}
+	_ resource.Resource                   = &ServiceAccountResource{}
+	_ resource.ResourceWithConfigure      = &ServiceAccountResource{}
+	_ resource.ResourceWithImportState    = &ServiceAccountResource{}
+	_ resource.ResourceWithValidateConfig = &ServiceAccountResource{}
 )
 
 // NewServiceAccountResource returns a new service account resource.
@@ -32,13 +33,18 @@ type ServiceAccountResource struct {
 
 // ServiceAccountResourceModel describes the resource data model.
 type ServiceAccountResourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	ProjectID   types.String `tfsdk:"project_id"`
-	Name        types.String `tfsdk:"name"`
-	DisplayName types.String `tfsdk:"display_name"`
-	Email       types.String `tfsdk:"email"`
-	Status      types.String `tfsdk:"status"`
-	CreatedAt   types.String `tfsdk:"created_at"`
+	ID types.String `tfsdk:"id"`
+	// Exactly one of ProjectID and OrganizationID, mirroring the control
+	// plane's own CHECK: a machine identity belongs to a project, or to the
+	// organization itself when it outlives every project
+	// (fogpipe/cloud-workspace#778).
+	ProjectID      types.String `tfsdk:"project_id"`
+	OrganizationID types.String `tfsdk:"organization_id"`
+	Name           types.String `tfsdk:"name"`
+	DisplayName    types.String `tfsdk:"display_name"`
+	Email          types.String `tfsdk:"email"`
+	Status         types.String `tfsdk:"status"`
+	CreatedAt      types.String `tfsdk:"created_at"`
 }
 
 func (r *ServiceAccountResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -57,8 +63,15 @@ func (r *ServiceAccountResource) Schema(_ context.Context, _ resource.SchemaRequ
 				},
 			},
 			"project_id": schema.StringAttribute{
-				Description: "The project this service account belongs to.",
-				Required:    true,
+				Description: "The project this service account belongs to. Exactly one of `project_id` and `organization_id` must be set.",
+				Optional:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"organization_id": schema.StringAttribute{
+				Description: "The organization that holds this service account directly, for a machine identity that outlives any single project — a CI suite that creates and destroys its own projects, or a Terraform root. Requires org administrate. Exactly one of `project_id` and `organization_id` must be set.",
+				Optional:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -106,6 +119,50 @@ func (r *ServiceAccountResource) Configure(_ context.Context, req resource.Confi
 	r.client = c
 }
 
+// ValidateConfig holds the exactly-one rule the control plane enforces with a
+// CHECK constraint. Without it the two Optional attributes make three
+// configurations expressible and only two valid, and the invalid pair would be
+// caught by the API mid-apply — after Terraform has decided what it is doing.
+func (r *ServiceAccountResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var cfg ServiceAccountResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	// Unknown at plan time is not absent: a value flowing from another
+	// resource is not yet readable and must not be reported as missing.
+	project := !cfg.ProjectID.IsNull() || cfg.ProjectID.IsUnknown()
+	org := !cfg.OrganizationID.IsNull() || cfg.OrganizationID.IsUnknown()
+	switch {
+	case project && org:
+		resp.Diagnostics.AddError(
+			"Both project_id and organization_id set",
+			"A service account belongs to a project or to the organization itself, never to both. Set exactly one.",
+		)
+	case !project && !org:
+		resp.Diagnostics.AddError(
+			"Neither project_id nor organization_id set",
+			"A service account needs an owner. Set project_id for a project-scoped machine identity, or organization_id for one the organization holds directly.",
+		)
+	}
+}
+
+// applyServiceAccount writes what the API returned onto the model. The owner
+// fields are written back as the API reports them rather than as configured,
+// and an empty one becomes null rather than "" — an Optional attribute the
+// config omitted must stay null, or every apply reports a result inconsistent
+// with its own plan.
+func applyServiceAccount(m *ServiceAccountResourceModel, sa *client.ServiceAccount) {
+	m.ID = types.StringValue(sa.ID)
+	m.ProjectID = optionalString(sa.ProjectID)
+	m.OrganizationID = optionalString(sa.OrganizationID)
+	m.Name = types.StringValue(sa.Name)
+	m.DisplayName = types.StringValue(sa.DisplayName)
+	m.Email = types.StringValue(sa.Email)
+	m.Status = types.StringValue(sa.Status)
+	m.CreatedAt = types.StringValue(sa.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
+}
+
 func (r *ServiceAccountResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan ServiceAccountResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -113,23 +170,27 @@ func (r *ServiceAccountResource) Create(ctx context.Context, req resource.Create
 		return
 	}
 
-	sa, err := r.client.CreateServiceAccount(ctx, plan.ProjectID.ValueString(), client.CreateServiceAccountRequest{
+	body := client.CreateServiceAccountRequest{
 		Name:        plan.Name.ValueString(),
 		DisplayName: plan.DisplayName.ValueString(),
-	})
+	}
+	var (
+		sa  *client.ServiceAccount
+		err error
+	)
+	// Which owner is set picks the endpoint: the org route needs org
+	// administrate, the same bar as granting a binding on the org.
+	if !plan.OrganizationID.IsNull() {
+		sa, err = r.client.CreateOrgServiceAccount(ctx, plan.OrganizationID.ValueString(), body)
+	} else {
+		sa, err = r.client.CreateServiceAccount(ctx, plan.ProjectID.ValueString(), body)
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating service account", err.Error())
 		return
 	}
 
-	plan.ID = types.StringValue(sa.ID)
-	plan.ProjectID = types.StringValue(sa.ProjectID)
-	plan.Name = types.StringValue(sa.Name)
-	plan.DisplayName = types.StringValue(sa.DisplayName)
-	plan.Email = types.StringValue(sa.Email)
-	plan.Status = types.StringValue(sa.Status)
-	plan.CreatedAt = types.StringValue(sa.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
-
+	applyServiceAccount(&plan, sa)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -140,8 +201,18 @@ func (r *ServiceAccountResource) Read(ctx context.Context, req resource.ReadRequ
 		return
 	}
 
-	// List SAs in project and find ours by ID.
-	accounts, err := r.client.ListServiceAccounts(ctx, state.ProjectID.ValueString())
+	// The API lists machine identities per owner and there is no get-by-id,
+	// so the owner in state decides which listing ours is in. An org account
+	// is not in any project's listing and vice versa.
+	var (
+		accounts []*client.ServiceAccount
+		err      error
+	)
+	if !state.OrganizationID.IsNull() {
+		accounts, err = r.client.ListOrgServiceAccounts(ctx, state.OrganizationID.ValueString())
+	} else {
+		accounts, err = r.client.ListServiceAccounts(ctx, state.ProjectID.ValueString())
+	}
 	if err != nil {
 		if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
 			resp.State.RemoveResource(ctx)
@@ -164,14 +235,7 @@ func (r *ServiceAccountResource) Read(ctx context.Context, req resource.ReadRequ
 		return
 	}
 
-	state.ID = types.StringValue(found.ID)
-	state.ProjectID = types.StringValue(found.ProjectID)
-	state.Name = types.StringValue(found.Name)
-	state.DisplayName = types.StringValue(found.DisplayName)
-	state.Email = types.StringValue(found.Email)
-	state.Status = types.StringValue(found.Status)
-	state.CreatedAt = types.StringValue(found.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
-
+	applyServiceAccount(&state, found)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -189,14 +253,7 @@ func (r *ServiceAccountResource) Update(ctx context.Context, req resource.Update
 		return
 	}
 
-	plan.ID = types.StringValue(sa.ID)
-	plan.ProjectID = types.StringValue(sa.ProjectID)
-	plan.Name = types.StringValue(sa.Name)
-	plan.DisplayName = types.StringValue(sa.DisplayName)
-	plan.Email = types.StringValue(sa.Email)
-	plan.Status = types.StringValue(sa.Status)
-	plan.CreatedAt = types.StringValue(sa.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
-
+	applyServiceAccount(&plan, sa)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -216,18 +273,35 @@ func (r *ServiceAccountResource) Delete(ctx context.Context, req resource.Delete
 	}
 }
 
-// ImportState imports a service account by a "project_id/service_account_id"
-// identifier — the API lists service accounts per project and Read looks ours
-// up in that list, so both values are needed. Read fills in everything else.
+// ImportState imports a service account by a
+// "project/<project_id>/<service_account_id>" or
+// "org/<organization_id>/<service_account_id>" identifier. Read looks the
+// account up in its owner's listing and there is no get-by-id, so the import
+// id has to name which owner — a bare "<id>/<id>" cannot, because a project
+// reference and an org reference are both opaque strings and guessing wrong
+// reports the account as gone rather than as misaddressed. Read fills in
+// everything else.
 func (r *ServiceAccountResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	parts := strings.SplitN(req.ID, "/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+	parts := strings.SplitN(req.ID, "/", 3)
+	malformed := len(parts) != 3 || parts[1] == "" || parts[2] == ""
+	var owner string
+	if !malformed {
+		switch parts[0] {
+		case "project":
+			owner = "project_id"
+		case "org":
+			owner = "organization_id"
+		default:
+			malformed = true
+		}
+	}
+	if malformed {
 		resp.Diagnostics.AddError(
 			"Error importing service account",
-			fmt.Sprintf("expected an import id of the form \"project_id/service_account_id\", got %q", req.ID),
+			fmt.Sprintf("expected an import id of the form \"project/<project_id>/<service_account_id>\" or \"org/<organization_id>/<service_account_id>\", got %q", req.ID),
 		)
 		return
 	}
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project_id"), parts[0])...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[1])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(owner), parts[1])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[2])...)
 }

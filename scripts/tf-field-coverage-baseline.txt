@@ -110,9 +110,3 @@ Runner.created_at
 Runner.updated_at
 ServiceAccount.updated_at
 
-# A service account belongs to the project the resource already names, and the
-# org is that project's (#138 gives a machine identity the org's name so two
-# tenants cannot mint the same one). Terraform states the project; deriving the
-# org from it is the platform's, and an attribute over it would be a second
-# place to write down one fact.
-ServiceAccount.organization_id

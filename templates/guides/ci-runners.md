@@ -7,8 +7,10 @@ page_title: "GitHub Actions Runners"
 
 A **runner** is a pool, not a machine. Nothing runs until GitHub has a job for
 it: the platform starts a pod, that pod serves exactly one job, and it is
-destroyed when the job ends. An idle pool costs nothing, and no state carries
-from one job to the next.
+destroyed when the job ends. A pool that scales to zero — `--min 0`, the
+default — costs nothing while idle, and no state carries from one job to the
+next. A runner kept warm by `--min` is a pod that exists while idle, billed
+for its cpu and memory the whole time (see [Billing](billing.md)).
 
 Runners live in your project's namespace, beside your apps and databases, and
 are isolated from other tenants exactly the way those are.
@@ -116,9 +118,10 @@ fpcloud runner create ci --min 1 --max 4 ...
 - `--max` is how many jobs the pool runs at once. Jobs beyond it queue on
   GitHub. Every one of them costs cores and memory for as long as it runs, so
   this is a budget, not a throughput dial.
-- `--min` keeps that many pods idle and ready, trading cost for a faster start.
-  The default is `0` — the pool scales to zero, and a job waits a few seconds for
-  its pod.
+- `--min` keeps that many pods idle and ready, trading cost for a faster start:
+  each warm runner is billed for its cpu and memory around the clock, job or no
+  job. The default is `0` — the pool scales to zero, and a job waits a few
+  seconds for its pod.
 - `--cpu` and `--memory` bound the runner — the container your workflow's steps
   execute in (for example `--cpu 2 --memory 4Gi`). A builder, if you ask for
   one, is sized separately and adds to what the pool costs.

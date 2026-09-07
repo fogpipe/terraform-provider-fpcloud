@@ -174,6 +174,7 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			"extensions": schema.SetAttribute{
 				Description: "Curated Postgres extensions installed in the database. The platform installs them, " +
 					"because an untrusted extension needs superuser to install and a managed database hands out none. " +
+					"An entry is `name` or `name:schema` — the schema its objects live in, created if absent, for a dump that references them by qualified name. " +
 					"Needs Postgres 18 or later. Mutable in place; adding or removing one restarts the database. " +
 					"Removing one UNINSTALLS it — the platform runs the `drop extension` you cannot, which takes the " +
 					"schema, types and tables the extension created with it, and the apply is refused when objects of " +

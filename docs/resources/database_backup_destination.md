@@ -63,6 +63,9 @@ resource "fpcloud_database_backup_destination" "aws" {
 
 - `enabled` (Boolean) Whether the backup destination is enabled.
 - `id` (String) The identifier of the backup destination (equals the database ID).
+- `last_restore_attempt_at` (String) When the restore drill last tried this destination's dump, whether or not it succeeded.
+- `last_restore_error` (String) What the latest restore drill attempt failed with; empty when it succeeded or none has run.
+- `last_restored_at` (String) When the platform's restore drill last restored this destination's latest scheduled dump into a scratch copy and answered a query from it — what was proved, beside what was uploaded. Empty until the first successful drill; always empty for an on-demand destination, which is not drilled.
 - `last_run_at` (String) Timestamp of the last backup run.
 - `last_run_status` (String) Status of the last backup run.
 

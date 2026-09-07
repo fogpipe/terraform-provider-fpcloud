@@ -51,6 +51,11 @@ type DatabaseBackupDestinationResourceModel struct {
 	Enabled         types.Bool   `tfsdk:"enabled"`
 	LastRunAt       types.String `tfsdk:"last_run_at"`
 	LastRunStatus   types.String `tfsdk:"last_run_status"`
+	// What the platform proved about the dumps, beside what it uploaded
+	// (ADR-160, fogpipe/cloud-workspace#775).
+	LastRestoredAt       types.String `tfsdk:"last_restored_at"`
+	LastRestoreAttemptAt types.String `tfsdk:"last_restore_attempt_at"`
+	LastRestoreError     types.String `tfsdk:"last_restore_error"`
 }
 
 func (r *DatabaseBackupDestinationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -147,6 +152,18 @@ func (r *DatabaseBackupDestinationResource) Schema(_ context.Context, _ resource
 			},
 			"last_run_status": schema.StringAttribute{
 				Description: "Status of the last backup run.",
+				Computed:    true,
+			},
+			"last_restored_at": schema.StringAttribute{
+				Description: "When the platform's restore drill last restored this destination's latest scheduled dump into a scratch copy and answered a query from it — what was proved, beside what was uploaded. Empty until the first successful drill; always empty for an on-demand destination, which is not drilled.",
+				Computed:    true,
+			},
+			"last_restore_attempt_at": schema.StringAttribute{
+				Description: "When the restore drill last tried this destination's dump, whether or not it succeeded.",
+				Computed:    true,
+			},
+			"last_restore_error": schema.StringAttribute{
+				Description: "What the latest restore drill attempt failed with; empty when it succeeded or none has run.",
 				Computed:    true,
 			},
 		},
@@ -273,6 +290,12 @@ func mapBackupDestinationToState(dest *client.BackupDestination, state *Database
 	state.Enabled = types.BoolValue(dest.Enabled)
 	state.LastRunAt = types.StringValue(dest.LastRunAt)
 	state.LastRunStatus = types.StringValue(dest.LastRunStatus)
+	state.LastRestoredAt, state.LastRestoreAttemptAt, state.LastRestoreError = types.StringValue(""), types.StringValue(""), types.StringValue("")
+	if r := dest.Restore; r != nil {
+		state.LastRestoredAt = types.StringValue(r.LastRestoredAt)
+		state.LastRestoreAttemptAt = types.StringValue(r.LastAttemptAt)
+		state.LastRestoreError = types.StringValue(r.Error)
+	}
 }
 
 // optionalString preserves null for an empty optional attribute, so an omitted

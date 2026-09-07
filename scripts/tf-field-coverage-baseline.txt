@@ -46,6 +46,10 @@ Runner.instances
 # Which runners are up and what job each is serving is the same kind of
 # reading one level finer: it changes with GitHub's queue rather than with
 # anything declared, so an attribute over it is drift on every plan.
+Runner.queue
+# GitHub's view of the pool's demand (#146): assigned, running and waiting
+# jobs, read live from the listener. The same reading as instances, from the
+# other side of the queue.
 Runner.admitted_runners
 # What a bucket currently holds is a measurement of the data plane, which the
 # tenant writes to without Terraform: an attribute over it would move on every

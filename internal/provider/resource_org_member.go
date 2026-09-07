@@ -70,11 +70,11 @@ func (r *OrgMemberResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"role": schema.StringAttribute{
-				Description: "Role to assign (admin, member).",
+				Description: "Role to assign (owner, editor, viewer).",
 				Required:    true,
 			},
 			"user_id": schema.StringAttribute{
-				Description: "The user ID of the member (populated after invite is accepted).",
+				Description: "The user ID of the member; empty while the invitation is pending.",
 				Computed:    true,
 			},
 			"status": schema.StringAttribute{
@@ -174,17 +174,17 @@ func (r *OrgMemberResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
-	// Role change — only supported for active members with a real user ID.
-	if !state.UserID.IsNull() && !state.UserID.IsUnknown() && state.UserID.ValueString() != "" {
-		err := r.client.UpdateOrgMemberRole(ctx,
-			plan.OrganizationID.ValueString(),
-			state.UserID.ValueString(),
-			plan.Role.ValueString(),
-		)
-		if err != nil {
-			resp.Diagnostics.AddError("Error updating org member role", err.Error())
-			return
-		}
+	// The binding is keyed on the email (ADR-061), and the API resolves a member
+	// by it whether or not an account exists yet. Addressing the member by user
+	// id made a pending invitation unreachable: no user id, no role change
+	// (fogpipe/cloud-workspace#96).
+	if err := r.client.UpdateOrgMemberRole(ctx,
+		plan.OrganizationID.ValueString(),
+		state.Email.ValueString(),
+		plan.Role.ValueString(),
+	); err != nil {
+		resp.Diagnostics.AddError("Error updating org member role", err.Error())
+		return
 	}
 
 	plan.ID = state.ID
@@ -201,14 +201,16 @@ func (r *OrgMemberResource) Delete(ctx context.Context, req resource.DeleteReque
 		return
 	}
 
-	if !state.UserID.IsNull() && !state.UserID.IsUnknown() && state.UserID.ValueString() != "" {
-		err := r.client.RemoveOrgMember(ctx, state.OrganizationID.ValueString(), state.UserID.ValueString())
-		if err != nil {
-			if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
-				return
-			}
-			resp.Diagnostics.AddError("Error removing org member", err.Error())
+	// By email, the token the binding is keyed on (ADR-061): a pending
+	// invitation has no user id, and a delete gated on one reported success
+	// while the invitation survived on the server — an orphan the next plan no
+	// longer saw (fogpipe/cloud-workspace#96).
+	err := r.client.RemoveOrgMember(ctx, state.OrganizationID.ValueString(), state.Email.ValueString())
+	if err != nil {
+		if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
+			return
 		}
+		resp.Diagnostics.AddError("Error removing org member", err.Error())
 	}
 }
 

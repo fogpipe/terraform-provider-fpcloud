@@ -19,13 +19,13 @@ Manages an organization member on the Fogpipe platform.
 
 - `email` (String) Email address of the user to invite.
 - `organization_id` (String) The organization to add the member to.
-- `role` (String) Role to assign (admin, member).
+- `role` (String) Role to assign (owner, editor, viewer).
 
 ### Read-Only
 
 - `id` (String) Member record ID.
 - `status` (String) Status of the membership (active, pending).
-- `user_id` (String) The user ID of the member (populated after invite is accepted).
+- `user_id` (String) The user ID of the member; empty while the invitation is pending.
 
 ## Import
 

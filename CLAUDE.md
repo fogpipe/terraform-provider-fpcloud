@@ -32,10 +32,13 @@ The mirror is not a convention, it is gated — in this repo's own CI
   which pairs client type `X` with this repo's `XResourceModel` one level into
   nested objects
 
-Both resolve `github.com/fogpipe/cloud-cli` at its **latest release**, not the
-version this repo's `go.mod` pins — judging the provider against its own pin
-would make the gate self-satisfying, staying green while the pin sits releases
-behind. A red build here after a `cloud-cli` release is the signal to bump.
+Both read `github.com/fogpipe/cloud-cli` at the version this repo's `go.mod`
+pins (`scripts/client-module.ts`), so a verdict is a fact about the commit: a
+gap goes red on the bump that brings the method in, and the same tree reads
+the same here as in CI. They used to resolve `@latest`, which is whatever the
+module proxy had served so far, and turned red on unrelated pushes when it
+moved (fogpipe/cloud-workspace#152). A pin lagging the released client is
+what `just release` warns about (`docs/release-policy.md` at the root).
 
 `templates/guides` drifting from the platform's docs pool fails a check in
 platform's CI instead, which still clones this repo to run it — that gate

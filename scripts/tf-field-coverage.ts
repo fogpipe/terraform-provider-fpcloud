@@ -19,8 +19,8 @@
 // express is a failure. The reverse cannot happen silently — the provider reads
 // client fields in Go, so one that disappears fails the build.
 //
-// The client is resolved at its LATEST RELEASE, not at the version go.mod pins
-// here; see tf-resource-coverage.ts for why the pin is the wrong yardstick.
+// The client is read at the version go.mod pins, the same reading as its
+// sibling; scripts/client-module.ts says why.
 //
 // Nested objects are compared one level down, against the attribute names
 // declared inside that attribute's own schema block, because that is where the
@@ -33,32 +33,10 @@
 //   deno run --allow-read --allow-run --allow-env scripts/tf-field-coverage.ts
 //   deno run --allow-write --allow-read --allow-run --allow-env scripts/tf-field-coverage.ts --update-baseline
 
+import { clientModule, pinnedClientDir } from "./client-module.ts";
+
 const root = new URL("../", import.meta.url).pathname;
 const baselinePath = root + "scripts/tf-field-coverage-baseline.txt";
-
-// `go list -m` answers with an empty Dir — not an error — when the module is
-// known but not yet downloaded, the normal state of a fresh CI checkout.
-// (Same helper as tf-resource-coverage.ts, same reason.)
-function moduleDir(mod: string): string {
-  const go = (...args: string[]) => {
-    const out = new Deno.Command("go", {
-      args,
-      cwd: root,
-      env: { ...Deno.env.toObject(), GOWORK: "off" },
-    }).outputSync();
-    if (!out.success) {
-      throw new Error(`go ${args.join(" ")} failed: ${new TextDecoder().decode(out.stderr)}`);
-    }
-    return new TextDecoder().decode(out.stdout).trim();
-  };
-  let dir = go("list", "-m", "-f", "{{.Dir}}", mod);
-  if (dir === "") {
-    go("mod", "download", mod);
-    dir = go("list", "-m", "-f", "{{.Dir}}", mod);
-  }
-  if (dir === "") throw new Error(`${mod} is not in the module cache after go mod download`);
-  return dir;
-}
 
 type Field = { json: string; type: string };
 
@@ -117,10 +95,9 @@ function attrNames(src: string): Set<string> {
   ]);
 }
 
+const client = pinnedClientDir();
 const clientTypes = goStructs(
-  Deno.readTextFileSync(
-    `${moduleDir("github.com/fogpipe/cloud-cli@latest")}/pkg/client/types.go`,
-  ),
+  Deno.readTextFileSync(`${client.dir}/pkg/client/types.go`),
 );
 const models = providerModels(`${root}internal/provider`);
 
@@ -175,7 +152,7 @@ const newGaps = gaps.filter((g) => !baseline.has(g));
 const stale = [...baseline].filter((g) => !gaps.includes(g)).sort();
 
 console.log(
-  `${paired.length} client types with a Terraform resource, ` +
+  `${clientModule} ${client.version}: ${paired.length} client types with a Terraform resource, ` +
     `${gaps.length} field(s) Terraform cannot express, ${baseline.size} in baseline.\n`,
 );
 

@@ -9,11 +9,11 @@
 // cross-references it against every `.client.Method(` call in this repo's
 // internal/provider/*.go.
 //
-// The client is resolved at its LATEST RELEASE, not at the version go.mod pins
-// here. Judging the provider against its own pin makes the gate self-satisfying:
-// it would stay green while the pin sits two releases behind and every field
-// added since is unreachable from HCL. A red build here after a cloud-cli
-// release is the signal to bump — see the workspace's provider-sync notes.
+// The client is read at the version go.mod pins, so the verdict is a fact
+// about this commit: a gap is red on the bump that brings the method in, and
+// the same tree reads the same everywhere (scripts/client-module.ts says why
+// "latest release" was not that). Whether the pin itself lags the released
+// client is asked at release time, not here.
 //
 // New gaps are failures; existing ones are accepted via a checked-in
 // baseline (scripts/tf-resource-coverage-baseline.txt) so this doesn't try to
@@ -26,33 +26,10 @@
 //   deno run --allow-read --allow-run --allow-env scripts/tf-resource-coverage.ts
 //   deno run --allow-write --allow-read --allow-run --allow-env scripts/tf-resource-coverage.ts --update-baseline
 
+import { clientModule, pinnedClientDir } from "./client-module.ts";
+
 const root = new URL("../", import.meta.url).pathname;
 const baselinePath = root + "scripts/tf-resource-coverage-baseline.txt";
-
-// `go list -m` answers with an empty Dir — not an error — when the module is
-// known but not yet downloaded, which is the normal state of a fresh CI
-// checkout. GOWORK=off so a session tree resolves the released client rather
-// than the sibling cloud-cli checkout: this repo builds alone everywhere else.
-function moduleDir(mod: string): string {
-  const go = (...args: string[]) => {
-    const out = new Deno.Command("go", {
-      args,
-      cwd: root,
-      env: { ...Deno.env.toObject(), GOWORK: "off" },
-    }).outputSync();
-    if (!out.success) {
-      throw new Error(`go ${args.join(" ")} failed: ${new TextDecoder().decode(out.stderr)}`);
-    }
-    return new TextDecoder().decode(out.stdout).trim();
-  };
-  let dir = go("list", "-m", "-f", "{{.Dir}}", mod);
-  if (dir === "") {
-    go("mod", "download", mod);
-    dir = go("list", "-m", "-f", "{{.Dir}}", mod);
-  }
-  if (dir === "") throw new Error(`${mod} is not in the module cache after go mod download`);
-  return dir;
-}
 
 // --- client.go: every *Client method that actually wraps an API call ---
 function clientMethods(clientGoPath: string): Set<string> {
@@ -93,9 +70,8 @@ function calledMethods(providerDir: string): Set<string> {
   return called;
 }
 
-const available = clientMethods(
-  `${moduleDir("github.com/fogpipe/cloud-cli@latest")}/pkg/client/client.go`,
-);
+const client = pinnedClientDir();
+const available = clientMethods(`${client.dir}/pkg/client/client.go`);
 const called = calledMethods(`${root}internal/provider`);
 
 const uncovered = [...available].filter((m) => !called.has(m)).sort();
@@ -129,7 +105,7 @@ const newGaps = uncovered.filter((m) => !baseline.has(m));
 const stale = [...baseline].filter((m) => !uncovered.includes(m)).sort();
 
 console.log(
-  `${available.size} client methods, ${uncovered.length} uncovered by any TF resource, ${baseline.size} in baseline.\n`,
+  `${clientModule} ${client.version}: ${available.size} client methods, ${uncovered.length} uncovered by any TF resource, ${baseline.size} in baseline.\n`,
 );
 
 if (newGaps.length) {

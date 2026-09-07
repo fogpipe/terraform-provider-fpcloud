@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// cliConfig mirrors the subset of the fpcloud CLI's ~/.fpcloud/config.yaml that
+// cliConfig mirrors the subset of the fpcloud CLI's config.yaml that
 // the provider can reuse as credentials — the AWS/GCP model where the CLI login
 // doubles as the provider's default credential source.
 type cliConfig struct {
@@ -17,17 +17,19 @@ type cliConfig struct {
 	APIKey string `yaml:"api_key"`
 }
 
-// loadCLIConfig reads the fpcloud CLI config, resolving its directory exactly the
-// way the CLI does — FPCLOUD_CONFIG_DIR (config only), else FPCLOUD_STATE_DIR (the
-// whole state dir), else ~/.fpcloud — so a direnv-scoped per-project config is
-// picked up either way. A missing/unreadable file yields a zero config, never an
-// error — it is a best-effort last resort behind the block and env var.
+// loadCLIConfig reads the fpcloud CLI config, finding it exactly the way the CLI
+// does — the nearest .fpcloud/ holding one at or above the working directory,
+// else ~/.fpcloud (fogpipe/cloud-workspace#768). So a stack applied from inside
+// a checkout that keeps its own fpcloud state inherits that state's credential,
+// which is the same directory rule `tofu` itself is run under. A
+// missing/unreadable file yields a zero config, never an error — it is a
+// best-effort last resort behind the block and env var.
 func loadCLIConfig() cliConfig {
-	dir := cliConfigDir()
-	if dir == "" {
+	path := cliConfigPath()
+	if path == "" {
 		return cliConfig{}
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return cliConfig{}
 	}
@@ -38,20 +40,28 @@ func loadCLIConfig() cliConfig {
 	return cfg
 }
 
-// cliConfigDir mirrors the CLI's configDir()/stateDir() precedence. Returns "" if
-// the home directory can't be determined and neither variable is set.
-func cliConfigDir() string {
-	if dir := os.Getenv("FPCLOUD_CONFIG_DIR"); dir != "" {
-		return dir
-	}
-	if dir := os.Getenv("FPCLOUD_STATE_DIR"); dir != "" {
-		return dir
+// cliConfigPath mirrors the CLI's own walk: the nearest .fpcloud/config.yaml at
+// or above the working directory, else the one in ~/.fpcloud. Returns "" if
+// there is no local one and the home directory cannot be determined.
+func cliConfigPath() string {
+	if dir, err := os.Getwd(); err == nil {
+		for {
+			p := filepath.Join(dir, ".fpcloud", "config.yaml")
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".fpcloud")
+	return filepath.Join(home, ".fpcloud", "config.yaml")
 }
 
 // cliOIDCToken shells out to `fpcloud get-token` and returns the OIDC

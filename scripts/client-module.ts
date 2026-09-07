@@ -51,13 +51,16 @@ export const pinnedClientVersion = () => {
 // downloaded, the normal state of a fresh CI checkout, so the download is
 // forced and an empty answer after it is refused rather than read as a client
 // with no methods.
+//
+// Version and Dir are asked for separately: printed on one line, an empty Dir
+// leaves nothing after the version, `go()` trims the line, and the version
+// itself was read as the directory — so the download branch below could never
+// run, and the first pin bump on a fresh cache failed the gate on a module it
+// had been told about and never fetched (fogpipe/cloud-workspace#297).
 export const pinnedClientDir = () => {
   const want = pinnedClientVersion();
-  const listed = go("list", "-m", "-f", "{{.Version}} {{.Dir}}", clientModule);
-  const [version, dir] = [
-    listed.split(" ")[0],
-    listed.slice(listed.indexOf(" ") + 1).trim(),
-  ];
+  const version = go("list", "-m", "-f", "{{.Version}}", clientModule);
+  const dir = go("list", "-m", "-f", "{{.Dir}}", clientModule);
   if (version !== want) {
     throw new Error(
       `go.mod pins ${clientModule} ${want} but the build list resolves ${version}`,

@@ -84,6 +84,12 @@ ProjectStatus
 # singular lookup (project/app/database); a collection-listing data source has
 # no precedent here and no clear use case yet
 ListDatabases
+# a database's subscriptions (ADR-172): each one IS declared, by
+# fpcloud_database_subscription, which reads its own with GetDatabaseSubscription.
+# Enumerating them is the same "list all X" shape as the line above, and the
+# health it reports moves between two consecutive reads — a data source over it
+# would hand Terraform a value that never settles.
+ListDatabaseSubscriptions
 ListBuckets
 ListOrgSecrets
 

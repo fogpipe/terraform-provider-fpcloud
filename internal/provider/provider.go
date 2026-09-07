@@ -112,6 +112,7 @@ func (p *FogpipeProvider) Resources(_ context.Context) []func() resource.Resourc
 		NewAppResource,
 		NewDatabaseResource,
 		NewDatabaseBackupDestinationResource,
+		NewDatabaseSubscriptionResource,
 		NewBucketResource,
 		NewBucketKeyResource,
 		NewBucketDomainResource,

@@ -129,7 +129,7 @@ The same per-account registration is the pool's reach: a workflow in a
 repository **outside** the connected account never sees it. Naming the label
 there is not an error on either side — the job queues, waiting for a runner
 GitHub will never offer it. Both commands say which account the label works
-in, and `fpcloud app webhook setup` warns when the repository it is given is
+in, and `fpcloud webhook setup` warns when the repository it is given is
 outside it.
 
 ## Bringing your own credential

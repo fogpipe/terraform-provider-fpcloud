@@ -98,6 +98,7 @@ was, with the extension installed and working.
 | `semver` | 0.41.0 | A semantic-version type with comparison operators and indexing |
 | `pg_statecharts` | 0.0.0 | State machines in SQL, interpreted from statechart definitions |
 | `vector` | 0.8.6 | Vector similarity search (pgvector): the `vector` type, distance operators, HNSW and IVFFlat indexes |
+| `pgaudit` | 18.1 | Per-statement audit logging of `fpcloud db connect` sessions, attributed to the person who opened them |
 
 Asking for anything else is refused at create, with the list of what is
 available — a database never reports an extension it does not have. Dependencies
@@ -128,10 +129,41 @@ explicitly. A database already running 17 does not move on its own — a major
 version change rewrites the data directory and is never a side effect of asking
 for an extension.
 
+## Auditing what a person did through a tunnel
+
+`pgaudit` is curated like the rest and enabled the same way:
+
+```bash
+fpcloud db update mydb --extension pgaudit \
+  --cpu 500m --memory 1Gi --storage 10Gi
+```
+
+It records the statements run through `fpcloud db connect` — reads and writes,
+attributed to the fpcloud identity that opened the session, because a tunnel
+authenticates as a role minted for that person rather than as your database's
+shared role.
+
+**Your application's own traffic is never audited.** The filter is attached to
+the session roles the platform mints, not to the database, so everything
+connecting as your `app` role — which is every app, job and migration you run —
+is untouched. That is a property of how it is switched on, not a setting you
+could get wrong.
+
+Enabling it is refused on a database whose sessions cannot be attributed to a
+person yet. Such a database still hands out the shared credential, so the
+audit log would record that `app` read a table and tell you nothing; the
+refusal names what has to happen first rather than turning something on that
+answers nothing.
+
+Entries are kept for as long as your logs are (14 days). The platform can say
+who connected to a database for as long as the audit log exists, and what they
+did for a fortnight.
+
 ## What it costs
 
 Adding or removing an extension is a **restart-class** change: the database
-rolls its pods to pick up the mount change, the same as a version or resource
+rolls its pods to pick up the mount change, or the library `pgaudit` is loaded
+through, the same as a version or resource
 change. Everything else about the database is unchanged — backups, restore,
 point-in-time recovery and failover all behave exactly as they do without
 extensions, because the database itself is still the image we operate.

@@ -80,6 +80,40 @@ jobs would land in whichever project's runners GitHub happened to pick.
 `fpcloud runner create` prints the exact label, and `fpcloud runner show <name>`
 repeats it, so you never have to assemble it yourself.
 
+## Check a workflow before you push it
+
+```bash
+fpcloud runner check
+fpcloud runner check --workflow .github/workflows/ci.yml
+```
+
+Reads `.github/workflows` (or the file you name) and says which of its jobs
+your pools can actually take. It sends the file's text, so it answers for a
+workflow you have not pushed yet — which is the point: a job that names a label
+no pool serves does not fail, it **queues forever**, and nothing on GitHub says
+why.
+
+Each job gets one verdict:
+
+| Verdict | What it means |
+|---|---|
+| `runs` | the label names a pool in this project, and the job asks for nothing the pool cannot serve |
+| `queues` | no pool here serves that label — the job waits with nothing to pick it up |
+| `refused` | the label matches a pool, but the job declares `container:` or `services:`, which these runners do not serve |
+| `github` | a GitHub-hosted label (`ubuntu-latest` and friends): it runs, on GitHub's minutes rather than on your pool |
+| `undetermined` | `runs-on` is an expression, or the job calls a reusable workflow, so which runner it picks is not in this file |
+
+`undetermined` is never "fine" — it is the check saying it could not answer.
+A matrix over `runs-on: ${{ matrix.os }}` has to be read by you.
+
+The commonest finding is `runs-on: self-hosted`, which works on most
+self-hosted setups and never here: a pool registers under exactly one label,
+its own, so `self-hosted` matches nothing. Use the label `runner create`
+printed.
+
+Nothing reads your repository — the platform holds no copy of your workflows
+and never fetches one.
+
 `runner show` also says what the pool is doing: **Busy** is runners executing
 a job beside the most the pool may run at once (`3 of 4`), one line per busy
 runner names the job and repository it serves, and **Waiting** is GitHub's own

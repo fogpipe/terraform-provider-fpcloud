@@ -9,6 +9,7 @@ import (
 	"github.com/fogpipe/terraform-provider-fpcloud/internal/provider"
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
@@ -138,4 +139,51 @@ resource "fpcloud_database" "test" {
 			},
 		},
 	})
+}
+
+// A rotation is asked for by changing password_rotation, adding it included;
+// removing it, or leaving it as it was, rotates nothing
+// (fogpipe/cloud-workspace#297).
+func TestRotationRequested(t *testing.T) {
+	cases := []struct {
+		name       string
+		prev, next types.String
+		want       bool
+	}{
+		{"added", types.StringNull(), types.StringValue("2026-09-07"), true},
+		{"changed", types.StringValue("1"), types.StringValue("2"), true},
+		{"unchanged", types.StringValue("1"), types.StringValue("1"), false},
+		{"removed", types.StringValue("1"), types.StringNull(), false},
+		{"emptied", types.StringValue("1"), types.StringValue(""), false},
+		{"never set", types.StringNull(), types.StringNull(), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := provider.RotationRequested(tc.prev, tc.next); got != tc.want {
+				t.Errorf("rotationRequested(%v, %v) = %v, want %v", tc.prev, tc.next, got, tc.want)
+			}
+		})
+	}
+}
+
+// The password survives an update that touches something else: a Computed
+// attribute with no plan modifier is unknown in every plan that changes the
+// resource, and the state mapper turned that into an empty password (#297).
+func TestPasswordIsKeptAcrossUpdates(t *testing.T) {
+	var resp fwresource.SchemaResponse
+	provider.NewDatabaseResource().Schema(context.Background(), fwresource.SchemaRequest{}, &resp)
+	p, ok := resp.Schema.Attributes["password"].(schema.StringAttribute)
+	if !ok {
+		t.Fatalf("password attribute missing or not a StringAttribute")
+	}
+	if len(p.PlanModifiers) == 0 {
+		t.Errorf("password has no plan modifier keeping the prior state across updates")
+	}
+	r, ok := resp.Schema.Attributes["password_rotation"].(schema.StringAttribute)
+	if !ok {
+		t.Fatalf("password_rotation attribute missing or not a StringAttribute")
+	}
+	if !r.Optional || r.Computed {
+		t.Errorf("password_rotation is the practitioner's request and must be Optional only")
+	}
 }

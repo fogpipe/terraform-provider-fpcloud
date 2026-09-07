@@ -57,6 +57,8 @@ type RunnerResourceModel struct {
 	Labels         types.List   `tfsdk:"labels"`
 	Status         types.String `tfsdk:"status"`
 	CurrentRunners types.Int64  `tfsdk:"current_runners"`
+	RunningRunners types.Int64  `tfsdk:"running_runners"`
+	PendingRunners types.Int64  `tfsdk:"pending_runners"`
 }
 
 func (r *RunnerResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -214,7 +216,15 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed:    true,
 			},
 			"current_runners": schema.Int64Attribute{
-				Description: "Runner pods alive right now — how many of your jobs are running.",
+				Description: "Runners alive right now: `running_runners` plus `pending_runners`.",
+				Computed:    true,
+			},
+			"running_runners": schema.Int64Attribute{
+				Description: "Runners executing a job right now.",
+				Computed:    true,
+			},
+			"pending_runners": schema.Int64Attribute{
+				Description: "Runners that exist without a job — above all, waiting for a pod the org's ceiling refuses.",
 				Computed:    true,
 			},
 		},
@@ -426,6 +436,8 @@ func (r *RunnerResource) apply(ctx context.Context, m *RunnerResourceModel, runn
 	m.GitHubAppInstallationID = optionalString(runner.GitHubAppInstallationID)
 	m.Status = types.StringValue(runner.Status)
 	m.CurrentRunners = types.Int64Value(int64(runner.CurrentRunners))
+	m.RunningRunners = types.Int64Value(int64(runner.RunningRunners))
+	m.PendingRunners = types.Int64Value(int64(runner.PendingRunners))
 	labels, d := types.ListValueFrom(ctx, types.StringType, runner.Labels)
 	diags.Append(d...)
 	m.Labels = labels

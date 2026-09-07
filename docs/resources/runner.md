@@ -91,10 +91,12 @@ resource "fpcloud_runner" "own_app" {
 
 ### Read-Only
 
-- `current_runners` (Number) Runner pods alive right now — how many of your jobs are running.
+- `current_runners` (Number) Runners alive right now: `running_runners` plus `pending_runners`.
 - `github_config_url` (String) The account URL the pool registered with, derived from the connection or from `github_account`. Read-only.
 - `id` (String) Runner ID.
 - `labels` (List of String) The `runs-on` labels this pool answers to.
+- `pending_runners` (Number) Runners that exist without a job — above all, waiting for a pod the org's ceiling refuses.
+- `running_runners` (Number) Runners executing a job right now.
 - `status` (String) Pool state: `pending` while it registers with GitHub, then `running`.
 
 <a id="nestedatt--builder"></a>

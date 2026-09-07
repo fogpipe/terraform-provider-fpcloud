@@ -38,6 +38,8 @@ MintBucketSessionCredentials
 ListRegistryRepositories
 ListRegistryTags
 DeleteRegistryTag
+# the CVEs behind a tag (fogpipe/cloud-workspace#321): a scan result, read, never declared
+ListRegistryCVEs
 
 # read-only observability — not something you reference as TF resource state
 GetAppLogs
@@ -47,7 +49,6 @@ GetAppVersion
 # them returns a different set on every read and settles for nobody
 ListWorkloadEvents
 ListDeployments
-GetDeployment
 ListRevisions
 ListAudit
 ClusterInfo

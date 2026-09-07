@@ -42,26 +42,29 @@ type DatabaseBackupModel struct {
 
 // DatabaseResourceModel describes the resource data model.
 type DatabaseResourceModel struct {
-	ID          types.String         `tfsdk:"id"`
-	ProjectID   types.String         `tfsdk:"project_id"`
-	Name        types.String         `tfsdk:"name"`
-	DisplayName types.String         `tfsdk:"display_name"`
-	Engine      types.String         `tfsdk:"engine"`
-	Version     types.String         `tfsdk:"version"`
-	Plan        types.String         `tfsdk:"plan"`
-	CPU         types.String         `tfsdk:"cpu"`
-	Memory      types.String         `tfsdk:"memory"`
-	Storage     types.String         `tfsdk:"storage"`
-	Instances   types.Int64          `tfsdk:"instances"`
-	Pooler      types.Bool           `tfsdk:"pooler"`
-	Extensions  types.Set            `tfsdk:"extensions"`
-	Status      types.String         `tfsdk:"status"`
-	Host        types.String         `tfsdk:"host"`
-	Port        types.Int64          `tfsdk:"port"`
-	Username    types.String         `tfsdk:"username"`
-	Password    types.String         `tfsdk:"password"`
-	CreatedAt   types.String         `tfsdk:"created_at"`
-	Backup      *DatabaseBackupModel `tfsdk:"backup"`
+	ID          types.String `tfsdk:"id"`
+	ProjectID   types.String `tfsdk:"project_id"`
+	Name        types.String `tfsdk:"name"`
+	DisplayName types.String `tfsdk:"display_name"`
+	Engine      types.String `tfsdk:"engine"`
+	Version     types.String `tfsdk:"version"`
+	Plan        types.String `tfsdk:"plan"`
+	CPU         types.String `tfsdk:"cpu"`
+	Memory      types.String `tfsdk:"memory"`
+	Storage     types.String `tfsdk:"storage"`
+	Instances   types.Int64  `tfsdk:"instances"`
+	Pooler      types.Bool   `tfsdk:"pooler"`
+	Extensions  types.Set    `tfsdk:"extensions"`
+	Status      types.String `tfsdk:"status"`
+	Host        types.String `tfsdk:"host"`
+	Port        types.Int64  `tfsdk:"port"`
+	Username    types.String `tfsdk:"username"`
+	Password    types.String `tfsdk:"password"`
+	// PasswordRotation is a value of the practitioner's choosing; changing it
+	// is the request to rotate (fogpipe/cloud-workspace#297).
+	PasswordRotation types.String         `tfsdk:"password_rotation"`
+	CreatedAt        types.String         `tfsdk:"created_at"`
+	Backup           *DatabaseBackupModel `tfsdk:"backup"`
 }
 
 func (r *DatabaseResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -195,11 +198,26 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Computed:    true,
 			},
 			"password": schema.StringAttribute{
-				Description: "Password for `username`, returned only at creation and kept in state from then " +
-					"on: the platform provisions it and stores no copy, so a later read has none. An imported " +
-					"database has no password in state; read it live with `fpcloud db connect`.",
+				Description: "Password for `username`, returned at creation and after a rotation and kept in " +
+					"state from then on: the platform provisions it and stores no copy, so a later read has none. " +
+					"An imported database has no password in state; read it live with `fpcloud db connect`. " +
+					"To make every copy of it stale, change `password_rotation`.",
 				Computed:  true,
 				Sensitive: true,
+				// Kept across updates: a later read has nothing to refresh it
+				// from, so an unknown here became an empty password in state
+				// after any other change to the resource.
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"password_rotation": schema.StringAttribute{
+				Description: "Change this value to rotate the database password — any string of your choosing, " +
+					"a date or a counter. The platform issues a new password, waits for the database to accept it, " +
+					"rolls every app in the project onto it, and `password` takes the new value; the old one stops " +
+					"authenticating new connections. Anything outside the platform that held it — a local psql, " +
+					"another workspace's state — needs the new one.",
+				Optional: true,
 			},
 			"created_at": schema.StringAttribute{
 				Description: "The time the database was created.",
@@ -355,6 +373,19 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 	mapDatabaseToState(db, &plan)
 
+	// A changed rotation value is the request to rotate (#297): the platform
+	// issues the new password, waits for the role to carry it and rolls every
+	// app in the project before answering, so the value written to state is
+	// the one Postgres accepts by the time the apply finishes.
+	if rotationRequested(state.PasswordRotation, plan.PasswordRotation) {
+		conn, err := r.client.RotateDatabasePassword(ctx, state.ID.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Error rotating database password", err.Error())
+			return
+		}
+		plan.Password = types.StringValue(conn.Password)
+	}
+
 	// Reconcile backup config toward the desired state (idempotent).
 	if plan.Backup != nil {
 		if err := r.client.UpdateBackupConfig(ctx, state.ID.ValueString(), client.UpdateBackupConfigRequest{
@@ -371,6 +402,16 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// rotationRequested reports whether the practitioner changed password_rotation
+// to a value. Adding the attribute counts — that is how the first rotation is
+// asked for — and removing it does not: an absent request is not a request.
+func rotationRequested(prev, next types.String) bool {
+	if next.IsNull() || next.IsUnknown() || next.ValueString() == "" {
+		return false
+	}
+	return prev.IsNull() || prev.ValueString() != next.ValueString()
 }
 
 // ImportState imports a database by its id. Read rebuilds everything else from

@@ -14,6 +14,16 @@ test:
 testacc:
     TF_ACC=1 go test ./internal/provider/ -v -count=1 -timeout 30m
 
+# The webhook acceptance tests, which `testacc` cannot run: webhook setup calls
+# the GitHub API to register a hook, so it needs a real repository the platform
+# App is installed on rather than a throwaway. FPCLOUD_ACC_WEBHOOK_REPO names it,
+# and this recipe is what provides it — the two tests skipped unconditionally
+# behind a message naming a variable they never read (ADR-127), #253 made the
+# read real, and nothing set it, so they still ran nowhere (internal/suite).
+testacc-webhook repo:
+    TF_ACC=1 FPCLOUD_ACC_WEBHOOK_REPO={{repo}} \
+      go test ./internal/provider/ -run TestAccWebhook -v -count=1 -timeout 30m
+
 # Regenerate docs/ from schema + examples/ + templates/. Run before tagging a
 # release. Everything under docs/ is output — this rewrites the tree from
 # scratch, so hand-written pages go in templates/ (see templates/guides).

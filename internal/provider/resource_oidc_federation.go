@@ -85,7 +85,9 @@ func (r *OIDCFederationResource) Schema(_ context.Context, _ resource.SchemaRequ
 				PlanModifiers: replaceStr,
 			},
 			"subject_pattern": schema.StringAttribute{
-				Description:   "Subject to match, e.g. \"repo:owner/name:ref:refs/tags/*\". \"*\" is a wildcard; a bare \"*\" is rejected.",
+				Description: "Subject to match, e.g. \"repo:owner/name:ref:refs/tags/*\". \"*\" is a wildcard; a bare \"*\" is rejected. " +
+					"A pattern in that slug form also matches GitHub's immutable subject form (\"repo:owner@OWNER-ID/name@REPO-ID:...\"), " +
+					"which newer repositories and any renamed, transferred or opted-in one carry; a pattern written with the ids matches only tokens carrying them.",
 				Required:      true,
 				PlanModifiers: replaceStr,
 			},

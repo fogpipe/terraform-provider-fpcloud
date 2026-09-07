@@ -29,7 +29,7 @@ resource "fpcloud_oidc_federation" "ci" {
 
 - `project` (String) The project (ID or name) the binding belongs to.
 - `service_account` (String) Service account (email or ID) the repo may assume. Must belong to the project.
-- `subject_pattern` (String) Subject to match, e.g. "repo:owner/name:ref:refs/tags/*". "*" is a wildcard; a bare "*" is rejected.
+- `subject_pattern` (String) Subject to match, e.g. "repo:owner/name:ref:refs/tags/*". "*" is a wildcard; a bare "*" is rejected. A pattern in that slug form also matches GitHub's immutable subject form ("repo:owner@OWNER-ID/name@REPO-ID:..."), which newer repositories and any renamed, transferred or opted-in one carry; a pattern written with the ids matches only tokens carrying them.
 
 ### Optional
 

@@ -617,6 +617,22 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		return
 	}
 
+	// The app exists from here on, whatever the steps below report. Record it
+	// now, so a failure further down — the release gate, a binding, a scale,
+	// traffic — leaves a tainted resource Terraform replaces on the next apply,
+	// not an app it knows nothing about and collides with on the name
+	// (fogpipe/cloud-workspace#224). The framework hands back the plan when
+	// Create returns early, and the plan's id is unknown, which is saved as
+	// null: a record that names nothing to destroy.
+	r.setModelFromApp(&plan, app, &resp.Diagnostics)
+	if plan.Traffic.IsNull() || plan.Traffic.IsUnknown() {
+		r.setTrafficOnModel(ctx, &plan, nil, &resp.Diagnostics)
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// The database binding is a separate call: the create request has no field
 	// for it (the API takes it on PATCH), and an unset value means "the project's
 	// sole database", which is already the default.

@@ -58,6 +58,7 @@ resource "fpcloud_database" "main" {
 - `password` (String, Sensitive) Password for `username`, returned at creation and after a rotation and kept in state from then on: the platform provisions it and stores no copy, so a later read has none. An imported database has no password in state; read it live with `fpcloud db connect`. To make every copy of it stale, change `password_rotation`.
 - `plan` (String) Legacy size tier, derived by the server from cpu/memory (e.g. "starter", "custom"). Read-only — size the database with cpu/memory/storage instead.
 - `port` (Number) The database port.
+- `read_host` (String) Cluster-internal hostname of the database's REPLICA (CNPG's `-ro` Service), on the same `port` and with the same credential — a replica is not a second identity. Every managed database has one, because every one is two instances. **Reads here can be stale**: replication is asynchronous, so a read-your-own-write can miss; send anything that must see everything committed so far to `host`. Empty when the platform cannot derive a replica endpoint for the database, which means there is none — never fall back to `host` under this name.
 - `status` (String) The current status of the database.
 - `username` (String) The database username.
 

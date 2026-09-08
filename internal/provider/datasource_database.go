@@ -32,6 +32,7 @@ type DatabaseDataSourceModel struct {
 	Storage     types.String `tfsdk:"storage"`
 	Instances   types.Int64  `tfsdk:"instances"`
 	Host        types.String `tfsdk:"host"`
+	ReadHost    types.String `tfsdk:"read_host"`
 	Port        types.Int64  `tfsdk:"port"`
 	Username    types.String `tfsdk:"username"`
 	CreatedAt   types.String `tfsdk:"created_at"`
@@ -105,6 +106,10 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 					"outside the cluster.",
 				Computed: true,
 			},
+			"read_host": schema.StringAttribute{
+				Description: "Cluster-internal hostname of the database's REPLICA (CNPG's `-ro` Service), on the same `port` and with the same credential — a replica is not a second identity. Every managed database has one, because every one is two instances. **Reads here can be stale**: replication is asynchronous, so a read-your-own-write can miss; send anything that must see everything committed so far to `host`. Empty when the platform cannot derive a replica endpoint for the database, which means there is none — never fall back to `host` under this name.",
+				Computed:    true,
+			},
 			"port": schema.Int64Attribute{
 				Description: "The database port.",
 				Computed:    true,
@@ -170,6 +175,11 @@ func (d *DatabaseDataSource) Read(ctx context.Context, req datasource.ReadReques
 	// These are on the API response and always were; they used to be hardcoded
 	// empty here, with a comment asserting the API did not expose them.
 	data.Host = types.StringValue(db.Host)
+	// Empty means the database has no derivable replica endpoint, and is carried
+	// through as empty rather than falling back to Host: a config wiring this into
+	// an app would otherwise send stale-tolerant reads to the primary while the
+	// attribute claimed a replica served them (fogpipe/cloud-workspace#862).
+	data.ReadHost = types.StringValue(db.ReadHost)
 	data.Port = types.Int64Value(int64(db.Port))
 	data.Username = types.StringValue(db.Username)
 	data.CreatedAt = types.StringValue(db.CreatedAt.Format("2006-01-02T15:04:05Z"))

@@ -57,6 +57,7 @@ type DatabaseResourceModel struct {
 	Extensions  types.Set    `tfsdk:"extensions"`
 	Status      types.String `tfsdk:"status"`
 	Host        types.String `tfsdk:"host"`
+	ReadHost    types.String `tfsdk:"read_host"`
 	Port        types.Int64  `tfsdk:"port"`
 	Username    types.String `tfsdk:"username"`
 	Password    types.String `tfsdk:"password"`
@@ -192,6 +193,10 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					"outside the cluster — an app in the same project gets DATABASE_URL injected, and " +
 					"`fpcloud db connect` tunnels in from a workstation.",
 				Computed: true,
+			},
+			"read_host": schema.StringAttribute{
+				Description: "Cluster-internal hostname of the database's REPLICA (CNPG's `-ro` Service), on the same `port` and with the same credential — a replica is not a second identity. Every managed database has one, because every one is two instances. **Reads here can be stale**: replication is asynchronous, so a read-your-own-write can miss; send anything that must see everything committed so far to `host`. Empty when the platform cannot derive a replica endpoint for the database, which means there is none — never fall back to `host` under this name.",
+				Computed:    true,
 			},
 			"port": schema.Int64Attribute{
 				Description: "The database port.",
@@ -526,6 +531,11 @@ func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 	// `connection_string` field that the API has never emitted, so host, port and
 	// username silently resolved to "" on every read.
 	state.Host = types.StringValue(db.Host)
+	// Empty means the database has no derivable replica endpoint, and is carried
+	// through as empty rather than falling back to Host: a config wiring this into
+	// an app would otherwise send stale-tolerant reads to the primary while the
+	// attribute claimed a replica served them (fogpipe/cloud-workspace#862).
+	state.ReadHost = types.StringValue(db.ReadHost)
 	state.Port = types.Int64Value(int64(db.Port))
 	state.Username = types.StringValue(db.Username)
 	// Password is returned only on create — the platform keeps no copy

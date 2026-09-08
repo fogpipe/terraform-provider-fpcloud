@@ -32,6 +32,7 @@ Use this data source to read a Fogpipe managed database by ID.
 - `plan` (String) The database plan (e.g. starter, standard, premium).
 - `port` (Number) The database port.
 - `project_id` (String) The ID of the project this database belongs to.
+- `read_host` (String) Cluster-internal hostname of the database's REPLICA (CNPG's `-ro` Service), on the same `port` and with the same credential — a replica is not a second identity. Every managed database has one, because every one is two instances. **Reads here can be stale**: replication is asynchronous, so a read-your-own-write can miss; send anything that must see everything committed so far to `host`. Empty when the platform cannot derive a replica endpoint for the database, which means there is none — never fall back to `host` under this name.
 - `status` (String) The current status of the database.
 - `storage` (String) Persistent volume size the database runs under (e.g. "10Gi").
 - `username` (String) The database username.

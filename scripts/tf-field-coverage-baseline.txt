@@ -62,6 +62,15 @@ Runner.restart
 # refresh and never converge on anything a config could state.
 Bucket.object_count
 Bucket.used_bytes
+# How far the replica trails the primary right now (#300), read live from
+# `pg_stat_replication` at request time. The same kind of reading as
+# `Bucket.used_bytes` one layer down: it moves every second, driven by the
+# tenant's own write volume rather than by anything declared, so an attribute
+# over it would rewrite state on every refresh and converge on nothing. It is
+# also the one field here a config could actively misuse — fed into another
+# resource's argument it would replace that resource continuously. `fpcloud db
+# show` and the console are where a staleness reading belongs.
+Database.replication_lag_seconds
 
 # --- the same state, spelled declaratively somewhere else ---------------
 # `backup.enabled` is where a database says whether it is backed up. This is

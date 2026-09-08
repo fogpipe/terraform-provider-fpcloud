@@ -34,6 +34,8 @@ github.com/fogpipe/cloud-cli v0.168.1-0.20260907143706-68e578efe731 h1:UVZ45/jSu
 github.com/fogpipe/cloud-cli v0.168.1-0.20260907143706-68e578efe731/go.mod h1:7f2uebiZPZAdRUuHK78aJJnkeSgzE8Qh99P4v7dSvSM=
 github.com/fogpipe/cloud-cli v0.171.3-0.20260907215806-ff70d6efc7ba h1:tOWBx1d3U3EuUNhjvBqIlcgnY6zt780l6tI6LcE/af8=
 github.com/fogpipe/cloud-cli v0.171.3-0.20260907215806-ff70d6efc7ba/go.mod h1:7f2uebiZPZAdRUuHK78aJJnkeSgzE8Qh99P4v7dSvSM=
+github.com/fogpipe/cloud-cli v0.173.1-0.20260908062239-c3fb96842a6c h1:HATtLgUd0RMDoEb/fEyBp/HhuXQevvRIXat1VFlmd3k=
+github.com/fogpipe/cloud-cli v0.173.1-0.20260908062239-c3fb96842a6c/go.mod h1:7f2uebiZPZAdRUuHK78aJJnkeSgzE8Qh99P4v7dSvSM=
 github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 h1:+zs/tPmkDkHx3U66DAb0lQFJrpS6731Oaa12ikc+DiI=
 github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376/go.mod h1:an3vInlBmSxCcxctByoQdvwPiA7DTK7jaaFDBTtu0ic=
 github.com/go-git/go-billy/v5 v5.6.2 h1:6Q86EsPXMa7c3YZ3aLAQsMA0VlWmy43r6FHqa/UNbRM=

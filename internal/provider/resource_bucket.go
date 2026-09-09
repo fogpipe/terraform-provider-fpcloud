@@ -262,7 +262,21 @@ func (r *BucketResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 	// Quotas, website serving, and the vanity slug are mutable in place
 	// (project/name force replacement).
-	bucket, err := r.client.SetBucketQuota(ctx, state.ID.ValueString(), plan.QuotaMaxSize.ValueInt64(), plan.QuotaMaxObjects.ValueInt64())
+	//
+	// Unknown means "keep what the bucket has", the same rule the website and
+	// public-read attributes below follow. Reading it as ValueInt64's zero sent
+	// max_objects: 0 for a plan that only lowered the size, and a quota is a size
+	// above zero (ADR-129) — so every update that did not restate BOTH quotas in
+	// configuration was refused (fogpipe/cloud-workspace#923).
+	maxSize := plan.QuotaMaxSize.ValueInt64()
+	if plan.QuotaMaxSize.IsUnknown() || plan.QuotaMaxSize.IsNull() {
+		maxSize = state.QuotaMaxSize.ValueInt64()
+	}
+	maxObjects := plan.QuotaMaxObjects.ValueInt64()
+	if plan.QuotaMaxObjects.IsUnknown() || plan.QuotaMaxObjects.IsNull() {
+		maxObjects = state.QuotaMaxObjects.ValueInt64()
+	}
+	bucket, err := r.client.SetBucketQuota(ctx, state.ID.ValueString(), maxSize, maxObjects)
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating bucket quota", err.Error())
 		return

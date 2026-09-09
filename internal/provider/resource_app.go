@@ -530,6 +530,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	asked := plan
 
 	// env and secret ride the create request (ADR-112): an app created with a
 	// release command is gated on it before it serves, so config written after
@@ -625,7 +626,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	// Create returns early, and the plan's id is unknown, which is saved as
 	// null: a record that names nothing to destroy.
 	r.setModelFromApp(&plan, app, &resp.Diagnostics)
-	if plan.Traffic.IsNull() || plan.Traffic.IsUnknown() {
+	if asked.Traffic.IsNull() || asked.Traffic.IsUnknown() {
 		r.setTrafficOnModel(ctx, &plan, nil, &resp.Diagnostics)
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -636,8 +637,8 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	// The database binding is a separate call: the create request has no field
 	// for it (the API takes it on PATCH), and an unset value means "the project's
 	// sole database", which is already the default.
-	if !plan.Database.IsNull() && !plan.Database.IsUnknown() && plan.Database.ValueString() != "" {
-		bound, err := r.client.SetAppDatabase(ctx, app.ID, plan.Database.ValueString())
+	if !asked.Database.IsNull() && !asked.Database.IsUnknown() && asked.Database.ValueString() != "" {
+		bound, err := r.client.SetAppDatabase(ctx, app.ID, asked.Database.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError("Error setting app database binding", err.Error())
 			return
@@ -647,7 +648,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	// An app created with a release command is gated on it before it serves, so
 	// the apply waits for the same verdict a deploy does.
-	if len(plan.ReleaseCommand.Elements()) > 0 {
+	if len(asked.ReleaseCommand.Elements()) > 0 {
 		if err := awaitRelease(ctx, r.client, app.ID); err != nil {
 			resp.Diagnostics.AddError("Error running release command", err.Error())
 			return
@@ -658,23 +659,23 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	// set them (they have no static default now — see the schema), so an unset
 	// value picks up the API's mode-appropriate default without a plan-vs-apply
 	// drift.
-	replicas := int32(plan.Replicas.ValueInt64())
-	cpuLimit := plan.CPULimit.ValueString()
-	memoryLimit := plan.MemoryLimit.ValueString()
-	alwaysOn := plan.Mode.ValueString() != "serverless"
+	replicas := int32(asked.Replicas.ValueInt64())
+	cpuLimit := asked.CPULimit.ValueString()
+	memoryLimit := asked.MemoryLimit.ValueString()
+	alwaysOn := asked.Mode.ValueString() != "serverless"
 
 	scaleReq := client.ScaleRequest{
 		CPULimit:    cpuLimit,
 		MemoryLimit: memoryLimit,
 	}
 	sendScale := cpuLimit != "500m" || memoryLimit != "512Mi" || (alwaysOn && replicas != 1)
-	if !plan.MinScale.IsNull() {
-		m := int32(plan.MinScale.ValueInt64())
+	if !asked.MinScale.IsNull() {
+		m := int32(asked.MinScale.ValueInt64())
 		scaleReq.MinScale = &m
 		sendScale = true
 	}
-	if !plan.MaxScale.IsNull() {
-		m := int32(plan.MaxScale.ValueInt64())
+	if !asked.MaxScale.IsNull() {
+		m := int32(asked.MaxScale.ValueInt64())
 		scaleReq.MaxScale = &m
 		sendScale = true
 	}
@@ -692,9 +693,9 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 
 	// Apply traffic configuration if specified.
-	if !plan.Traffic.IsNull() && !plan.Traffic.IsUnknown() {
+	if !asked.Traffic.IsNull() && !asked.Traffic.IsUnknown() {
 		var trafficModels []TrafficTargetModel
-		resp.Diagnostics.Append(plan.Traffic.ElementsAs(ctx, &trafficModels, false)...)
+		resp.Diagnostics.Append(asked.Traffic.ElementsAs(ctx, &trafficModels, false)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -718,7 +719,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 
 	r.setModelFromApp(&plan, app, &resp.Diagnostics)
-	if plan.Traffic.IsNull() || plan.Traffic.IsUnknown() {
+	if asked.Traffic.IsNull() || asked.Traffic.IsUnknown() {
 		// Read current traffic from the API. On error (e.g. a freshly-created
 		// serverless app with no ready revision yet) fall back to an empty set so
 		// traffic resolves to a known value — a Computed attribute left unknown

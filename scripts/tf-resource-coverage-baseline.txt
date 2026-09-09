@@ -44,6 +44,9 @@ VerifyDomain
 VerifyBucketDomain
 PublishWebsiteVersion
 ClearBucketLifecycleRules
+# `project prune` removes finished pods a namespace has kept; a sweep with a
+# result, not a state to converge on.
+PrunePods
 
 # data-plane object operations — deliberately imperative, matches the
 # aws_s3_bucket / aws s3 sync split already established for buckets (#389)

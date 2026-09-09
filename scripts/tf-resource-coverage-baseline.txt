@@ -103,9 +103,6 @@ GetJobLogs
 # "list all X" convenience (see above) — jobs are looked up singularly
 ListJobs
 
-# "list all X" convenience (see above) — runner pools are looked up singularly
-ListRunners
-
 # metered usage (#675) — read-only observability. Usage is produced by the
 # platform, not declared: there is no desired state for "what this app consumed"
 ListProjectUsage

@@ -3,48 +3,57 @@
 page_title: "fpcloud_runner Resource - fpcloud"
 subcategory: ""
 description: |-
-  Manages a pool of GitHub Actions runners in a project. A pool is not a machine: a pod is created for one job and destroyed when it ends, so an idle pool costs nothing. Workflows opt in by naming the pool in runs-on. A pool serves every repository in the GitHub account the project is connected to — connect it once with fpcloud github connect, which proves you control that account.
+  Manages a project's GitHub Actions runner. A project has one: it is not a machine but a scale set — a pod is created for one job and destroyed when it ends, so an idle runner costs nothing. Workflows opt in with runs-on: <project>-ci. The runner serves every repository in the GitHub account the project is connected to — connect it once with fpcloud github connect, which proves you control that account.
 ---
 
 # fpcloud_runner (Resource)
 
-Manages a pool of GitHub Actions runners in a project. A pool is not a machine: a pod is created for one job and destroyed when it ends, so an idle pool costs nothing. Workflows opt in by naming the pool in `runs-on`. A pool serves every repository in the GitHub account the project is connected to — connect it once with `fpcloud github connect`, which proves you control that account.
+Manages a project's GitHub Actions runner. A project has one: it is not a machine but a scale set — a pod is created for one job and destroyed when it ends, so an idle runner costs nothing. Workflows opt in with `runs-on: <project>-ci`. The runner serves every repository in the GitHub account the project is connected to — connect it once with `fpcloud github connect`, which proves you control that account.
 
 ## Example Usage
 
 ```terraform
-# CI for the project's GitHub account. The pool scales to zero: a pod is created
-# for a job and destroyed when it ends, so an idle pool costs nothing. Workflows
-# opt in with `runs-on: ci`.
+# A project has one runner, and it scales to zero: a pod is created for a job
+# and destroyed when it ends, so an idle runner costs nothing. Workflows opt in
+# with `runs-on: <project>-ci`.
 #
 # There is no account to configure. Connect the project once with
 # `fpcloud github connect` — you authorize the install as yourself, which is
-# what proves you control the account — and every pool serves it.
+# what proves you control the account — and the runner serves it.
 resource "fpcloud_runner" "ci" {
-  project     = fpcloud_project.example.name
-  name        = "ci"
-  max_runners = 4
+  project = fpcloud_project.example.name
 }
 
-# A second pool, able to build container images. `builder` runs a rootless
-# BuildKit alongside each job and sets BUILDKIT_HOST — there is no Docker daemon
-# in a runner, and Docker-in-Docker is not available.
+# Sized from the menu (small, medium, large), running more jobs at once, able
+# to build container images and with a database beside every job.
 #
-# `cpu`/`memory` bound the runner your steps execute in; the builder is sized
-# apart from it because the two do different work, and it adds to what the pool
-# costs. Leave the builder's fields out to take the platform's defaults.
-resource "fpcloud_runner" "shared" {
-  project     = fpcloud_project.example.name
-  name        = "shared"
-  min_runners = 1
+# `builder` runs a rootless BuildKit alongside each job and sets BUILDKIT_HOST —
+# there is no Docker daemon in a runner, and Docker-in-Docker is not available.
+# It is sized apart from the runner because the two do different work, and it
+# adds to what a job costs; leave its fields out to take the platform's defaults.
+#
+# `services` are the platform's answer to a workflow's `services:` block, which
+# does not work on these runners. Each one is reachable on 127.0.0.1 from your
+# steps for the life of the job.
+resource "fpcloud_runner" "other" {
+  project     = fpcloud_project.other.name
+  size        = "large"
   max_runners = 6
-  cpu         = "4"
-  memory      = "8Gi"
 
   builder = {
     cpu    = "2"
     memory = "4Gi"
   }
+
+  services = [
+    {
+      name  = "postgres"
+      image = "postgres:18-alpine"
+      env = {
+        POSTGRES_PASSWORD = "ci"
+      }
+    },
+  ]
 }
 
 # Bring your own GitHub App instead — for an organization whose policy forbids
@@ -53,8 +62,7 @@ resource "fpcloud_runner" "shared" {
 # This is the one case that names an account: your own key says nothing about
 # which account it is for. Holding the key is itself the proof it is yours.
 resource "fpcloud_runner" "own_app" {
-  project        = fpcloud_project.example.name
-  name           = "isolated"
+  project        = fpcloud_project.isolated.name
   github_account = "acme"
 
   credential                 = "app"
@@ -69,36 +77,31 @@ resource "fpcloud_runner" "own_app" {
 
 ### Required
 
-- `name` (String) Runner name, unique within the project (DNS-1123 label). This is also the `runs-on` label workflows use. Changing it forces a new runner.
-- `project` (String) ID or name of the project this runner belongs to. Changing it forces a new runner.
+- `project` (String) ID or name of the project this runner belongs to. A project has one runner, so this is also what identifies it. Changing it forces a new runner.
 
 ### Optional
 
-- `builder` (Attributes) Run a rootless BuildKit alongside each job and point `BUILDKIT_HOST` at it. There is no Docker daemon in a runner and Docker-in-Docker is not available, so this is how a job builds images. Omit the block for a pool that builds nothing; set it to `{}` for a builder at the platform's defaults. It is sized apart from the runner because the two do different work — the runner's memory follows your workflow's steps, the builder's follows your Dockerfile — and it adds to what the pool costs. (see [below for nested schema](#nestedatt--builder))
-- `cpu` (String) CPU limit for the runner — the container your workflow's steps execute in, e.g. "2". A builder, if you ask for one, is sized separately and adds to what the pool costs.
-- `credential` (String) How the pool authenticates: `platform` (default) uses the Fogpipe GitHub App and takes its account from the project's GitHub connection, so nothing else is set here; `app` uses your own GitHub App; `token` uses a personal access token. Chosen explicitly rather than inferred, so a pool that means to use the Fogpipe app and one carrying its own key are told apart by reading the config.
-- `display_name` (String) Human-readable label. Defaults to the name. Mutable in place.
-- `github_account` (String) The GitHub account the pool serves, e.g. `acme`. Only with a credential you supply (`app` or `token`), which carries no account of its own. With the default `platform` credential the account comes from the project's GitHub connection and setting this is an error — an account is proved, not named.
+- `builder` (Attributes) Run a rootless BuildKit alongside each job and point `BUILDKIT_HOST` at it. There is no Docker daemon in a runner and Docker-in-Docker is not available, so this is how a job builds images. Omit the block for a runner that builds nothing; set it to `{}` for a builder at the platform's defaults. It is sized apart from the runner because the two do different work — the runner's memory follows your workflow's steps, the builder's follows your Dockerfile — and it adds to what a job costs. (see [below for nested schema](#nestedatt--builder))
+- `credential` (String) How the runner authenticates: `platform` (default) uses the Fogpipe GitHub App and takes its account from the project's GitHub connection, so nothing else is set here; `app` uses your own GitHub App; `token` uses a personal access token. Chosen explicitly rather than inferred, so a runner that means to use the Fogpipe app and one carrying its own key are told apart by reading the config.
+- `github_account` (String) The GitHub account the runner serves, e.g. `acme`. Only with a credential you supply (`app` or `token`), which carries no account of its own. With the default `platform` credential the account comes from the project's GitHub connection and setting this is an error — an account is proved, not named.
 - `github_app_id` (String) Your GitHub App's id, with `credential = "app"`. Use alongside `github_app_installation_id` and `github_app_private_key`.
 - `github_app_installation_id` (String) Installation id of your GitHub App on the organization, with `credential = "app"`. With `credential = "platform"` it comes from the project's GitHub connection.
 - `github_app_private_key` (String, Sensitive) Your GitHub App's private key (PEM), with `credential = "app"`. Write-only — never returned by the API; the configured value is preserved in state across reads.
 - `github_token` (String, Sensitive) A personal access token, with `credential = "token"`. Write-only — never returned by the API. It carries a person's full access and dies with their account.
-- `image` (String) Runner image. Defaults to the platform's, which the operator keeps current — GitHub refuses work to deprecated runner versions, so pinning your own means keeping it current yourself.
-- `max_runners` (Number) Jobs the pool runs at once; further jobs queue on GitHub. Defaults to 2. Every one of them costs cores and memory for as long as it runs, so this is a budget rather than a throughput dial.
-- `memory` (String) Memory limit for the runner, e.g. "4Gi". A job that exceeds it is killed rather than slowed, and GitHub can take several minutes to notice, so a run that stalls with no output and ends as cancelled is usually this.
-- `min_runners` (Number) Runners kept idle and ready. Defaults to 0 — the pool scales to zero and a job waits a few seconds for its pod.
-- `runner_group` (String) GitHub runner group the pool joins. Defaults to `Default`.
-- `services` (Attributes List) Containers to run beside every job in this pool, reachable on `127.0.0.1` from your steps. This is how a workflow gets a database or a cache here: a job's own `services:` block does not work, because GitHub serves one by running the job inside a container and there is no container mode on these runners. Declared on the pool, they also coexist with `builder`, which a container mode would not. The set is replaced whole, and every service counts towards your organization's ceiling for as long as a job is running. (see [below for nested schema](#nestedatt--services))
+- `max_runners` (Number) Jobs the runner runs at once; further jobs queue on GitHub. Defaults to 2. Every one of them costs cores and memory for as long as it runs, so this is a budget rather than a throughput dial.
+- `runner_group` (String) GitHub runner group the runner joins. Defaults to `Default`.
+- `services` (Attributes List) Containers to run beside every job, reachable on `127.0.0.1` from your steps. This is how a workflow gets a database or a cache here: a job's own `services:` block does not work, because GitHub serves one by running the job inside a container and there is no container mode on these runners. Declared on the runner, they also coexist with `builder`, which a container mode would not. The set is replaced whole, and every service counts towards your organization's ceiling for as long as a job is running. (see [below for nested schema](#nestedatt--services))
+- `size` (String) What one job gets — the container your workflow's steps execute in — from a fixed menu: `small` (1 CPU, 2Gi), `medium` (2 CPU, 4Gi) or `large` (4 CPU, 8Gi). Defaults to `medium`. A job that exceeds its memory is killed rather than slowed, and GitHub can take several minutes to notice, so a run that stalls with no output and ends as cancelled is usually this. A builder, if you ask for one, is sized separately and adds to what a job costs.
 
 ### Read-Only
 
 - `current_runners` (Number) Runners alive right now: `running_runners` plus `pending_runners`.
-- `github_config_url` (String) The account URL the pool registered with, derived from the connection or from `github_account`. Read-only.
+- `github_config_url` (String) The account URL the runner registered with, derived from the connection or from `github_account`. Read-only.
 - `id` (String) Runner ID.
-- `labels` (List of String) The `runs-on` labels this pool answers to.
+- `labels` (List of String) The `runs-on` labels this runner answers to.
 - `pending_runners` (Number) Runners that exist without a job — above all, waiting for a pod the org's ceiling refuses.
 - `running_runners` (Number) Runners executing a job right now.
-- `status` (String) Pool state: `pending` while it registers with GitHub, then `running`.
+- `status` (String) Runner state: `pending` while it registers with GitHub, then `running`.
 
 <a id="nestedatt--builder"></a>
 ### Nested Schema for `builder`
@@ -115,7 +118,7 @@ Optional:
 Required:
 
 - `image` (String) Image to run, e.g. `postgres:18-alpine`.
-- `name` (String) Container name in the job pod: a DNS-1123 label, unique within the pool. It names nothing on the network — the containers share one.
+- `name` (String) Container name in the job pod: a DNS-1123 label, unique within the runner. It names nothing on the network — the containers share one.
 
 Optional:
 
@@ -130,9 +133,10 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import by runner id. The credential is write-only, so it is not read back —
-# put it in the config before the first apply after an import, or the next apply
-# will send an empty one.
+# Import by project id — a project has one runner, so the project is what
+# names it. The credential is write-only, so it is not read back — put it in
+# the config before the first apply after an import, or the next apply will
+# send an empty one.
 terraform import fpcloud_runner.ci 0d0e5f0b-3a3f-4d9f-9a2e-3f9e1c2b4a7d
 
 # Or declaratively (Terraform 1.5+ / OpenTofu):

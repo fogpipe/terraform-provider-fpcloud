@@ -1,35 +1,44 @@
-# CI for the project's GitHub account. The pool scales to zero: a pod is created
-# for a job and destroyed when it ends, so an idle pool costs nothing. Workflows
-# opt in with `runs-on: ci`.
+# A project has one runner, and it scales to zero: a pod is created for a job
+# and destroyed when it ends, so an idle runner costs nothing. Workflows opt in
+# with `runs-on: <project>-ci`.
 #
 # There is no account to configure. Connect the project once with
 # `fpcloud github connect` — you authorize the install as yourself, which is
-# what proves you control the account — and every pool serves it.
+# what proves you control the account — and the runner serves it.
 resource "fpcloud_runner" "ci" {
-  project     = fpcloud_project.example.name
-  name        = "ci"
-  max_runners = 4
+  project = fpcloud_project.example.name
 }
 
-# A second pool, able to build container images. `builder` runs a rootless
-# BuildKit alongside each job and sets BUILDKIT_HOST — there is no Docker daemon
-# in a runner, and Docker-in-Docker is not available.
+# Sized from the menu (small, medium, large), running more jobs at once, able
+# to build container images and with a database beside every job.
 #
-# `cpu`/`memory` bound the runner your steps execute in; the builder is sized
-# apart from it because the two do different work, and it adds to what the pool
-# costs. Leave the builder's fields out to take the platform's defaults.
-resource "fpcloud_runner" "shared" {
-  project     = fpcloud_project.example.name
-  name        = "shared"
-  min_runners = 1
+# `builder` runs a rootless BuildKit alongside each job and sets BUILDKIT_HOST —
+# there is no Docker daemon in a runner, and Docker-in-Docker is not available.
+# It is sized apart from the runner because the two do different work, and it
+# adds to what a job costs; leave its fields out to take the platform's defaults.
+#
+# `services` are the platform's answer to a workflow's `services:` block, which
+# does not work on these runners. Each one is reachable on 127.0.0.1 from your
+# steps for the life of the job.
+resource "fpcloud_runner" "other" {
+  project     = fpcloud_project.other.name
+  size        = "large"
   max_runners = 6
-  cpu         = "4"
-  memory      = "8Gi"
 
   builder = {
     cpu    = "2"
     memory = "4Gi"
   }
+
+  services = [
+    {
+      name  = "postgres"
+      image = "postgres:18-alpine"
+      env = {
+        POSTGRES_PASSWORD = "ci"
+      }
+    },
+  ]
 }
 
 # Bring your own GitHub App instead — for an organization whose policy forbids
@@ -38,8 +47,7 @@ resource "fpcloud_runner" "shared" {
 # This is the one case that names an account: your own key says nothing about
 # which account it is for. Holding the key is itself the proof it is yours.
 resource "fpcloud_runner" "own_app" {
-  project        = fpcloud_project.example.name
-  name           = "isolated"
+  project        = fpcloud_project.isolated.name
   github_account = "acme"
 
   credential                 = "app"

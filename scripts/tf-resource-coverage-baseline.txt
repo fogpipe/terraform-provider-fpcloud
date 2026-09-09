@@ -60,6 +60,17 @@ ListRegistryTags
 DeleteRegistryTag
 # the CVEs behind a tag (fogpipe/cloud-workspace#321): a scan result, read, never declared
 ListRegistryCVEs
+# NOTE: ahead of the pin. go.mod pins a cloud-cli older than this method, so the
+# gate reports this line as "now covered — remove from the baseline". Do NOT
+# remove it: it is here so the bump that brings ListAppCVEs in is green rather
+# than red on the person doing the bump. The line becomes a real exclusion the
+# moment the pin moves.
+# the same answer for the image an app is RUNNING (fogpipe/cloud-workspace#934).
+# A vulnerability list is a read of changing external facts — the same bytes
+# gain CVEs as the scanner's database learns them — so it is not infrastructure
+# state a plan can converge on, and a data source over it would diff on every
+# refresh for reasons nobody declared.
+ListAppCVEs
 
 # read-only observability — not something you reference as TF resource state
 GetAppLogs

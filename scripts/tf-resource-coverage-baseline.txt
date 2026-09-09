@@ -1,9 +1,9 @@
 # client methods with no Terraform resource/data-source calling them, reviewed
 # and accepted as permanent exclusions during the 2026-07-24 coverage sweep.
-# Grouped and reasoned here for humans; scripts/tf-resource-coverage.ts only
-# reads non-comment lines, so --update-baseline will flatten these groupings
-# back to a plain list — re-annotate by hand after running it, or leave the
-# groups as documentation and let a fresh entry land ungrouped at the bottom.
+# Grouped and reasoned here for humans, and maintained by hand:
+# scripts/tf-resource-coverage.ts reads the non-comment lines and never writes
+# this file (fogpipe/cloud-workspace#888), so add a new entry to the group it
+# belongs to, with its reason.
 
 # auth / identity — not infrastructure state
 GetMe

@@ -65,14 +65,14 @@ snapshot:
 # just client-layer plumbing? New gaps fail; existing ones are accepted via
 # scripts/tf-resource-coverage-baseline.txt.
 tf-resource-coverage *args:
-    deno run --allow-read --allow-write --allow-run --allow-env scripts/tf-resource-coverage.ts {{args}}
+    deno run --allow-read --allow-run --allow-env scripts/tf-resource-coverage.ts {{args}}
 
 # And once a resource calls the method, can Terraform reach every field of it?
 # tf-resource-coverage is satisfied forever by the first call, so a field added
 # to pkg/client stayed unsettable in HCL with every gate green. New gaps fail;
 # reviewed ones are accepted via scripts/tf-field-coverage-baseline.txt.
 tf-field-coverage *args:
-    deno run --allow-read --allow-write --allow-run --allow-env scripts/tf-field-coverage.ts {{args}}
+    deno run --allow-read --allow-run --allow-env scripts/tf-field-coverage.ts {{args}}
 
 # Regenerate the third-party attribution the release archive carries. Run after
 # any dependency change; CI fails on a stale file.

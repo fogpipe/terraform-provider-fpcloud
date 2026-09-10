@@ -133,35 +133,54 @@ is undersized, and one with jobs waiting and no pod busy cannot schedule (see
 reported as unreadable, and `project status` shows it as `?` — never as an
 empty queue.
 
-The same per-account registration is the runner's reach: a workflow in a
-repository **outside** the connected account never sees it. Naming the label
-there is not an error on either side — the job queues, waiting for a runner
-GitHub will never offer it. Both commands say which account the label works
-in, and `fpcloud webhook setup` warns when the repository it is given is
-outside it.
+Where the runner is registered is its reach: a workflow in a repository
+**outside** it never sees the runner. Naming the label there is not an error on
+either side — the job queues, waiting for a runner GitHub will never offer it.
+Both commands say what the label works in, and `fpcloud webhook setup` warns
+when the repository it is given is outside it.
 
 ## Bringing your own credential
 
 The Fogpipe app is the default and needs nothing from you. Two cases it cannot
 serve, both selected explicitly:
 
-These need `--github-account`, because a key or a token says nothing about which
-account it is for. Holding the credential is itself the proof it is yours:
+These need `--github-scope`, because a key or a token says nothing about what it
+is for. Holding the credential is itself the proof it is yours:
 
 ```bash
 # your own GitHub App — for an organization whose policy forbids third-party apps
-fpcloud runner create --credential app --github-account acme \
+fpcloud runner create --credential app --github-scope acme \
     --github-app-id 123456 \
     --github-app-installation-id 7891011 \
     --github-app-private-key-file ./acme-ci.private-key.pem
 
 # a personal access token — fine for a first try
-fpcloud runner create --credential token --github-account acme --github-token ghp_…
+fpcloud runner create --credential token --github-scope acme --github-token ghp_…
 ```
 
+### A runner for one repository
+
+`--github-scope` takes a single repository as well as a whole account, written
+`owner/name`:
+
+```bash
+fpcloud runner create --credential token \
+    --github-scope lorentzlasson/grannsnack --github-token ghp_…
+```
+
+That runner serves that repository and nothing else, not even a sibling in the
+same account.
+
+**This is how a personal GitHub account runs CI here.** GitHub has no
+account-level self-hosted runner for a personal account — they are managed per
+repository — so a repository scope is the only one such an account has. It also
+means the Fogpipe app cannot serve it, and you supply the credential yourself.
+
 Your own app needs the **Self-hosted runners: Read & write** organization
-permission. A token carries a person's full access and dies with their account,
-so it is not something to leave in place.
+permission for an account scope, or **Administration: Read & write** on the
+repository for a repository scope — which is GitHub's requirement, not ours. A
+token carries a person's full access and dies with their account, so it is not
+something to leave in place.
 
 Anything secret you supply is encrypted on arrival and **write-only**: it is
 never returned by the API, the CLI or the console. Rotate it by supplying a new

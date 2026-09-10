@@ -38,7 +38,7 @@ type RunnerResourceModel struct {
 	ID      types.String `tfsdk:"id"`
 	Project types.String `tfsdk:"project"`
 
-	GitHubAccount   types.String `tfsdk:"github_account"`
+	GitHubScope     types.String `tfsdk:"github_scope"`
 	GitHubConfigURL types.String `tfsdk:"github_config_url"`
 	RunnerGroup     types.String `tfsdk:"runner_group"`
 	Size            types.String `tfsdk:"size"`
@@ -88,16 +88,19 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"github_account": schema.StringAttribute{
-				Description: "The GitHub account the runner serves, e.g. `acme`. Only with a credential " +
-					"you supply (`app` or `token`), which carries no account of its own. With the " +
-					"default `platform` credential the account comes from the project's GitHub " +
-					"connection and setting this is an error — an account is proved, not named.",
+			"github_scope": schema.StringAttribute{
+				Description: "Where the runner registers: an organization (`acme`), whose every " +
+					"repository it serves, or one repository (`acme/backend`), which it serves " +
+					"alone. Only with a credential you supply (`app` or `token`), which carries " +
+					"no scope of its own. With the default `platform` credential the scope comes " +
+					"from the project's GitHub connection and setting this is an error — an " +
+					"account is proved, not named. A personal GitHub account has no " +
+					"account-level runner at all, so a repository is the only scope it has.",
 				Optional: true,
 			},
 			"github_config_url": schema.StringAttribute{
-				Description: "The account URL the runner registered with, derived from the connection " +
-					"or from `github_account`. Read-only.",
+				Description: "The URL the runner registered with, derived from the connection " +
+					"or from `github_scope`. Read-only.",
 				Computed: true,
 			},
 			"runner_group": schema.StringAttribute{
@@ -294,7 +297,7 @@ func (r *RunnerResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 
 	createReq := client.CreateRunnerRequest{
-		GitHubAccount:           plan.GitHubAccount.ValueString(),
+		GitHubScope:             plan.GitHubScope.ValueString(),
 		RunnerGroup:             plan.RunnerGroup.ValueString(),
 		Size:                    plan.Size.ValueString(),
 		Builder:                 runnerBuilderFromModel(ctx, plan.Builder, &resp.Diagnostics),
@@ -356,14 +359,14 @@ func (r *RunnerResource) Update(ctx context.Context, req resource.UpdateRequest,
 	// The whole mutable surface is sent every apply: the plan is the desired
 	// state, so a field the user removed from the config must be cleared, not
 	// left at whatever the server last saw.
-	account := plan.GitHubAccount.ValueString()
+	scope := plan.GitHubScope.ValueString()
 	group := plan.RunnerGroup.ValueString()
 	maxRunners := int(plan.MaxRunners.ValueInt64())
 
 	updateReq := client.UpdateRunnerRequest{
-		GitHubAccount: &account,
-		RunnerGroup:   &group,
-		MaxRunners:    &maxRunners,
+		GitHubScope: &scope,
+		RunnerGroup: &group,
+		MaxRunners:  &maxRunners,
 	}
 	// Size is computed when the config leaves it out, so an omitted size is
 	// whatever the runner has, not a request to change it.

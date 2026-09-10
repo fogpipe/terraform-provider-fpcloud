@@ -44,14 +44,25 @@ resource "fpcloud_runner" "other" {
 # Bring your own GitHub App instead — for an organization whose policy forbids
 # third-party apps, or GitHub Enterprise Server.
 #
-# This is the one case that names an account: your own key says nothing about
-# which account it is for. Holding the key is itself the proof it is yours.
+# This is the one case that names a scope: your own key says nothing about what
+# it is for. Holding the key is itself the proof it is yours.
 resource "fpcloud_runner" "own_app" {
-  project        = fpcloud_project.isolated.name
-  github_account = "acme"
+  project      = fpcloud_project.isolated.name
+  github_scope = "acme"
 
   credential                 = "app"
   github_app_id              = var.github_app_id
   github_app_installation_id = var.github_app_installation_id
   github_app_private_key     = file("${path.module}/acme-ci.private-key.pem")
+}
+
+# A runner for one repository, which is the only scope a personal GitHub
+# account has: GitHub manages a personal account's runners per repository, so
+# there is no account-level runner to register.
+resource "fpcloud_runner" "one_repo" {
+  project      = fpcloud_project.solo.name
+  github_scope = "lorentzlasson/grannsnack"
+
+  credential   = "token"
+  github_token = var.github_token
 }

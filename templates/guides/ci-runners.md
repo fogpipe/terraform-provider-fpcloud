@@ -200,7 +200,7 @@ fpcloud runner update --size medium --max 2
 ### Runners draw on your organization's resource ceiling
 
 Your runner's pods run in a namespace of their own, bounded by the same
-ceiling as the rest of your organization — **2 CPU / 4Gi / 20 pods** by default
+ceiling as the rest of your organization — **8 CPU / 16Gi / 20 pods** by default
 (see [the organization's resource
 ceiling](projects-and-access.md#the-organizations-resource-ceiling)). CI
 spends the same budget your apps and databases do, so a runner you declare is

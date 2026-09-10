@@ -16,9 +16,9 @@ jobs it may run at once; there is nothing to name.
 Runners live in your project's namespace, beside your apps and databases, and
 are isolated from other tenants exactly the way those are.
 
-## Connect your GitHub account
+## Connect your GitHub organization
 
-Once per project, connect the GitHub account your runner will serve:
+Once per project, connect the GitHub organization your runner will serve:
 
 ```bash
 fpcloud github connect
@@ -32,16 +32,23 @@ returns at once; the outcome is recorded either way, and `fpcloud github
 status` reads it back, including the reason for a refusal and the install link
 it carries.
 
-Only accounts **you administer** can be connected — an owner of the
-organization, or your own user account. Being a member is not enough, because
-connecting lets a project run CI on that account. Fogpipe never takes an
-organization name on trust, so no project can point a runner at an account it
-does not control.
+Only organizations **you own** can be connected. Being a member is not enough,
+because connecting lets a project run CI on that organization. Fogpipe never
+takes an organization name on trust, so no project can point a runner at an
+account it does not control.
 
-If the **Fogpipe** app is not installed on the account yet, connecting tells you
-and gives you the link. If you administer more than one account with it
-installed, say which — a named account is checked before the browser opens, so
-a missing installation is reported there and then:
+**A personal GitHub account cannot be connected.** GitHub manages a personal
+account's self-hosted runners per repository, and the Fogpipe app holds one
+permission — self-hosted runners on an *organization*. There is nothing for it
+to register on an account that is a person, so connecting one is refused rather
+than accepted into a runner that would never pick up a job. To run Fogpipe CI on
+a repository you own personally, move it into an organization; a free one you
+own by yourself is enough.
+
+If the **Fogpipe** app is not installed on the organization yet, connecting
+tells you and gives you the link. If you own more than one with it installed,
+say which — a named account is checked before the browser opens, so a missing
+installation or a personal account is reported there and then:
 
 ```bash
 fpcloud github connect --account acme
@@ -55,7 +62,7 @@ fpcloud github disconnect  # remove the binding (delete the runner first)
 ## Create the runner
 
 The runner needs nothing from you — it serves every repository in the connected
-account:
+organization:
 
 ```bash
 fpcloud runner create

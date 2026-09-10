@@ -122,3 +122,14 @@ resources.
 - Dependency versions track the platform's, `pkg/client` above all. A bare
   `go mod tidy` resolves to latest and drags the server's graph forward through
   this module.
+
+## The workflows run on GitHub's runners, on purpose
+
+Every workflow here is `runs-on: ubuntu-latest`, never the `fpcloud` pool the
+platform's own CI uses (`fogpipe/cloud-workspace#955`). This repo is public: a
+fork's pull request runs its workflow on whatever runner the repo names, and a
+pod on node-2 beside the databases is not a place for a stranger's code.
+GitHub's runners are throwaway VMs; the pool is not. The org's runner group
+refuses public repos for the same reason, so a job sent there queues forever.
+Depends on this repo being public — if it ever goes private, this section is
+what to revisit.

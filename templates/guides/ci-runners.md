@@ -198,7 +198,7 @@ runs slower is sharing a busy node, and `fpcloud runner show` says nothing
 about that because nothing has failed.
 
 `--max` is how many jobs the runner runs at once — one pod each, `2` by
-default, up to `8`. Jobs beyond it queue on GitHub. Every one of them costs
+default, up to `20`. Jobs beyond it queue on GitHub. Every one of them costs
 cores and memory for as long as it runs, so this is a budget, not a throughput
 dial. There is no floor: the runner always scales to zero, and a job waits a
 few seconds for its pod.

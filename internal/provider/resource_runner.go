@@ -132,7 +132,7 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Optional: true,
 				Attributes: map[string]schema.Attribute{
 					"cpu": schema.StringAttribute{
-						Description: "CPU limit for the builder, e.g. \"1\". Defaults to the platform's, which is not the runner's size.",
+						Description: "CPU size for the builder, e.g. \"1\". Defaults to the platform's, which is not the runner's size.",
 						Optional:    true,
 						Computed:    true,
 					},
@@ -173,7 +173,7 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 							Optional:    true,
 						},
 						"cpu": schema.StringAttribute{
-							Description: "CPU limit for this container, e.g. \"500m\". Defaults to the platform's " +
+							Description: "CPU size for this container, e.g. \"500m\". Defaults to the platform's " +
 								"own, which is not the runner's size — a database beside a job has nothing to " +
 								"do with how big the job is.",
 							Optional: true,

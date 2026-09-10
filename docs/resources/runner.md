@@ -108,7 +108,7 @@ resource "fpcloud_runner" "own_app" {
 
 Optional:
 
-- `cpu` (String) CPU limit for the builder, e.g. "1". Defaults to the platform's, which is not the runner's size.
+- `cpu` (String) CPU size for the builder, e.g. "1". Defaults to the platform's, which is not the runner's size.
 - `memory` (String) Memory limit for the builder, e.g. "2Gi". Defaults to the platform's, which is not the runner's size.
 
 
@@ -122,7 +122,7 @@ Required:
 
 Optional:
 
-- `cpu` (String) CPU limit for this container, e.g. "500m". Defaults to the platform's own, which is not the runner's size — a database beside a job has nothing to do with how big the job is.
+- `cpu` (String) CPU size for this container, e.g. "500m". Defaults to the platform's own, which is not the runner's size — a database beside a job has nothing to do with how big the job is.
 - `env` (Map of String) Environment for the container. NOT a secret store: it is stored and read back as written, and it configures a container that lives for one job and is reachable from nothing but that job's own pod — which is what GitHub does with `services.*.env` too. A credential to anything that outlives the job does not belong here.
 - `memory` (String) Memory limit for this container, e.g. "1Gi". Defaults to the platform's own.
 

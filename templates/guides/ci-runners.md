@@ -187,6 +187,16 @@ jobs the platform can run beside each other, and three shapes are what it can
 plan for. A builder, if you ask for one, is sized separately and adds to what
 each job costs.
 
+The two columns bound differently. **Memory is a ceiling**: a job that exceeds
+it is killed. **CPU is a share**: the size is what your job is scheduled and
+billed as, and what it is guaranteed against other jobs when the node is busy —
+but a job on a quiet node runs on whatever cores are idle, above its size, at
+no extra cost. The same goes for disk: a build has the whole device to itself
+until something else on the node needs it, and then yields most of it. A job
+that runs faster than its size suggests is not being over-billed; a job that
+runs slower is sharing a busy node, and `fpcloud runner show` says nothing
+about that because nothing has failed.
+
 `--max` is how many jobs the runner runs at once — one pod each, `2` by
 default, up to `8`. Jobs beyond it queue on GitHub. Every one of them costs
 cores and memory for as long as it runs, so this is a budget, not a throughput

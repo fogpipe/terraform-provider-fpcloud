@@ -176,10 +176,15 @@ account-level self-hosted runner for a personal account — they are managed per
 repository — so a repository scope is the only one such an account has. It also
 means the Fogpipe app cannot serve it, and you supply the credential yourself.
 
-Your own app needs the **Self-hosted runners: Read & write** organization
-permission for an account scope, or **Administration: Read & write** on the
-repository for a repository scope — which is GitHub's requirement, not ours. A
-token carries a person's full access and dies with their account, so it is not
+What the credential must carry is GitHub's requirement, not ours, and it
+differs by scope:
+
+| Scope | Your own GitHub App | A token |
+|---|---|---|
+| an organization | Self-hosted runners: Read & write | classic `admin:org`, or fine-grained **Self-hosted runners: Read & write** |
+| one repository | Administration: Read & write | classic `repo`, or fine-grained **Administration: Read & write** |
+
+A token carries a person's full access and dies with their account, so it is not
 something to leave in place.
 
 Anything secret you supply is encrypted on arrival and **write-only**: it is

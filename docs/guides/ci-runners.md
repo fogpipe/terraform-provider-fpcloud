@@ -434,8 +434,16 @@ fpcloud runner show
 
 `Status` is the runner's own state, not a job's. `pending` means the platform
 has declared the runner and is waiting for it to register with GitHub — normal
-for a few seconds after creation, and worth investigating if it persists
-(usually a credential without the self-hosted-runner permission).
+for a few seconds after creation. When registration is failing, the runner
+controller's own reason is listed as a `RegistrationFailed` problem, with how
+many times it was hit in the last hour:
+
+```
+Problem   RegistrationFailed — the runner controller cannot register this runner with GitHub: … (×4)
+```
+
+A `RegistrationUnread` problem means the platform could not read that reason,
+not that there is none.
 
 `Busy` is how many pods exist right now, which is how many of your jobs are
 running.

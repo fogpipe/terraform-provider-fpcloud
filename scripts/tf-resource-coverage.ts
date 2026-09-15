@@ -4,7 +4,7 @@
 //
 // pkg/client having a method only proves the CLI can reach an endpoint — the
 // client can carry a method for years with zero Terraform surface on top of it
-// (registry retention, org secrets, FKE). This reads every func on *Client that
+// (registry retention, org secrets). This reads every func on *Client that
 // wraps a newRequest() call out of the github.com/fogpipe/cloud-cli module, and
 // cross-references it against every `.client.Method(` call in this repo's
 // internal/provider/*.go.

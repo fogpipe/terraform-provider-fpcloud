@@ -39,7 +39,6 @@ output "org_cpu_ceiling" {
 ### Read-Only
 
 - `created_at` (String) Timestamp when the organization was created.
-- `fke_enabled` (Boolean) Whether the organization is entitled to FKE (tenant kubeconfig) access. Operator-granted.
 - `max_cpu` (String) The organization's CPU ceiling, shared by every project it owns.
 - `max_memory` (String) The organization's memory ceiling, shared by every project it owns.
 - `max_object_storage` (String) The organization's object-storage ceiling. Every bucket quota in the organization is a reservation against it, so a bucket the ceiling cannot hold is refused.

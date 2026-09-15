@@ -18,8 +18,8 @@ var _ datasource.DataSource = &OrgDataSource{}
 // An org is read and never written here: it is granted by an operator together
 // with its first owner (ADR-093), because it is the unit the platform bounds
 // and invoices — a tenant able to declare one in Terraform could raise its own
-// ceiling by declaring a second. Its ceiling and FKE entitlement are exposed as
-// facts to read, not fields to set.
+// ceiling by declaring a second. Its ceiling is exposed as facts to read, not
+// fields to set.
 type OrgDataSource struct {
 	client *client.Client
 }
@@ -28,7 +28,6 @@ type OrgDataSource struct {
 type OrgDataSourceModel struct {
 	ID         types.String `tfsdk:"id"`
 	Name       types.String `tfsdk:"name"`
-	FKEEnabled types.Bool   `tfsdk:"fke_enabled"`
 	MaxCPU     types.String `tfsdk:"max_cpu"`
 	MaxMemory  types.String `tfsdk:"max_memory"`
 	MaxPods    types.Int64  `tfsdk:"max_pods"`
@@ -71,11 +70,6 @@ func (d *OrgDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, re
 				Description: "The organization's readable name. Mutable — nothing is derived from " +
 					"it — so prefer id when pinning a configuration. Provide either id or name.",
 				Optional: true,
-				Computed: true,
-			},
-			"fke_enabled": schema.BoolAttribute{
-				Description: "Whether the organization is entitled to FKE (tenant kubeconfig) access. " +
-					"Operator-granted.",
 				Computed: true,
 			},
 			"max_cpu": schema.StringAttribute{
@@ -167,7 +161,6 @@ func (d *OrgDataSource) Read(ctx context.Context, req datasource.ReadRequest, re
 
 	data.ID = types.StringValue(org.ShortID)
 	data.Name = types.StringValue(org.DisplayName)
-	data.FKEEnabled = types.BoolValue(org.FKEEnabled)
 	data.MaxCPU = types.StringValue(org.MaxCPU)
 	data.MaxMemory = types.StringValue(org.MaxMemory)
 	data.MaxPods = types.Int64Value(int64(org.MaxPods))

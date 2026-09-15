@@ -120,8 +120,8 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			},
 			"max_runners": schema.Int64Attribute{
 				Description: "Jobs the runner runs at once; further jobs queue on GitHub. Defaults to 2. " +
-					"Every one of them costs cores and memory for as long as it runs, so this is a " +
-					"budget rather than a throughput dial.",
+					"Every one of them is reserved against your organization's ceiling whether or not " +
+					"a job is running, so this is a budget rather than a throughput dial.",
 				Optional: true,
 				Computed: true,
 			},
@@ -246,7 +246,7 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed:    true,
 			},
 			"pending_runners": schema.Int64Attribute{
-				Description: "Runners that exist without a job — above all, waiting for a pod the org's ceiling refuses.",
+				Description: "Runners that exist without a job — above all, waiting for room to schedule.",
 				Computed:    true,
 			},
 		},

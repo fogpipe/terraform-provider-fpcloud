@@ -99,7 +99,7 @@ resource "fpcloud_runner" "one_repo" {
 - `github_app_private_key` (String, Sensitive) Your GitHub App's private key (PEM), with `credential = "app"`. Write-only — never returned by the API; the configured value is preserved in state across reads.
 - `github_scope` (String) Where the runner registers: an organization (`acme`), whose every repository it serves, or one repository (`acme/backend`), which it serves alone. Only with a credential you supply (`app` or `token`), which carries no scope of its own. With the default `platform` credential the scope comes from the project's GitHub connection and setting this is an error — an account is proved, not named. A personal GitHub account has no account-level runner at all, so a repository is the only scope it has.
 - `github_token` (String, Sensitive) A personal access token, with `credential = "token"`. Write-only — never returned by the API. It carries a person's full access and dies with their account.
-- `max_runners` (Number) Jobs the runner runs at once; further jobs queue on GitHub. Defaults to 2. Every one of them costs cores and memory for as long as it runs, so this is a budget rather than a throughput dial.
+- `max_runners` (Number) Jobs the runner runs at once; further jobs queue on GitHub. Defaults to 2. Every one of them is reserved against your organization's ceiling whether or not a job is running, so this is a budget rather than a throughput dial.
 - `runner_group` (String) GitHub runner group the runner joins. Defaults to `Default`.
 - `services` (Attributes List) Containers to run beside every job, reachable on `127.0.0.1` from your steps. This is how a workflow gets a database or a cache here: a job's own `services:` block does not work, because GitHub serves one by running the job inside a container and there is no container mode on these runners. Declared on the runner, they also coexist with `builder`, which a container mode would not. The set is replaced whole, and every service counts towards your organization's ceiling for as long as a job is running. (see [below for nested schema](#nestedatt--services))
 - `size` (String) What one job gets — the container your workflow's steps execute in — from a fixed menu: `small` (1 CPU, 2Gi), `medium` (2 CPU, 4Gi) or `large` (4 CPU, 8Gi). Defaults to `medium`. A job that exceeds its memory is killed rather than slowed, and GitHub can take several minutes to notice, so a run that stalls with no output and ends as cancelled is usually this. A builder, if you ask for one, is sized separately and adds to what a job costs.
@@ -110,7 +110,7 @@ resource "fpcloud_runner" "one_repo" {
 - `github_config_url` (String) The URL the runner registered with, derived from the connection or from `github_scope`. Read-only.
 - `id` (String) Runner ID.
 - `labels` (List of String) The `runs-on` labels this runner answers to.
-- `pending_runners` (Number) Runners that exist without a job — above all, waiting for a pod the org's ceiling refuses.
+- `pending_runners` (Number) Runners that exist without a job — above all, waiting for room to schedule.
 - `running_runners` (Number) Runners executing a job right now.
 - `status` (String) Runner state: `pending` while it registers with GitHub, then `running`.
 

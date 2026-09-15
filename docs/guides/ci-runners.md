@@ -245,7 +245,8 @@ ceiling as the rest of your organization — **8 CPU / 16Gi / 20 pods** by defau
 (see [the organization's resource
 ceiling](projects-and-access.md#the-organizations-resource-ceiling)). CI
 spends the same budget your apps and databases do, so a runner you declare is
-capacity they no longer have.
+capacity they no longer have. A runner pod counts at what it is scheduled and
+billed as (the size), not at the idle capacity it may burst into on top.
 
 The rule is that **one job must fit**: one pod — the size you chose, plus its
 builder, plus every service container — has to fit inside what the ceiling has

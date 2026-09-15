@@ -44,9 +44,6 @@ VerifyDomain
 VerifyBucketDomain
 PublishWebsiteVersion
 ClearBucketLifecycleRules
-# `project prune` removes finished pods a namespace has kept; a sweep with a
-# result, not a state to converge on.
-PrunePods
 
 # data-plane object operations — deliberately imperative, matches the
 # aws_s3_bucket / aws s3 sync split already established for buckets (#389)
@@ -60,33 +57,26 @@ ListRegistryTags
 DeleteRegistryTag
 # the CVEs behind a tag (fogpipe/cloud-workspace#321): a scan result, read, never declared
 ListRegistryCVEs
-# NOTE: ahead of the pin. go.mod pins a cloud-cli older than this method, so the
-# gate reports this line as "now covered — remove from the baseline". Do NOT
-# remove it: it is here so the bump that brings ListAppCVEs in is green rather
-# than red on the person doing the bump. The line becomes a real exclusion the
-# moment the pin moves.
 # the same answer for the image an app is RUNNING (fogpipe/cloud-workspace#934).
 # A vulnerability list is a read of changing external facts — the same bytes
 # gain CVEs as the scanner's database learns them — so it is not infrastructure
 # state a plan can converge on, and a data source over it would diff on every
 # refresh for reasons nobody declared.
 ListAppCVEs
+# asking for one image to be scanned now (fogpipe/cloud-workspace#940, ADR-214):
+# a request that starts work and is followed to its verdict, not a state to hold.
+ScanImage
 
 # read-only observability — not something you reference as TF resource state
 GetAppLogs
 GetAppVersion
-# workload events (#126) — warnings the cluster emitted about pods that exist
-# right now. They age out of the cluster on their own, so a data source over
-# them returns a different set on every read and settles for nobody
-ListWorkloadEvents
+# app events (#126) — warnings recorded against an app right now. They age out
+# on their own, so a data source over them returns a different set on every
+# read and settles for nobody
+ListAppEvents
 ListDeployments
 ListRevisions
 ListAudit
-ClusterInfo
-FKECredentials
-FKEToken
-OrgFKECredentials
-OrgFKEToken
 # the project status document (#778) is the strongest case in this group: it is
 # an observation of live cluster state that changes between two consecutive
 # reads, so a data source over it would hand Terraform a value that never
@@ -125,8 +115,8 @@ ListOrgUsage
 # organization writes (ADR-093, ADR-094) — an org is granted by an operator
 # together with its first owner, so there is no fpcloud_org resource for these
 # to hang on: a tenant able to declare an org in Terraform could raise its own
-# ceiling by declaring a second. The ceiling and the FKE entitlement are the
-# operator's to set for the same reason — a tenant that could write its own
+# ceiling by declaring a second. The ceiling is the operator's to set for the
+# same reason — a tenant that could write its own
 # ceiling has no ceiling — and are no longer in pkg/client at all (ADR-089,
 # fogpipe/cloud-workspace#121); renaming is a one-line write on something
 # Terraform does not own. fpcloud_org is a data source instead.

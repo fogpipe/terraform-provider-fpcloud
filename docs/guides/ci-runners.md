@@ -248,15 +248,15 @@ spends the same budget your apps and databases do, so a runner you declare is
 capacity they no longer have. A runner pod counts at what it is scheduled and
 billed as (the size), not at the idle capacity it may burst into on top.
 
-The rule is that **one job must fit**: one pod — the size you chose, plus its
-builder, plus every service container — has to fit inside what the ceiling has
-left. `--max` is weighed differently: the runner's namespace is bounded at
-`--max` pods of that shape, so a runner may ask for more concurrency than the
-ceiling holds at once, and those jobs wait for a slot. `fpcloud runner show`
-says how many of `--max` the ceiling admits right now.
+The rule is that **every job you allow at once must fit**: `--max` pods — each
+the size you chose, plus its builder, plus every service container — have to
+fit inside what the ceiling has left. That capacity is reserved for as long as
+the runner exists, whether or not a job is running, so your apps can never be
+admitted into room your next burst of jobs is about to take. You are still
+billed only for the minutes a job runs. Jobs past `--max` queue on GitHub.
 
-A runner too large to run even once is refused when you ask for it, rather
-than accepted and left with jobs that never start:
+A runner that does not fit is refused when you ask for it, rather than accepted
+and left to push your organization over its ceiling:
 
 ```console
 $ fpcloud runner create --size large --builder-memory 8Gi
@@ -265,16 +265,15 @@ ceiling left; shrink it, free capacity in another project, or ask your operator
 to raise the ceiling
 ```
 
-An existing runner that stops fitting — because its builder grew, or the
-ceiling was lowered — keeps its declaration and says the same thing on
-`fpcloud runner show`. It is the runner you edit to fix it, so it is not taken
-away from you; its pods simply do not start until it fits again.
+An existing runner that stops fitting because the ceiling was lowered under it
+keeps its declaration and says the same thing on `fpcloud runner show`. It is
+the runner you edit to fix it, so it is not taken away from you.
 
-The size and the builder are weighed together, so shrink them in one command
-when both have to give:
+The size, the builder and `--max` are weighed together, so shrink them in one
+command when more than one has to give:
 
 ```console
-$ fpcloud runner update --size small --builder-memory 2Gi
+$ fpcloud runner update --size small --builder-memory 2Gi --max 1
 ```
 
 A job that exceeds its size's memory is killed rather than slowed, and because

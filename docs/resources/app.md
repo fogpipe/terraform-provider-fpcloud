@@ -99,8 +99,7 @@ resource "fpcloud_app" "web" {
 - `secret` (Map of String, Sensitive) Secret environment variables (encrypted at rest). Set as part of the create, like env, so a release command that reads one is not gated before it arrives.
 - `security_context` (Attributes) Opt-in pod/container hardening. When set, the container is locked to the PSS-restricted baseline (drop ALL capabilities, no privilege escalation, RuntimeDefault seccomp) plus the run-as identity below. Updated in place: removing the block clears it, which is how an app that once needed root returns to the platform default. (see [below for nested schema](#nestedatt--security_context))
 - `service_account` (String) Service account email to attach as workload identity. The app will receive credentials to call the Fogpipe API as this service account.
-- `storage` (String) Persistent volume size (e.g. '50Gi'). Opt-in and always-on mode only. Grow-only — the volume can never shrink.
-- `storage_path` (String) Mount path for the persistent volume. Defaults to '/data' when storage is set. Immutable — changing it replaces the app.
+- `storage` (String) Size of the app's existing persistent volume (e.g. '50Gi'). Grow-only — the volume can never shrink. A new app cannot be given one; keep state in a bucket.
 - `traffic` (Attributes List) Traffic routing configuration. Each block specifies a revision and its traffic percentage. Use '@latest' to route to the latest revision. (see [below for nested schema](#nestedatt--traffic))
 - `type` (String) Process type: 'web' (default) serves HTTP behind a Service, or 'worker' — a long-running process with no port, Service, ingress, URL or health checks. A worker is always-on only. Changing this replaces the app: it decides whether the app has an address at all.
 - `url_slug` (String) Optional vanity host override (ADR-040): sets the app's public host to '<url_slug>.app.<platform_domain>'. When empty, the host is derived from the app/project/org names. Globally unique, a DNS-1123 label, always-on mode only. Set to an empty string to clear it back to the derived host.
@@ -111,6 +110,7 @@ resource "fpcloud_app" "web" {
 - `created_at` (String) Timestamp when the app was created.
 - `id` (String) App ID.
 - `status` (String) Current status of the app.
+- `storage_path` (String) Mount path of the app's existing persistent volume.
 - `updated_at` (String) Timestamp when the app was last updated.
 - `url` (String) URL where the app is accessible: the platform host while it is served, or the oldest active custom domain once one exists — an active domain replaces the platform host (ADR-130), so this changes when a domain activates or is removed.
 

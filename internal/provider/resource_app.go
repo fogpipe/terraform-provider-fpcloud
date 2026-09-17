@@ -26,6 +26,7 @@ import (
 var (
 	_ resource.Resource                = &AppResource{}
 	_ resource.ResourceWithImportState = &AppResource{}
+	_ resource.ResourceWithModifyPlan  = &AppResource{}
 )
 
 // AppResource defines the resource implementation.
@@ -314,14 +315,12 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			"storage": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Persistent volume size (e.g. '50Gi'). Opt-in and always-on mode only. Grow-only — the volume can never shrink.",
+				Description: "Size of the app's existing persistent volume (e.g. '50Gi'). Grow-only — the volume can never shrink. A new app cannot be given one; keep state in a bucket.",
 			},
 			"storage_path": schema.StringAttribute{
-				Optional:    true,
 				Computed:    true,
-				Description: "Mount path for the persistent volume. Defaults to '/data' when storage is set. Immutable — changing it replaces the app.",
+				Description: "Mount path of the app's existing persistent volume.",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
@@ -509,6 +508,21 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 	}
 }
 
+// ModifyPlan refuses a persistent volume on an app about to be created, which
+// includes one being replaced: the API no longer attaches a volume at create.
+func (r *AppResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() || (!req.State.Raw.IsNull() && len(resp.RequiresReplace) == 0) {
+		return
+	}
+	var storage types.String
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("storage"), &storage)...)
+	if storage.IsNull() || storage.IsUnknown() || storage.ValueString() == "" {
+		return
+	}
+	resp.Diagnostics.AddAttributeError(path.Root("storage"), "A new app cannot have a persistent volume",
+		"Persistent volumes are no longer offered on new apps. Keep state in a bucket instead.")
+}
+
 func (r *AppResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
@@ -576,8 +590,6 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		Routes:              routes,
 		Mode:                plan.Mode.ValueString(),
 		Type:                plan.Type.ValueString(),
-		Storage:             plan.Storage.ValueString(),
-		StoragePath:         plan.StoragePath.ValueString(),
 		HealthCheckPath:     plan.HealthCheckPath.ValueString(),
 		HealthCheckTimeout:  int(plan.HealthCheckTimeout.ValueInt64()),
 		HealthCheckInterval: int(plan.HealthCheckInterval.ValueInt64()),

@@ -26,7 +26,6 @@ import (
 var (
 	_ resource.Resource                = &AppResource{}
 	_ resource.ResourceWithImportState = &AppResource{}
-	_ resource.ResourceWithModifyPlan  = &AppResource{}
 )
 
 // AppResource defines the resource implementation.
@@ -52,8 +51,6 @@ type AppResourceModel struct {
 	Ingress             types.String `tfsdk:"ingress"`
 	Mode                types.String `tfsdk:"mode"`
 	Type                types.String `tfsdk:"type"`
-	Storage             types.String `tfsdk:"storage"`
-	StoragePath         types.String `tfsdk:"storage_path"`
 	ServiceAccount      types.String `tfsdk:"service_account"`
 	Env                 types.Map    `tfsdk:"env"`
 	Secret              types.Map    `tfsdk:"secret"`
@@ -312,18 +309,6 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"storage": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "Size of the app's existing persistent volume (e.g. '50Gi'). Grow-only — the volume can never shrink. A new app cannot be given one; keep state in a bucket.",
-			},
-			"storage_path": schema.StringAttribute{
-				Computed:    true,
-				Description: "Mount path of the app's existing persistent volume.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
 			"service_account": schema.StringAttribute{
 				Optional:    true,
 				Description: "Service account email to attach as workload identity. The app will receive credentials to call the Fogpipe API as this service account.",
@@ -506,21 +491,6 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			},
 		},
 	}
-}
-
-// ModifyPlan refuses a persistent volume on an app about to be created, which
-// includes one being replaced: the API no longer attaches a volume at create.
-func (r *AppResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() || (!req.State.Raw.IsNull() && len(resp.RequiresReplace) == 0) {
-		return
-	}
-	var storage types.String
-	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("storage"), &storage)...)
-	if storage.IsNull() || storage.IsUnknown() || storage.ValueString() == "" {
-		return
-	}
-	resp.Diagnostics.AddAttributeError(path.Root("storage"), "A new app cannot have a persistent volume",
-		"Persistent volumes are no longer offered on new apps. Keep state in a bucket instead.")
 }
 
 func (r *AppResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -986,15 +956,6 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
-	// Grow persistent storage if the requested size changed (grow-only, enforced server-side).
-	if plan.Storage.ValueString() != state.Storage.ValueString() && plan.Storage.ValueString() != "" {
-		_, err := r.client.UpdateAppStorage(ctx, appID, plan.Storage.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError("Error updating app storage", err.Error())
-			return
-		}
-	}
-
 	// Sync env vars: compute diff between old and new env/secret maps and update configs.
 	var planEnv, stateEnv, planSecret, stateSecret map[string]string
 	if !plan.Env.IsNull() && !plan.Env.IsUnknown() {
@@ -1440,8 +1401,6 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	model.Ingress = types.StringValue(app.Ingress)
 	model.Mode = types.StringValue(app.Mode)
 	model.Type = types.StringValue(app.Type)
-	model.Storage = types.StringValue(app.Storage)
-	model.StoragePath = types.StringValue(app.StoragePath)
 	model.Replicas = types.Int64Value(int64(app.Replicas))
 	model.MinScale = types.Int64Value(int64(app.MinScale))
 	model.MaxScale = types.Int64Value(int64(app.MaxScale))

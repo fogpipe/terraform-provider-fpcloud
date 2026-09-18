@@ -51,7 +51,6 @@ Runner.queue
 # GitHub's view of the pool's demand (#146): assigned, running and waiting
 # jobs, read live from the listener. The same reading as instances, from the
 # other side of the queue.
-Runner.admitted_runners
 # The recycle record (#145): asked for, in progress, finished. It is an
 # operation with a lifetime, not a state a config can hold — `terraform apply`
 # has no way to say "restart now and not again", and an attribute over the

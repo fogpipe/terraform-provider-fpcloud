@@ -37,6 +37,7 @@ RunBackupDestination
 RestoreBackupDestination
 RollbackApp
 ReconcileApp
+RestartApp
 MoveProject
 ApplyRetention
 PreviewRetention

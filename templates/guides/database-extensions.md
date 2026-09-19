@@ -111,15 +111,16 @@ function: the removal is refused and the objects are named, so drop them
 yourself and remove the extension afterwards. Nothing is ever cascaded away on
 your behalf.
 
-If the drop fails, nothing is unmounted — the database is left exactly as it
-was, with the extension installed and working.
+If the drop fails, nothing is unmounted: the extension stays installed, working
+and in the database's set. Anything else the same update asked for has still
+happened.
 
 ## What is available
 
 | Extension | Version | Provides |
 |-----------|---------|----------|
 | `semver` | 0.41.0 | A semantic-version type with comparison operators and indexing |
-| `pg_statecharts` | 0.0.0 | State machines in SQL, interpreted from statechart definitions |
+| `pg_statecharts` | 0.1.0 | State machines in SQL, interpreted from statechart definitions |
 | `vector` | 0.8.6 | Vector similarity search (pgvector): the `vector` type, distance operators, HNSW and IVFFlat indexes |
 | `pgaudit` | 18.1 | Per-statement audit logging of `fpcloud db connect` sessions, attributed to the person who opened them |
 
@@ -132,6 +133,20 @@ Some of these are already inside the database image — `vector` is — and stil
 need asking for: what the platform does for you is the `CREATE EXTENSION` that
 superuser gates, whether or not the files are on disk. The platform installs a
 curated extension into the `public` schema.
+
+Each extension the platform mounts is installed at the version in this table.
+When that version moves, your database is upgraded in place the next time it is
+updated — any `db update` — with the `alter extension … update` your role could
+not run. Like adding an extension, an upgrade restarts the database.
+
+An upgrade runs before any removal in the same update. So when a new version
+stops needing another extension, and even removes it itself, you can take the
+upgrade and drop that extension from the set in one update:
+
+```bash
+fpcloud db update events --extension pg_statecharts \
+  --cpu 500m --memory 1Gi --storage 10Gi     # upgraded, then semver removed
+```
 
 The catalog is curated rather than open. If you need an extension that is not
 here, ask — adding one is a build we own, not something you have to package.

@@ -29,10 +29,29 @@ jobs:
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.PASSPHRASE }}
+      # The notes come from the annotated tag's message, which the workspace
+      # release recipe wrote them into (fogpipe/cloud-workspace#1045). GoReleaser
+      # keeps `changelog: disable` — a commit list is not release notes, and one
+      # version names a release of all three repos, so the text is the same on
+      # every one of them and on `fpcloud changelog`.
+      - name: Read the release notes off the tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}"
+          kind="$(git cat-file -t "${tag}")"
+          if [ "${kind}" != "tag" ]; then
+            echo "::error::${tag} is a ${kind}, not an annotated tag — it carries no release notes. Cut it with 'just release'."
+            exit 1
+          fi
+          # Outside the checkout: GoReleaser refuses to release from a dirty
+          # tree, and an untracked notes.md in the repo root is one.
+          git for-each-ref --format='%(contents)' "refs/tags/${tag}" > "${RUNNER_TEMP}/notes.md"
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
-          args: release --clean
+          args: release --clean --release-notes=${{ runner.temp }}/notes.md
         env:
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

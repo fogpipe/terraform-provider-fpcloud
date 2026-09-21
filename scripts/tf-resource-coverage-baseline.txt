@@ -17,6 +17,15 @@ databaseConnection
 # either recycle on every apply or sit as permanent drift. `fpcloud runner
 # restart` is the surface.
 RestartRunner
+# Deploying a catalog template (ADR-235) creates an app, a database and a
+# bucket the practitioner did not declare, and `app upgrade` is an action on
+# one of them, not a state. OpenTofu's surface is `data.fpcloud_template`,
+# from which a module declares the three resources itself.
+InstantiateTemplate
+UpgradeApp
+# Enumerating the catalog is a person's read — `fpcloud template list`, the
+# console — and a data source names one entry.
+ListTemplates
 # `runner check` (#774) answers a question about text the caller supplies. It
 # creates nothing, changes nothing and has no id — there is no resource for it
 # to be.

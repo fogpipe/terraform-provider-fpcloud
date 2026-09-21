@@ -118,3 +118,10 @@ Runner.created_at
 Runner.updated_at
 ServiceAccount.updated_at
 
+# --- a catalog instance is made, never declared (ADR-235) ------------------
+# `template` names the catalog entry an app was deployed from by the console or
+# the CLI, and `template_update` is the catalog's newer version on offer; an app
+# declared in HCL is the practitioner's own image and carries neither, and the
+# upgrade they point at is an action, not an attribute.
+App.template
+App.template_update

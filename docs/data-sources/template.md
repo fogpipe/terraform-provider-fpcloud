@@ -25,8 +25,12 @@ Use this data source to read one entry of the curated app catalog: the mirrored 
 - `bucket_public_read` (Boolean) Whether that bucket is created world-readable.
 - `command` (List of String) The entrypoint override the entry needs, if any.
 - `cpu` (String) The recommended CPU limit.
+- `database_cpu` (String) The CPU limit of each database instance the entry is created with; empty when it needs no database.
 - `database_engine` (String) The managed database engine the entry needs; empty when it needs none.
 - `database_extensions` (List of String) Curated extensions the database needs installed.
+- `database_instances` (Number) How many instances every managed database runs; 0 when the entry needs no database.
+- `database_memory` (String) The memory limit of each database instance.
+- `database_storage` (String) The volume of each database instance.
 - `database_version` (String) The database major the entry needs.
 - `env` (Map of String) The app's plain environment: literal values and $(NAME) references to what the platform injects for the bound database, bucket and the app's own URL.
 - `health_check_path` (String) The path that answers 200 once the app is up.
@@ -37,6 +41,7 @@ Use this data source to read one entry of the curated app catalog: the mirrored 
 - `memory` (String) The recommended memory limit.
 - `notes` (String) What a person does after the deploy: the first sign-in, a setting the app only takes in its own UI.
 - `port` (Number) The HTTP port the container listens on.
+- `reserved` (Map of String) What a deployment of the entry holds while it runs, per hour, keyed by metered resource type (`compute.cpu`, `database.storage`) in that type's billing unit — cores or GiB. Multiplied by the org's rates (`fpcloud billing prices`) and 730 hours it is the monthly cost; bucket and backup storage are billed by use and absent.
 - `secrets` (List of String) Keys the app needs as random secrets; generate one per key and pass them as the app's secrets.
 - `summary` (String) One line on what the app is.
 - `upstream_digest` (String) The digest the source image was reviewed and mirrored at.

@@ -43,6 +43,11 @@ type TemplateDataSourceModel struct {
 	DatabaseEngine  types.String `tfsdk:"database_engine"`
 	DatabaseVersion types.String `tfsdk:"database_version"`
 	DatabaseExts    types.List   `tfsdk:"database_extensions"`
+	DatabaseCPU     types.String `tfsdk:"database_cpu"`
+	DatabaseMemory  types.String `tfsdk:"database_memory"`
+	DatabaseStorage types.String `tfsdk:"database_storage"`
+	DatabaseInst    types.Int64  `tfsdk:"database_instances"`
+	Reserved        types.Map    `tfsdk:"reserved"`
 	Bucket          types.Bool   `tfsdk:"bucket"`
 	BucketPublic    types.Bool   `tfsdk:"bucket_public_read"`
 	Notes           types.String `tfsdk:"notes"`
@@ -137,6 +142,27 @@ func (d *TemplateDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Computed:    true,
 				ElementType: types.StringType,
 			},
+			"database_cpu": schema.StringAttribute{
+				Description: "The CPU limit of each database instance the entry is created with; empty when it needs no database.",
+				Computed:    true,
+			},
+			"database_memory": schema.StringAttribute{
+				Description: "The memory limit of each database instance.",
+				Computed:    true,
+			},
+			"database_storage": schema.StringAttribute{
+				Description: "The volume of each database instance.",
+				Computed:    true,
+			},
+			"database_instances": schema.Int64Attribute{
+				Description: "How many instances every managed database runs; 0 when the entry needs no database.",
+				Computed:    true,
+			},
+			"reserved": schema.MapAttribute{
+				Description: "What a deployment of the entry holds while it runs, per hour, keyed by metered resource type (`compute.cpu`, `database.storage`) in that type's billing unit — cores or GiB. Multiplied by the org's rates (`fpcloud billing prices`) and 730 hours it is the monthly cost; bucket and backup storage are billed by use and absent.",
+				ElementType: types.StringType,
+				Computed:    true,
+			},
 			"bucket": schema.BoolAttribute{
 				Description: "Whether the entry needs a bucket bound to the app.",
 				Computed:    true,
@@ -222,11 +248,20 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 		data.DatabaseEngine = types.StringValue(db.Engine)
 		data.DatabaseVersion = types.StringValue(db.Version)
 		data.DatabaseExts, _ = types.ListValueFrom(ctx, types.StringType, orEmpty(db.Extensions))
+		data.DatabaseCPU = types.StringValue(db.CPU)
+		data.DatabaseMemory = types.StringValue(db.Memory)
+		data.DatabaseStorage = types.StringValue(db.Storage)
+		data.DatabaseInst = types.Int64Value(int64(db.Instances))
 	} else {
 		data.DatabaseEngine = types.StringValue("")
 		data.DatabaseVersion = types.StringValue("")
 		data.DatabaseExts, _ = types.ListValueFrom(ctx, types.StringType, []string{})
+		data.DatabaseCPU = types.StringValue("")
+		data.DatabaseMemory = types.StringValue("")
+		data.DatabaseStorage = types.StringValue("")
+		data.DatabaseInst = types.Int64Value(0)
 	}
+	data.Reserved, _ = types.MapValueFrom(ctx, types.StringType, orEmptyMap(t.Reserved))
 	if b := t.Needs.Bucket; b != nil {
 		data.Bucket = types.BoolValue(true)
 		data.BucketPublic = types.BoolValue(b.PublicRead)

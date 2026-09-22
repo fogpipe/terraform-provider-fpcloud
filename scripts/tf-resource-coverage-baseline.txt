@@ -93,6 +93,10 @@ ListAudit
 # settles — a perpetual diff for anything referencing it, and a plan that
 # depends on whether an app happened to be restarting
 ProjectStatus
+# the changelog (ADR-239) is what shipped in each release: a published fact a
+# person reads — `fpcloud changelog`, the console — that grows with every
+# release, so nothing a plan declares converges on it
+Changelog
 
 # "list all X" convenience — every existing data source in this provider is a
 # singular lookup (project/app/database); a collection-listing data source has

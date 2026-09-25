@@ -44,7 +44,10 @@ resource "fpcloud_app_config" "test" {
 	})
 }
 
-func TestAccAppConfigResourceSecret(t *testing.T) {
+// The project-secret flow end to end (#1069): the secret is created, an app
+// mounts it at a path, the database of who-mounts-what answers, and the value
+// never reads back from anything.
+func TestAccProjectSecretResource(t *testing.T) {
 	proj := accName("cfsp")
 	app := accName("cfsa")
 
@@ -54,30 +57,38 @@ func TestAccAppConfigResourceSecret(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: testAccAppScaffold(proj, app) + `
-resource "fpcloud_app_config" "secret" {
-  app_id    = fpcloud_app.scaffold.id
-  key       = "API_SECRET"
-  value     = "super-secret-value"
-  is_secret = true
+resource "fpcloud_project_secret" "stripe" {
+  project_id = fpcloud_project.scaffold.id
+  name       = "stripe-key"
+  value      = "sk_test_123"
 }
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("fpcloud_app_config.secret", "id"),
-					resource.TestCheckResourceAttr("fpcloud_app_config.secret", "is_secret", "true"),
+					resource.TestCheckResourceAttrSet("fpcloud_project_secret.stripe", "id"),
+					resource.TestCheckResourceAttr("fpcloud_project_secret.stripe", "name", "stripe-key"),
 				),
 			},
 			{
-				// A secret's plaintext is never returned by the API, so it
-				// cannot be verified on import: it arrives null and the first
-				// apply re-sends the configured value (#89).
-				ResourceName:            "fpcloud_app_config.secret",
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"value"},
-				ImportStateIdFunc: func(s *terraform.State) (string, error) {
-					rs := s.RootModule().Resources["fpcloud_app_config.secret"]
-					return rs.Primary.Attributes["app_id"] + "/" + rs.Primary.Attributes["key"], nil
-				},
+				Config: testAccAppScaffold(proj, app) + `
+resource "fpcloud_project_secret" "stripe" {
+  project_id = fpcloud_project.scaffold.id
+  name       = "stripe-key"
+  value      = "sk_test_456"
+}
+
+resource "fpcloud_app" "mounter" {
+  project_id = fpcloud_project.scaffold.id
+  name       = "` + accName("cfsm") + `"
+  image      = "nginx:latest"
+  ingress    = "internal"
+  secret_mounts = {
+    "/secrets/stripe" = fpcloud_project_secret.stripe.name
+  }
+` + accRootImageOptOut + `}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("fpcloud_app.mounter", "secret_mounts./secrets/stripe", "stripe-key"),
+				),
 			},
 		},
 	})

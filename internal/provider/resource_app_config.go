@@ -9,7 +9,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -31,13 +30,14 @@ type AppConfigResource struct {
 	client *client.Client
 }
 
-// AppConfigResourceModel describes the resource data model.
+// AppConfigResourceModel describes the resource data model. Env is plain by
+// definition (#1069): a secret is an fpcloud_project_secret, mounted on the
+// app as a file.
 type AppConfigResourceModel struct {
-	ID       types.String `tfsdk:"id"`
-	AppID    types.String `tfsdk:"app_id"`
-	Key      types.String `tfsdk:"key"`
-	Value    types.String `tfsdk:"value"`
-	IsSecret types.Bool   `tfsdk:"is_secret"`
+	ID    types.String `tfsdk:"id"`
+	AppID types.String `tfsdk:"app_id"`
+	Key   types.String `tfsdk:"key"`
+	Value types.String `tfsdk:"value"`
 }
 
 func (r *AppConfigResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -70,15 +70,9 @@ func (r *AppConfigResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"value": schema.StringAttribute{
-				Description: "The configuration value. Marked as sensitive when is_secret is true.",
-				Required:    true,
-				Sensitive:   true,
-			},
-			"is_secret": schema.BoolAttribute{
-				Description: "Whether this config value is a secret. Secrets are redacted in API responses.",
-				Optional:    true,
-				Computed:    true,
-				Default:     booldefault.StaticBool(false),
+				Description: "The configuration value. Env is plain: it reads back in full. " +
+					"A credential belongs in fpcloud_project_secret, mounted on the app as a file.",
+				Required: true,
 			},
 		},
 	}
@@ -111,22 +105,13 @@ func (r *AppConfigResource) Create(ctx context.Context, req resource.CreateReque
 		plan.AppID.ValueString(),
 		plan.Key.ValueString(),
 		plan.Value.ValueString(),
-		plan.IsSecret.ValueBool(),
 	)
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating app config", err.Error())
 		return
 	}
 
-	// A secret's plaintext value lives only in config — the API never echoes it
-	// back verbatim (it stores it encrypted), so trusting mapAppConfigToState's
-	// value would make the applied state diverge from the plan. Always keep the
-	// configured value for secrets.
-	configuredValue := plan.Value
 	mapAppConfigToState(cfg, &plan)
-	if plan.IsSecret.ValueBool() {
-		plan.Value = configuredValue
-	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -160,15 +145,7 @@ func (r *AppConfigResource) Read(ctx context.Context, req resource.ReadRequest, 
 		return
 	}
 
-	// A secret's plaintext value lives only in config/state — the API redacts or
-	// re-encrypts it — so keep the prior state value to avoid a perpetual diff.
-	// (mapAppConfigToState overwrites Value, so capture it first.)
-	priorValue := state.Value
 	mapAppConfigToState(found, &state)
-	if found.IsSecret {
-		state.Value = priorValue
-	}
-
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -184,22 +161,13 @@ func (r *AppConfigResource) Update(ctx context.Context, req resource.UpdateReque
 		plan.AppID.ValueString(),
 		plan.Key.ValueString(),
 		plan.Value.ValueString(),
-		plan.IsSecret.ValueBool(),
 	)
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating app config", err.Error())
 		return
 	}
 
-	// A secret's plaintext value lives only in config — the API never echoes it
-	// back verbatim (it stores it encrypted), so trusting mapAppConfigToState's
-	// value would make the applied state diverge from the plan. Always keep the
-	// configured value for secrets.
-	configuredValue := plan.Value
 	mapAppConfigToState(cfg, &plan)
-	if plan.IsSecret.ValueBool() {
-		plan.Value = configuredValue
-	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -224,18 +192,11 @@ func mapAppConfigToState(cfg *client.AppConfig, state *AppConfigResourceModel) {
 	state.ID = types.StringValue(cfg.ID)
 	state.AppID = types.StringValue(cfg.AppID)
 	state.Key = types.StringValue(cfg.Key)
-	// Only update value from API if it's not redacted (non-secret, or API returned a value).
-	if cfg.Value != "" || !cfg.IsSecret {
-		state.Value = types.StringValue(cfg.Value)
-	}
-	state.IsSecret = types.BoolValue(cfg.IsSecret)
+	state.Value = types.StringValue(cfg.Value)
 }
 
 // ImportState imports a config entry by an "app_id/key" identifier — the pair
-// Read keys on. A non-secret entry imports completely. A secret's plaintext is
-// never returned by the API, so it imports with a null value: the first apply
-// re-sends the configured value in place, which is the only honest option for
-// a value the provider cannot read.
+// Read keys on. Every value reads back in full: env is plain by definition.
 func (r *AppConfigResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	parts := strings.SplitN(req.ID, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {

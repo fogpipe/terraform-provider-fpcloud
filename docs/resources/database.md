@@ -59,6 +59,7 @@ resource "fpcloud_database" "main" {
 - `plan` (String) Legacy size tier, derived by the server from cpu/memory (e.g. "starter", "custom"). Read-only — size the database with cpu/memory/storage instead.
 - `port` (Number) The database port.
 - `read_host` (String) Cluster-internal hostname of the database's REPLICA (CNPG's `-ro` Service), on the same `port` and with the same credential — a replica is not a second identity. Every managed database has one, because every one is two instances. **Reads here can be stale**: replication is asynchronous, so a read-your-own-write can miss; send anything that must see everything committed so far to `host`. Empty when the platform cannot derive a replica endpoint for the database, which means there is none — never fall back to `host` under this name.
+- `secret` (String) Name of the project secret holding this database's owner connection URL (`<name>-owner`), created with the database and rewritten by a rotation. Mount it on an app (fpcloud_app's `secret_mounts`) to hand the app the database.
 - `status` (String) The current status of the database.
 - `username` (String) The database username.
 

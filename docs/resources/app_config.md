@@ -36,11 +36,7 @@ resource "fpcloud_app_config" "stripe_key" {
 
 - `app_id` (String) The application ID this config belongs to.
 - `key` (String) The configuration key (environment variable name).
-- `value` (String, Sensitive) The configuration value. Marked as sensitive when is_secret is true.
-
-### Optional
-
-- `is_secret` (Boolean) Whether this config value is a secret. Secrets are redacted in API responses.
+- `value` (String) The configuration value. Env is plain: it reads back in full. A credential belongs in fpcloud_project_secret, mounted on the app as a file.
 
 ### Read-Only
 

@@ -168,3 +168,8 @@ ListPrices
 StartGitHubConnect
 GetGitHubConnection
 DisconnectGitHub
+
+# Project secrets (#1069): TF manages one secret per fpcloud_project_secret and
+# reads it back by id; enumerating a project's secrets is a CLI/console read
+# (`fpcloud secret list`), not state anyone declares.
+ListProjectSecrets

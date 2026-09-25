@@ -4,10 +4,6 @@
 # (fogpipe/cloud-workspace#888), so only add to it deliberately, on review,
 # with the reason beside the entry, in the group it belongs to.
 
-# --- named differently on purpose ---------------------------------------
-# Terraform takes the human name and lets the API resolve it, the way every
-# other reference in the provider reads. The id is what comes back.
-App.database_id
 App.service_account_id
 # The permission trio is `read`/`write`/`owner` in HCL; `can_` reads as a
 # question, and a schema attribute is an assertion.
@@ -125,3 +121,14 @@ ServiceAccount.updated_at
 # upgrade they point at is an action, not an attribute.
 App.template
 App.template_update
+
+# --- project secrets (#1069) ----------------------------------------------
+# Which apps mount a database's owner secret is live cluster-derived state a
+# read reports, not configuration: fpcloud_app's secret_mounts is where the
+# binding is declared, and expressing the reverse index as an attribute would
+# put the same fact in two places of one plan.
+Database.mounted_by
+# Set only on a database's owner secret, which the platform creates and
+# deletes with the database — never on one Terraform manages, so a config
+# could never legitimately write it.
+ProjectSecret.owner_database_id

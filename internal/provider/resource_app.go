@@ -40,7 +40,6 @@ type AppResourceModel struct {
 	Name                types.String `tfsdk:"name"`
 	DisplayName         types.String `tfsdk:"display_name"`
 	URLSlug             types.String `tfsdk:"url_slug"`
-	Database            types.String `tfsdk:"database"`
 	Image               types.String `tfsdk:"image"`
 	Command             types.List   `tfsdk:"command"`
 	Args                types.List   `tfsdk:"args"`
@@ -53,7 +52,7 @@ type AppResourceModel struct {
 	Type                types.String `tfsdk:"type"`
 	ServiceAccount      types.String `tfsdk:"service_account"`
 	Env                 types.Map    `tfsdk:"env"`
-	Secret              types.Map    `tfsdk:"secret"`
+	SecretMounts        types.Map    `tfsdk:"secret_mounts"`
 	Replicas            types.Int64  `tfsdk:"replicas"`
 	MinScale            types.Int64  `tfsdk:"min_scale"`
 	MaxScale            types.Int64  `tfsdk:"max_scale"`
@@ -172,17 +171,6 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					"'<url_slug>.app.<platform_domain>'. When empty, the host is derived from the app/" +
 					"project/org names. Globally unique, a DNS-1123 label, always-on mode only. Set to an " +
 					"empty string to clear it back to the derived host.",
-				Optional: true,
-				Computed: true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"database": schema.StringAttribute{
-				Description: "Database (name or id) this app's unprefixed DATABASE_URL points at. " +
-					"Leave unset when the project has a single database — that one is used. With several, " +
-					"DATABASE_URL is omitted unless this names one; each database is always injected as " +
-					"'<NAME>_DATABASE_URL' regardless. Set to an empty string to clear the binding.",
 				Optional: true,
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
@@ -319,12 +307,14 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Description: "Environment variables (plaintext). Set as part of the create, so a release " +
 					"command on a new app reads them on its first run.",
 			},
-			"secret": schema.MapAttribute{
+			"secret_mounts": schema.MapAttribute{
 				Optional:    true,
-				Sensitive:   true,
+				Computed:    true,
 				ElementType: types.StringType,
-				Description: "Secret environment variables (encrypted at rest). Set as part of the create, " +
-					"like env, so a release command that reads one is not gated before it arrives.",
+				Description: "Project secrets mounted as files: map of container file path to secret name " +
+					"(fpcloud_project_secret). The only way a secret reaches the app — env is plain. " +
+					"Mounting a database's owner secret is how the app is handed that database. " +
+					"Set as part of the create, so a release command that reads one is not gated before it arrives.",
 			},
 			"replicas": schema.Int64Attribute{
 				Description: "Fixed replica count for always-on apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.",
@@ -516,10 +506,11 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 	asked := plan
 
-	// env and secret ride the create request (ADR-112): an app created with a
-	// release command is gated on it before it serves, so config written after
-	// the create call arrives after the migration that reads it has already run.
-	var envMap, secretMap map[string]string
+	// env and secret_mounts ride the create request (ADR-112): an app created
+	// with a release command is gated on it before it serves, so config written
+	// after the create call arrives after the migration that reads it has
+	// already run.
+	var envMap, mountsMap map[string]string
 
 	if !plan.Env.IsNull() && !plan.Env.IsUnknown() {
 		resp.Diagnostics.Append(plan.Env.ElementsAs(ctx, &envMap, false)...)
@@ -527,8 +518,8 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 			return
 		}
 	}
-	if !plan.Secret.IsNull() && !plan.Secret.IsUnknown() {
-		resp.Diagnostics.Append(plan.Secret.ElementsAs(ctx, &secretMap, false)...)
+	if !plan.SecretMounts.IsNull() && !plan.SecretMounts.IsUnknown() {
+		resp.Diagnostics.Append(plan.SecretMounts.ElementsAs(ctx, &mountsMap, false)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -566,7 +557,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		HealthCheckRetries:  int(plan.HealthCheckRetries.ValueInt64()),
 		Probes:              probes,
 		EnvVars:             envMap,
-		Secrets:             secretMap,
+		SecretMounts:        mountsMap,
 	}
 	if !plan.ServiceAccount.IsNull() && !plan.ServiceAccount.IsUnknown() {
 		createReq.ServiceAccount = plan.ServiceAccount.ValueString()
@@ -614,18 +605,6 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
-	}
-
-	// The database binding is a separate call: the create request has no field
-	// for it (the API takes it on PATCH), and an unset value means "the project's
-	// sole database", which is already the default.
-	if !asked.Database.IsNull() && !asked.Database.IsUnknown() && asked.Database.ValueString() != "" {
-		bound, err := r.client.SetAppDatabase(ctx, app.ID, asked.Database.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError("Error setting app database binding", err.Error())
-			return
-		}
-		app = bound
 	}
 
 	// An app created with a release command is gated on it before it serves, so
@@ -861,12 +840,16 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
-	// Update the database binding if it changed. An empty string clears it back
-	// to the default (the project's sole database, or none when it has several).
-	if plan.Database.ValueString() != state.Database.ValueString() {
-		_, err := r.client.SetAppDatabase(ctx, appID, plan.Database.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError("Error updating app database binding", err.Error())
+	// Replace the secret mounts when they changed: the map is the unit — a
+	// mount has no id — and an empty map is a deliberate unmount-everything.
+	if !plan.SecretMounts.Equal(state.SecretMounts) && !plan.SecretMounts.IsUnknown() {
+		var mounts map[string]string
+		resp.Diagnostics.Append(plan.SecretMounts.ElementsAs(ctx, &mounts, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if _, err := r.client.SetSecretMounts(ctx, appID, mounts); err != nil {
+			resp.Diagnostics.AddError("Error updating app secret mounts", err.Error())
 			return
 		}
 	}
@@ -956,19 +939,15 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
-	// Sync env vars: compute diff between old and new env/secret maps and update configs.
-	var planEnv, stateEnv, planSecret, stateSecret map[string]string
+	// Sync env vars: compute the diff between old and new env maps and update
+	// configs. Env is plain by definition (#1069); a secret is a mounted
+	// project secret, handled above.
+	var planEnv, stateEnv map[string]string
 	if !plan.Env.IsNull() && !plan.Env.IsUnknown() {
 		resp.Diagnostics.Append(plan.Env.ElementsAs(ctx, &planEnv, false)...)
 	}
 	if !state.Env.IsNull() && !state.Env.IsUnknown() {
 		resp.Diagnostics.Append(state.Env.ElementsAs(ctx, &stateEnv, false)...)
-	}
-	if !plan.Secret.IsNull() && !plan.Secret.IsUnknown() {
-		resp.Diagnostics.Append(plan.Secret.ElementsAs(ctx, &planSecret, false)...)
-	}
-	if !state.Secret.IsNull() && !state.Secret.IsUnknown() {
-		resp.Diagnostics.Append(state.Secret.ElementsAs(ctx, &stateSecret, false)...)
 	}
 	if resp.Diagnostics.HasError() {
 		return
@@ -986,26 +965,8 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	// Set new/changed env keys.
 	for k, v := range planEnv {
 		if oldVal, exists := stateEnv[k]; !exists || oldVal != v {
-			if _, err := r.client.SetConfig(ctx, appID, k, v, false); err != nil {
+			if _, err := r.client.SetConfig(ctx, appID, k, v); err != nil {
 				resp.Diagnostics.AddError("Error setting env config", fmt.Sprintf("key %q: %s", k, err.Error()))
-				return
-			}
-		}
-	}
-	// Remove old secret keys no longer present.
-	for k := range stateSecret {
-		if _, exists := planSecret[k]; !exists {
-			if err := r.client.UnsetConfig(ctx, appID, k); err != nil {
-				resp.Diagnostics.AddError("Error unsetting secret config", fmt.Sprintf("key %q: %s", k, err.Error()))
-				return
-			}
-		}
-	}
-	// Set new/changed secret keys.
-	for k, v := range planSecret {
-		if oldVal, exists := stateSecret[k]; !exists || oldVal != v {
-			if _, err := r.client.SetConfig(ctx, appID, k, v, true); err != nil {
-				resp.Diagnostics.AddError("Error setting secret config", fmt.Sprintf("key %q: %s", k, err.Error()))
 				return
 			}
 		}
@@ -1395,7 +1356,9 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	model.Name = types.StringValue(app.Name)
 	model.DisplayName = types.StringValue(app.DisplayName)
 	model.URLSlug = types.StringValue(app.URLSlug)
-	model.Database = types.StringValue(app.DatabaseID)
+	mounts, mountDiags := types.MapValueFrom(context.Background(), types.StringType, app.SecretMounts)
+	diags.Append(mountDiags...)
+	model.SecretMounts = mounts
 	model.Image = types.StringValue(app.Image)
 	model.Port = types.Int64Value(int64(app.Port))
 	model.Ingress = types.StringValue(app.Ingress)

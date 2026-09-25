@@ -58,6 +58,7 @@ type DatabaseResourceModel struct {
 	Status      types.String `tfsdk:"status"`
 	Host        types.String `tfsdk:"host"`
 	ReadHost    types.String `tfsdk:"read_host"`
+	Secret      types.String `tfsdk:"secret"`
 	Port        types.Int64  `tfsdk:"port"`
 	Username    types.String `tfsdk:"username"`
 	Password    types.String `tfsdk:"password"`
@@ -201,6 +202,12 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			"port": schema.Int64Attribute{
 				Description: "The database port.",
 				Computed:    true,
+			},
+			"secret": schema.StringAttribute{
+				Description: "Name of the project secret holding this database's owner connection URL " +
+					"(`<name>-owner`), created with the database and rewritten by a rotation. Mount it on " +
+					"an app (fpcloud_app's `secret_mounts`) to hand the app the database.",
+				Computed: true,
 			},
 			"username": schema.StringAttribute{
 				Description: "The database username.",
@@ -536,6 +543,7 @@ func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 	// an app would otherwise send stale-tolerant reads to the primary while the
 	// attribute claimed a replica served them (fogpipe/cloud-workspace#862).
 	state.ReadHost = types.StringValue(db.ReadHost)
+	state.Secret = types.StringValue(db.Secret)
 	state.Port = types.Int64Value(int64(db.Port))
 	state.Username = types.StringValue(db.Username)
 	// Password is returned only on create — the platform keeps no copy

@@ -50,6 +50,9 @@ type TemplateDataSourceModel struct {
 	Reserved        types.Map    `tfsdk:"reserved"`
 	Bucket          types.Bool   `tfsdk:"bucket"`
 	BucketPublic    types.Bool   `tfsdk:"bucket_public_read"`
+	RunAsUser       types.Int64  `tfsdk:"run_as_user"`
+	StartupPeriod   types.Int64  `tfsdk:"startup_period_seconds"`
+	StartupFailures types.Int64  `tfsdk:"startup_failure_threshold"`
 	Notes           types.String `tfsdk:"notes"`
 }
 
@@ -171,6 +174,18 @@ func (d *TemplateDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Description: "Whether that bucket is created world-readable.",
 				Computed:    true,
 			},
+			"run_as_user": schema.Int64Attribute{
+				Description: "The uid the app is created to run as, pinned non-root, where the upstream image declares no user; null when the image's own user is what runs.",
+				Computed:    true,
+			},
+			"startup_period_seconds": schema.Int64Attribute{
+				Description: "How often the startup probe checks the health path during the first boot; null when the entry leaves startup to the shared health check.",
+				Computed:    true,
+			},
+			"startup_failure_threshold": schema.Int64Attribute{
+				Description: "How many startup probe misses the first boot is allowed before liveness takes over; null when the entry declares no startup probe.",
+				Computed:    true,
+			},
 			"notes": schema.StringAttribute{
 				Description: "What a person does after the deploy: the first sign-in, a setting the app only takes in its own UI.",
 				Computed:    true,
@@ -268,6 +283,15 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 	} else {
 		data.Bucket = types.BoolValue(false)
 		data.BucketPublic = types.BoolValue(false)
+	}
+	data.RunAsUser = types.Int64Null()
+	if t.RunAsUser != nil {
+		data.RunAsUser = types.Int64Value(*t.RunAsUser)
+	}
+	data.StartupPeriod, data.StartupFailures = types.Int64Null(), types.Int64Null()
+	if s := t.Startup; s != nil {
+		data.StartupPeriod = types.Int64Value(int64(s.PeriodSeconds))
+		data.StartupFailures = types.Int64Value(int64(s.FailureThreshold))
 	}
 
 	resp.Diagnostics = diags

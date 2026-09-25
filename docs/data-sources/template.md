@@ -42,7 +42,10 @@ Use this data source to read one entry of the curated app catalog: the mirrored 
 - `notes` (String) What a person does after the deploy: the first sign-in, a setting the app only takes in its own UI.
 - `port` (Number) The HTTP port the container listens on.
 - `reserved` (Map of String) What a deployment of the entry holds while it runs, per hour, keyed by metered resource type (`compute.cpu`, `database.storage`) in that type's billing unit — cores or GiB. Multiplied by the org's rates (`fpcloud billing prices`) and 730 hours it is the monthly cost; bucket and backup storage are billed by use and absent.
+- `run_as_user` (Number) The uid the app is created to run as, pinned non-root, where the upstream image declares no user; null when the image's own user is what runs.
 - `secrets` (List of String) Keys the app needs as random secrets; generate one per key and pass them as the app's secrets.
+- `startup_failure_threshold` (Number) How many startup probe misses the first boot is allowed before liveness takes over; null when the entry declares no startup probe.
+- `startup_period_seconds` (Number) How often the startup probe checks the health path during the first boot; null when the entry leaves startup to the shared health check.
 - `summary` (String) One line on what the app is.
 - `upstream_digest` (String) The digest the source image was reviewed and mirrored at.
 - `upstream_image` (String) The source image the platform's mirror was copied from.

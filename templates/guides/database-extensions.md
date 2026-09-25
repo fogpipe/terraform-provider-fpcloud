@@ -19,7 +19,7 @@ need nothing from fpcloud:
 create extension if not exists citext;
 ```
 
-That works today, under the role your `DATABASE_URL` connects as.
+That works today, under the database's own `app` role.
 
 ## Untrusted extensions: ask for them at create
 

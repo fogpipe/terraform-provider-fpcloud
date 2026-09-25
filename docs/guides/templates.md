@@ -38,11 +38,12 @@ migrations — carries the startup probe that gives it that time, shown as
 **Startup**. Both are ordinary app settings afterwards, read and changed with
 `fpcloud app get` and `fpcloud app set-probes`.
 
-An entry's environment references what the platform injects rather than
-copying it: the database it creates is bound as `DATABASE_URL` and the libpq
-variables, the bucket as `S3_*`, and the app's own address as
-`FPCLOUD_APP_URL`, so a rotated credential reaches the app without anyone
-re-entering it.
+An entry's environment is wired for you at deploy: the database it creates is
+seeded into the app's env as `DATABASE_URL` and the libpq variables, the bucket
+arrives as `S3_*`, and the app's own address as `FPCLOUD_APP_URL` — so nothing
+is copied by hand. The database credential in env is the template's wiring, not
+a recommendation; your own apps mount the database's owner secret as a file
+instead.
 
 `fpcloud template get <name>` shows the inputs an entry asks for — an admin
 password, an SMTP relay — and the note that says what to do after the deploy

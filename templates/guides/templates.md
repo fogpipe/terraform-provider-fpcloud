@@ -30,6 +30,14 @@ is the platform's own mirror of that digest, so it is scanned, digest-pinned
 and retention-protected like every other image on the platform — `fpcloud app
 cves` answers for it the way it does for your own images.
 
+A template app runs as a non-root user like any other app on the platform.
+Where the upstream image declares no user, the entry names the uid the app is
+created with and `fpcloud template get` shows it as **Runs as**; an entry whose
+first boot takes longer than the shared health check allows — a JVM running its
+migrations — carries the startup probe that gives it that time, shown as
+**Startup**. Both are ordinary app settings afterwards, read and changed with
+`fpcloud app get` and `fpcloud app set-probes`.
+
 An entry's environment references what the platform injects rather than
 copying it: the database it creates is bound as `DATABASE_URL` and the libpq
 variables, the bucket as `S3_*`, and the app's own address as

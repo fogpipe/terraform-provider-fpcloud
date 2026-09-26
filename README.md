@@ -58,13 +58,10 @@ just snapshot      # local GoReleaser dry-run (no publish)
 To run a local build against a config, use a `dev_overrides` block in
 `~/.terraformrc` pointing `fogpipe/fpcloud` at your `$GOBIN`.
 
-**`docs/` is entirely generated.** `just docs` rewrites the tree from the schema,
-`examples/`, and `templates/`, deleting anything it didn't produce. Hand-written
-pages therefore live in `templates/` — files there without a `.tmpl` extension are
-copied through verbatim, so markdown containing `{{ ... }}` survives intact.
-`templates/guides/` holds the conceptual guides, synced from the `fp-cloud` docs
-pool by `just sync-tf-docs <path-to-this-checkout>` over there; edit them at the
-source, not here.
+**`docs/` is entirely generated.** `just docs` rewrites the tree from the schema
+and `examples/`, deleting anything it didn't produce. The provider carries no
+guides of its own: the provider description links to
+https://cloud.fogpipe.com/llms.txt, where every guide is published.
 
 ## Acceptance tests
 

@@ -40,10 +40,6 @@ module proxy had served so far, and turned red on unrelated pushes when it
 moved (fogpipe/cloud-workspace#152). A pin lagging the released client is
 what `just release` warns about (`docs/release-policy.md` at the root).
 
-`templates/guides` drifting from the platform's docs pool fails a check in
-platform's CI instead, which still clones this repo to run it — that gate
-reads platform's private docs pool, so it cannot move here.
-
 Both coverage gates accept reviewed exclusions via baselines in this repo
 (`scripts/tf-resource-coverage-baseline.txt`, `scripts/tf-field-coverage-baseline.txt`).
 Baselining is a decision, not a way past a red build.

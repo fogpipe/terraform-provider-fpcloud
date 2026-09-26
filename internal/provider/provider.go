@@ -39,7 +39,7 @@ func (p *FogpipeProvider) Metadata(_ context.Context, _ provider.MetadataRequest
 
 func (p *FogpipeProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "The Fogpipe provider manages resources on the Fogpipe PaaS platform.",
+		Description: "The Fogpipe provider manages resources on the Fogpipe PaaS platform. Guides for every capability are at https://cloud.fogpipe.com/llms.txt.",
 		Attributes: map[string]schema.Attribute{
 			"api_key": schema.StringAttribute{
 				Description: "API key for Fogpipe. Can also be set via the FPCLOUD_API_KEY environment variable, or inherited from the fpcloud CLI login — an API key in the fpcloud config.yaml (the nearest .fpcloud/ at or above the working directory, else ~/.fpcloud), or the OIDC token from `fpcloud login` via `fpcloud get-token` (requires the fpcloud CLI on PATH).",

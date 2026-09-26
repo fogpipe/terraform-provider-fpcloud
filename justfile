@@ -26,7 +26,7 @@ testacc-webhook repo:
 
 # Regenerate docs/ from schema + examples/ + templates/. Run before tagging a
 # release. Everything under docs/ is output — this rewrites the tree from
-# scratch, so hand-written pages go in templates/ (see templates/guides).
+# scratch, so a hand-written page would go in templates/.
 #
 # The schema is exported here rather than left to tfplugindocs, which otherwise
 # downloads a Terraform binary and verifies its signature against a HashiCorp

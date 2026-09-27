@@ -13,19 +13,12 @@ Manages an individual configuration key-value pair for a Fogpipe application.
 ## Example Usage
 
 ```terraform
-# Plain environment variable
+# A plain environment variable. A credential belongs in fpcloud_project_secret,
+# mounted as a file through fpcloud_app's secret_mounts.
 resource "fpcloud_app_config" "api_url" {
   app_id = fpcloud_app.web.id
   key    = "NEXT_PUBLIC_API_URL"
   value  = "https://api.example.com"
-}
-
-# Secret (encrypted at rest)
-resource "fpcloud_app_config" "stripe_key" {
-  app_id    = fpcloud_app.web.id
-  key       = "STRIPE_SECRET_KEY"
-  value     = var.stripe_secret_key
-  is_secret = true
 }
 ```
 
@@ -49,8 +42,6 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import by "app_id/key". A non-secret entry imports completely; a secret's
-# plaintext is never returned by the API, so its value arrives null and the
-# first apply re-sends the configured value in place.
-terraform import fpcloud_app_config.database_url 9f3e6b1d-7a2c-4d8f-b5e9-1c0a8d6f4b2e/DATABASE_URL
+# Import by "app_id/key".
+terraform import fpcloud_app_config.api_url 9f3e6b1d-7a2c-4d8f-b5e9-1c0a8d6f4b2e/NEXT_PUBLIC_API_URL
 ```

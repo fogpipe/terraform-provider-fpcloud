@@ -45,14 +45,14 @@ resource "fpcloud_database" "main" {
 - `extensions` (Set of String) Curated Postgres extensions installed in the database. The platform installs them, because an untrusted extension needs superuser to install and a managed database hands out none. An entry is `name` or `name:schema` — the schema its objects live in, created if absent, for a dump that references them by qualified name. Needs Postgres 18 or later. Mutable in place; adding or removing one restarts the database. Removing one UNINSTALLS it — the platform runs the `drop extension` you cannot, which takes the schema, types and tables the extension created with it, and the apply is refused when objects of yours still depend on it.
 - `memory` (String) Memory request/limit (e.g. "512Mi", "2Gi"). Mutable in place. Defaults to "512Mi".
 - `password_rotation` (String) Change this value to rotate the database password — any string of your choosing, a date or a counter. The platform issues a new password, waits for the database to accept it, rolls every app in the project onto it, and `password` takes the new value; the old one stops authenticating new connections. Anything outside the platform that held it — a local psql, another workspace's state — needs the new one.
-- `pooler` (Boolean) Whether a PgBouncer connection pooler is provisioned (injects DATABASE_POOL_URL). Mutable in place.
+- `pooler` (Boolean) Whether a PgBouncer connection pooler is provisioned, reached at the owner URL's host with `-rw` replaced by `-pooler`. Mutable in place.
 - `storage` (String) Persistent volume size (e.g. "10Gi"). Mutable in place but grow-only — the API rejects a shrink. Defaults to "10Gi".
 - `version` (String) The database engine major version (e.g. "18"). Omit to take the platform's current default. Mutable: raising it triggers an in-place major-version upgrade (forward-only; the API rejects downgrades).
 
 ### Read-Only
 
 - `created_at` (String) The time the database was created.
-- `host` (String) Cluster-internal hostname of the database's primary. Not reachable from outside the cluster — an app in the same project gets DATABASE_URL injected, and `fpcloud db connect` tunnels in from a workstation.
+- `host` (String) Cluster-internal hostname of the database's primary. Not reachable from outside the cluster — an app in the same project mounts the owner `secret`, and `fpcloud db connect` tunnels in from a workstation.
 - `id` (String) The unique identifier of the database.
 - `instances` (Number) Number of Postgres instances the platform runs this database as. Read-only: replication across nodes is what the platform promises, not a size the tenant buys (ADR-136). A client-side default here is what would delete a replica on the next apply.
 - `password` (String, Sensitive) Password for `username`, returned at creation and after a rotation and kept in state from then on: the platform provisions it and stores no copy, so a later read has none. An imported database has no password in state; read it live with `fpcloud db connect`. To make every copy of it stale, change `password_rotation`.
@@ -80,7 +80,7 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 
 ```shell
 # Import by database id. The password is returned only at creation, so an
-# imported database carries an empty one — use the injected DATABASE_URL or
-# `fpcloud db connect` for the live credential.
+# imported database carries an empty one — mount the owner `secret` on an app,
+# or use `fpcloud db connect`, for the live credential.
 terraform import fpcloud_database.events 5881262f-2d2c-4e52-9a7b-1f9c0a6f3b1d
 ```

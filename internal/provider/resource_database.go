@@ -168,7 +168,7 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Computed: true,
 			},
 			"pooler": schema.BoolAttribute{
-				Description: "Whether a PgBouncer connection pooler is provisioned (injects DATABASE_POOL_URL). Mutable in place.",
+				Description: "Whether a PgBouncer connection pooler is provisioned, reached at the owner URL's host with `-rw` replaced by `-pooler`. Mutable in place.",
 				Optional:    true,
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
@@ -191,7 +191,7 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			},
 			"host": schema.StringAttribute{
 				Description: "Cluster-internal hostname of the database's primary. Not reachable from " +
-					"outside the cluster — an app in the same project gets DATABASE_URL injected, and " +
+					"outside the cluster — an app in the same project mounts the owner `secret`, and " +
 					"`fpcloud db connect` tunnels in from a workstation.",
 				Computed: true,
 			},
@@ -432,7 +432,7 @@ func rotationRequested(prev, next types.String) bool {
 
 // ImportState imports a database by its id. Read rebuilds everything else from
 // the API; the password is returned only at creation, so an imported database
-// carries an empty one — use the injected DATABASE_URL or `fpcloud db connect`
+// carries an empty one — mount the owner `secret` or use `fpcloud db connect`
 // for the live credential, as the attribute's description already says.
 func (r *DatabaseResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)

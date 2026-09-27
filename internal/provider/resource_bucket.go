@@ -35,6 +35,7 @@ type BucketResourceModel struct {
 	Status          types.String `tfsdk:"status"`
 	AccessKeyID     types.String `tfsdk:"access_key_id"`
 	SecretAccessKey types.String `tfsdk:"secret_access_key"`
+	Secret          types.String `tfsdk:"secret"`
 
 	PublicRead           types.Bool   `tfsdk:"public_read"`
 	WebsiteEnabled       types.Bool   `tfsdk:"website_enabled"`
@@ -110,6 +111,13 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
+			},
+			"secret": schema.StringAttribute{
+				Description: "Name of the project secret holding this bucket's read+write key as an AWS " +
+					"config file (`<name>-key`: key, region and endpoint), created and deleted with the " +
+					"bucket. Mount it on an app (fpcloud_app's `secret_mounts`) and point `AWS_CONFIG_FILE` " +
+					"at the path to hand the app the bucket.",
+				Computed: true,
 			},
 			"secret_access_key": schema.StringAttribute{
 				Description: "S3 secret access key for the bucket's initial access key. Returned only " +
@@ -402,6 +410,7 @@ func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 	m.URLSlug = types.StringValue(bucket.URLSlug)
 	m.URL = types.StringValue(bucket.URL)
 	m.GlobalAlias = types.StringValue(bucket.GlobalAlias)
+	m.Secret = types.StringValue(bucket.Secret)
 }
 
 // optionalInt64 is a nullable/unknown TF number as a pointer, so an attribute

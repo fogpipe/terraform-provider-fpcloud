@@ -123,12 +123,14 @@ App.template
 App.template_update
 
 # --- project secrets (#1069) ----------------------------------------------
-# Which apps mount a database's owner secret is live cluster-derived state a
-# read reports, not configuration: fpcloud_app's secret_mounts is where the
-# binding is declared, and expressing the reverse index as an attribute would
-# put the same fact in two places of one plan.
+# Which apps mount a database's or a bucket's secret is live state a read
+# reports, not configuration: fpcloud_app's secret_mounts is where the binding
+# is declared, and expressing the reverse index as an attribute would put the
+# same fact in two places of one plan.
 Database.mounted_by
-# Set only on a database's owner secret, which the platform creates and
-# deletes with the database — never on one Terraform manages, so a config
+Bucket.mounted_by
+# Set only on a database's or a bucket's secret, which the platform creates
+# and deletes with its resource — never on one Terraform manages, so a config
 # could never legitimately write it.
 ProjectSecret.owner_database_id
+ProjectSecret.owner_bucket_id

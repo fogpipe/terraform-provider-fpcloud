@@ -299,7 +299,7 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			},
 			"service_account": schema.StringAttribute{
 				Optional:    true,
-				Description: "Service account email to attach as workload identity. The app will receive credentials to call the Fogpipe API as this service account.",
+				Description: "Service account email to attach as workload identity. The app receives an API key for this service account as a mounted file, named by FPCLOUD_API_KEY_FILE, so fpcloud and this provider running inside it authenticate as the service account with nothing configured.",
 			},
 			"env": schema.MapAttribute{
 				Optional:    true,

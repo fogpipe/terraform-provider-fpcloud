@@ -42,7 +42,7 @@ func (p *FogpipeProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 		Description: "The Fogpipe provider manages resources on the Fogpipe PaaS platform. Guides for every capability are at https://cloud.fogpipe.com/llms.txt.",
 		Attributes: map[string]schema.Attribute{
 			"api_key": schema.StringAttribute{
-				Description: "API key for Fogpipe. Can also be set via the FPCLOUD_API_KEY environment variable, or inherited from the fpcloud CLI login — an API key in the fpcloud config.yaml (the nearest .fpcloud/ at or above the working directory, else ~/.fpcloud), or the OIDC token from `fpcloud login` via `fpcloud get-token` (requires the fpcloud CLI on PATH).",
+				Description: "API key for Fogpipe. Can also be set via the FPCLOUD_API_KEY environment variable (or a file named by FPCLOUD_API_KEY_FILE, which is how an app with a service account is given its key), or inherited from the fpcloud CLI login — an API key in the fpcloud config.yaml (the nearest .fpcloud/ at or above the working directory, else ~/.fpcloud), or the OIDC token from `fpcloud login` via `fpcloud get-token` (requires the fpcloud CLI on PATH).",
 				Optional:    true,
 				Sensitive:   true,
 			},
@@ -71,7 +71,12 @@ func (p *FogpipeProvider) Configure(ctx context.Context, req provider.ConfigureR
 	// login (`fpcloud login`) works with nothing in HCL or env — bare
 	// `tofu apply`, the AWS/GCP way.
 	apiKey := cli.APIKey
-	if envKey := os.Getenv("FPCLOUD_API_KEY"); envKey != "" {
+	envKey, err := client.EnvAPIKey()
+	if err != nil {
+		resp.Diagnostics.AddError("Unreadable credential", err.Error())
+		return
+	}
+	if envKey != "" {
 		apiKey = envKey
 	}
 	if !config.APIKey.IsNull() && !config.APIKey.IsUnknown() {
@@ -83,7 +88,7 @@ func (p *FogpipeProvider) Configure(ctx context.Context, req provider.ConfigureR
 	if apiKey == "" {
 		resp.Diagnostics.AddError(
 			"Missing credentials",
-			"The provider found no credentials. Log in with the fpcloud CLI (`fpcloud login`), set FPCLOUD_API_KEY, or set api_key in the provider configuration.",
+			"The provider found no credentials. Log in with the fpcloud CLI (`fpcloud login`), set FPCLOUD_API_KEY (or FPCLOUD_API_KEY_FILE), or set api_key in the provider configuration.",
 		)
 		return
 	}

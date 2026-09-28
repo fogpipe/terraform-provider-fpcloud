@@ -74,11 +74,11 @@ func (r *OrgMemberResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Required:    true,
 			},
 			"user_id": schema.StringAttribute{
-				Description: "The user ID of the member; empty while the invitation is pending.",
+				Description: "The user ID of the member; empty until they first sign in.",
 				Computed:    true,
 			},
 			"status": schema.StringAttribute{
-				Description: "Status of the membership (active, pending).",
+				Description: "How far the member has got to signing in: active (signed in), invited (an account exists and its setup mail was sent), not_provisioned (no account yet), or unchecked (not read by the provisioning pass yet).",
 				Computed:    true,
 			},
 		},
@@ -143,7 +143,7 @@ func (r *OrgMemberResource) Read(ctx context.Context, req resource.ReadRequest, 
 
 	var found *client.OrgMember
 	for _, m := range members {
-		if m.ID == state.ID.ValueString() {
+		if m.Role != "" && m.ID == state.ID.ValueString() {
 			found = m
 			break
 		}
@@ -235,7 +235,7 @@ func (r *OrgMemberResource) ImportState(ctx context.Context, req resource.Import
 	}
 	var found *client.OrgMember
 	for _, m := range members {
-		if m.ID == parts[1] {
+		if m.Role != "" && m.ID == parts[1] {
 			found = m
 			break
 		}

@@ -24,8 +24,8 @@ Manages an organization member on the Fogpipe platform.
 ### Read-Only
 
 - `id` (String) Member record ID.
-- `status` (String) Status of the membership (active, pending).
-- `user_id` (String) The user ID of the member; empty while the invitation is pending.
+- `status` (String) How far the member has got to signing in: active (signed in), invited (an account exists and its setup mail was sent), not_provisioned (no account yet), or unchecked (not read by the provisioning pass yet).
+- `user_id` (String) The user ID of the member; empty until they first sign in.
 
 ## Import
 

@@ -152,7 +152,7 @@ func (r *IAMBindingResource) Read(ctx context.Context, req resource.ReadRequest,
 
 	var found *client.IAMBinding
 	for _, b := range bindings {
-		if b.ID == state.ID.ValueString() {
+		if b.ID == state.ID.ValueString() && b.ResourceType == "project" {
 			found = b
 			break
 		}

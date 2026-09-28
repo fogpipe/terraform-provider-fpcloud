@@ -27,6 +27,10 @@ Domain.bucket_id
 # A job's app is `app`, resolved by name like every other reference.
 Job.app_id
 Job.app_name
+# A member's project roles are each an `fpcloud_iam_binding`; reading them
+# back onto `fpcloud_org_member` would make one grant two resources' state
+# (fogpipe/cloud-workspace#1111).
+OrgMember.projects
 
 # --- deploy-time state, not configuration -------------------------------
 # What is running right now is the outcome of a deploy, which Terraform does

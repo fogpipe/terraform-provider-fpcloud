@@ -11,13 +11,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// A pending invitation is a binding by email with no user id (ADR-061). The
-// provider used to address the member by user id, so a pending one could
+// An unredeemed invitation is a binding by email with no user id (ADR-061). The
+// provider used to address the member by user id, so an unredeemed one could
 // neither change role nor be destroyed — `terraform destroy` reported success
 // and left the invitation on the server (fogpipe/cloud-workspace#96). Invites an
 // address nobody will redeem, changes its role, and checks the teardown really
 // takes it back.
-func TestAccOrgMemberResource_pendingInvitationIsUpdatedAndDestroyed(t *testing.T) {
+func TestAccOrgMemberResource_invitationIsUpdatedAndDestroyed(t *testing.T) {
 	if os.Getenv("FPCLOUD_API_KEY") == "" {
 		t.Skip("FPCLOUD_API_KEY not set, skipping acceptance test")
 	}
@@ -41,7 +41,7 @@ resource "fpcloud_org_member" "test" {
 			{
 				Config: config("viewer"),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("fpcloud_org_member.test", "status", "pending"),
+					resource.TestCheckResourceAttrWith("fpcloud_org_member.test", "status", notSignedIn),
 					resource.TestCheckResourceAttr("fpcloud_org_member.test", "user_id", ""),
 					resource.TestCheckResourceAttr("fpcloud_org_member.test", "role", "viewer"),
 				),
@@ -55,6 +55,14 @@ resource "fpcloud_org_member" "test" {
 			},
 		},
 	})
+}
+
+func notSignedIn(status string) error {
+	switch status {
+	case "unchecked", "invited", "not_provisioned":
+		return nil
+	}
+	return fmt.Errorf("status %q, want one that says nobody has signed in", status)
 }
 
 // testAccCheckOrgMemberRole reads the role back from the API rather than from

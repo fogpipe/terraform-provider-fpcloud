@@ -156,6 +156,13 @@ ListWebsiteVersions
 GetBillingEstimate
 ListInvoices
 GetInvoice
+# what an org or a project cost (ADR-273, fogpipe/cloud-workspace#1144) replaces
+# the estimate above, which goes stale here once this repo's pin passes it. Cost
+# moves every hour, so a data source reading it would make every plan differ
+# from the last with nothing changed; it is a read for people, not a value
+# anything is declared against.
+OrgCost
+ProjectCost
 # the price list is a published fact about the platform, identical for every
 # caller — a data source would return the same rows to everyone and give
 # Terraform a value nothing can be declared against

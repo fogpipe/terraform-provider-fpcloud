@@ -60,10 +60,10 @@ type DatabaseResourceModel struct {
 	ReadHost    types.String `tfsdk:"read_host"`
 	Secret      types.String `tfsdk:"secret"`
 	Port        types.Int64  `tfsdk:"port"`
-	Username    types.String `tfsdk:"username"`
-	Password    types.String `tfsdk:"password"`
 	// PasswordRotation is a value of the practitioner's choosing; changing it
-	// is the request to rotate (fogpipe/cloud-workspace#297).
+	// is the request to rotate (fogpipe/cloud-workspace#297). The resource
+	// carries no password (ADR-281): an app has it through the mounted owner
+	// secret, and a person reads a live one with `fpcloud db connect`.
 	PasswordRotation types.String         `tfsdk:"password_rotation"`
 	CreatedAt        types.String         `tfsdk:"created_at"`
 	Backup           *DatabaseBackupModel `tfsdk:"backup"`
@@ -209,30 +209,12 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					"an app (fpcloud_app's `secret_mounts`) to hand the app the database.",
 				Computed: true,
 			},
-			"username": schema.StringAttribute{
-				Description: "The database username.",
-				Computed:    true,
-			},
-			"password": schema.StringAttribute{
-				Description: "Password for `username`, returned at creation and after a rotation and kept in " +
-					"state from then on: the platform provisions it and stores no copy, so a later read has none. " +
-					"An imported database has no password in state; read it live with `fpcloud db connect`. " +
-					"To make every copy of it stale, change `password_rotation`.",
-				Computed:  true,
-				Sensitive: true,
-				// Kept across updates: a later read has nothing to refresh it
-				// from, so an unknown here became an empty password in state
-				// after any other change to the resource.
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
 			"password_rotation": schema.StringAttribute{
 				Description: "Change this value to rotate the database password — any string of your choosing, " +
 					"a date or a counter. The platform issues a new password, waits for the database to accept it, " +
-					"rolls every app in the project onto it, and `password` takes the new value; the old one stops " +
-					"authenticating new connections. Anything outside the platform that held it — a local psql, " +
-					"another workspace's state — needs the new one.",
+					"and rolls every app mounting the owner `secret` onto it; the old one stops authenticating new " +
+					"connections. The resource carries no password: an app has it through the mounted secret, and " +
+					"`fpcloud db connect` reads a live credential.",
 				Optional: true,
 			},
 			"created_at": schema.StringAttribute{
@@ -391,15 +373,16 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 
 	// A changed rotation value is the request to rotate (#297): the platform
 	// issues the new password, waits for the role to carry it and rolls every
-	// app in the project before answering, so the value written to state is
-	// the one Postgres accepts by the time the apply finishes.
+	// app mounting the owner secret before answering. Nothing of it reaches
+	// state: the resource carries no password (ADR-281), and the answer is the
+	// database as a read returns it.
 	if rotationRequested(state.PasswordRotation, plan.PasswordRotation) {
-		conn, err := r.client.RotateDatabasePassword(ctx, state.ID.ValueString())
+		rotated, err := r.client.RotateDatabasePassword(ctx, state.ID.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError("Error rotating database password", err.Error())
 			return
 		}
-		plan.Password = types.StringValue(conn.Password)
+		mapDatabaseToState(rotated, &plan)
 	}
 
 	// Reconcile backup config toward the desired state (idempotent).
@@ -430,10 +413,8 @@ func rotationRequested(prev, next types.String) bool {
 	return prev.IsNull() || prev.ValueString() != next.ValueString()
 }
 
-// ImportState imports a database by its id. Read rebuilds everything else from
-// the API; the password is returned only at creation, so an imported database
-// carries an empty one — mount the owner `secret` or use `fpcloud db connect`
-// for the live credential, as the attribute's description already says.
+// ImportState imports a database by its id. Read rebuilds everything from the
+// API: the resource carries no credential (ADR-281), so an import is whole.
 func (r *DatabaseResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
@@ -545,15 +526,6 @@ func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 	state.ReadHost = types.StringValue(db.ReadHost)
 	state.Secret = types.StringValue(db.Secret)
 	state.Port = types.Int64Value(int64(db.Port))
-	state.Username = types.StringValue(db.Username)
-	// Password is returned only on create — the platform keeps no copy
-	// (fogpipe/cloud-workspace#265) — so a later read has nothing to refresh it
-	// from and the value in state is kept rather than being blanked.
-	if db.Password != "" {
-		state.Password = types.StringValue(db.Password)
-	} else if state.Password.IsNull() || state.Password.IsUnknown() {
-		state.Password = types.StringValue("")
-	}
 }
 
 // awaitDatabaseRunning blocks until the database leaves provisioning. A

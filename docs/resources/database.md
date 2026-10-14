@@ -44,7 +44,7 @@ resource "fpcloud_database" "main" {
 - `engine` (String) The database engine (e.g. postgres).
 - `extensions` (Set of String) Curated Postgres extensions installed in the database. The platform installs them, because an untrusted extension needs superuser to install and a managed database hands out none. An entry is `name` or `name:schema` — the schema its objects live in, created if absent, for a dump that references them by qualified name. Needs Postgres 18 or later. Mutable in place; adding or removing one restarts the database. Removing one UNINSTALLS it — the platform runs the `drop extension` you cannot, which takes the schema, types and tables the extension created with it, and the apply is refused when objects of yours still depend on it.
 - `memory` (String) Memory request/limit (e.g. "512Mi", "2Gi"). Mutable in place. Defaults to "512Mi".
-- `password_rotation` (String) Change this value to rotate the database password — any string of your choosing, a date or a counter. The platform issues a new password, waits for the database to accept it, rolls every app in the project onto it, and `password` takes the new value; the old one stops authenticating new connections. Anything outside the platform that held it — a local psql, another workspace's state — needs the new one.
+- `password_rotation` (String) Change this value to rotate the database password — any string of your choosing, a date or a counter. The platform issues a new password, waits for the database to accept it, and rolls every app mounting the owner `secret` onto it; the old one stops authenticating new connections. The resource carries no password: an app has it through the mounted secret, and `fpcloud db connect` reads a live credential.
 - `pooler` (Boolean) Whether a PgBouncer connection pooler is provisioned, reached at the owner URL's host with `-rw` replaced by `-pooler`. Mutable in place.
 - `storage` (String) Persistent volume size (e.g. "10Gi"). Mutable in place but grow-only — the API rejects a shrink. Defaults to "10Gi".
 - `version` (String) The database engine major version (e.g. "18"). Omit to take the platform's current default. Mutable: raising it triggers an in-place major-version upgrade (forward-only; the API rejects downgrades).
@@ -55,13 +55,11 @@ resource "fpcloud_database" "main" {
 - `host` (String) Cluster-internal hostname of the database's primary. Not reachable from outside the cluster — an app in the same project mounts the owner `secret`, and `fpcloud db connect` tunnels in from a workstation.
 - `id` (String) The unique identifier of the database.
 - `instances` (Number) Number of Postgres instances the platform runs this database as. Read-only: replication across nodes is what the platform promises, not a size the tenant buys (ADR-136). A client-side default here is what would delete a replica on the next apply.
-- `password` (String, Sensitive) Password for `username`, returned at creation and after a rotation and kept in state from then on: the platform provisions it and stores no copy, so a later read has none. An imported database has no password in state; read it live with `fpcloud db connect`. To make every copy of it stale, change `password_rotation`.
 - `plan` (String) Legacy size tier, derived by the server from cpu/memory (e.g. "starter", "custom"). Read-only — size the database with cpu/memory/storage instead.
 - `port` (Number) The database port.
 - `read_host` (String) Cluster-internal hostname of the database's REPLICA (CNPG's `-ro` Service), on the same `port` and with the same credential — a replica is not a second identity. Every managed database has one, because every one is two instances. **Reads here can be stale**: replication is asynchronous, so a read-your-own-write can miss; send anything that must see everything committed so far to `host`. Empty when the platform cannot derive a replica endpoint for the database, which means there is none — never fall back to `host` under this name.
 - `secret` (String) Name of the project secret holding this database's owner connection URL (`<name>-owner`), created with the database and rewritten by a rotation. Mount it on an app (fpcloud_app's `secret_mounts`) to hand the app the database.
 - `status` (String) The current status of the database.
-- `username` (String) The database username.
 
 <a id="nestedatt--backup"></a>
 ### Nested Schema for `backup`
@@ -79,8 +77,7 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import by database id. The password is returned only at creation, so an
-# imported database carries an empty one — mount the owner `secret` on an app,
-# or use `fpcloud db connect`, for the live credential.
+# Import by database id. The resource carries no credential: mount the owner
+# `secret` on an app, or use `fpcloud db connect` for a live one.
 terraform import fpcloud_database.events 5881262f-2d2c-4e52-9a7b-1f9c0a6f3b1d
 ```

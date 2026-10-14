@@ -98,13 +98,13 @@ resource "fpcloud_database" "test" {
 			},
 			{
 				// An existing database can be brought under Terraform by id
-				// (fogpipe/cloud-workspace#32). The password is returned only at
-				// creation, so import cannot carry it; status moves as the cluster
+				// (fogpipe/cloud-workspace#32). The resource carries no credential
+				// (ADR-281), so the import is whole; status moves as the cluster
 				// provisions.
 				ResourceName:            "fpcloud_database.test",
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"password", "status"},
+				ImportStateVerifyIgnore: []string{"status"},
 			},
 		},
 	})
@@ -166,18 +166,15 @@ func TestRotationRequested(t *testing.T) {
 	}
 }
 
-// The password survives an update that touches something else: a Computed
-// attribute with no plan modifier is unknown in every plan that changes the
-// resource, and the state mapper turned that into an empty password (#297).
-func TestPasswordIsKeptAcrossUpdates(t *testing.T) {
+// The resource carries no credential (ADR-281): rotation is still asked for
+// through `password_rotation`, and nothing it issues reaches state.
+func TestTheResourceCarriesNoCredential(t *testing.T) {
 	var resp fwresource.SchemaResponse
 	provider.NewDatabaseResource().Schema(context.Background(), fwresource.SchemaRequest{}, &resp)
-	p, ok := resp.Schema.Attributes["password"].(schema.StringAttribute)
-	if !ok {
-		t.Fatalf("password attribute missing or not a StringAttribute")
-	}
-	if len(p.PlanModifiers) == 0 {
-		t.Errorf("password has no plan modifier keeping the prior state across updates")
+	for _, name := range []string{"password", "username"} {
+		if _, found := resp.Schema.Attributes[name]; found {
+			t.Errorf("%s is an attribute again; a credential is read on purpose, never carried in state", name)
+		}
 	}
 	r, ok := resp.Schema.Attributes["password_rotation"].(schema.StringAttribute)
 	if !ok {

@@ -160,6 +160,12 @@ GetInvoice
 # anything is declared against.
 OrgCost
 ProjectCost
+
+# what an org or a project holds against its bound, per axis (ADR-279,
+# fogpipe/cloud-workspace#1222). A read of live capacity, like cost: the
+# provider gets no data source.
+OrgCapacity
+ProjectCapacity
 # the price list is a published fact about the platform, identical for every
 # caller — a data source would return the same rows to everyone and give
 # Terraform a value nothing can be declared against

@@ -34,7 +34,6 @@ type DatabaseDataSourceModel struct {
 	Host        types.String `tfsdk:"host"`
 	ReadHost    types.String `tfsdk:"read_host"`
 	Port        types.Int64  `tfsdk:"port"`
-	Username    types.String `tfsdk:"username"`
 	CreatedAt   types.String `tfsdk:"created_at"`
 }
 
@@ -114,10 +113,6 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Description: "The database port.",
 				Computed:    true,
 			},
-			"username": schema.StringAttribute{
-				Description: "The database username.",
-				Computed:    true,
-			},
 			"created_at": schema.StringAttribute{
 				Description: "The creation timestamp of the database.",
 				Computed:    true,
@@ -181,7 +176,6 @@ func (d *DatabaseDataSource) Read(ctx context.Context, req datasource.ReadReques
 	// attribute claimed a replica served them (fogpipe/cloud-workspace#862).
 	data.ReadHost = types.StringValue(db.ReadHost)
 	data.Port = types.Int64Value(int64(db.Port))
-	data.Username = types.StringValue(db.Username)
 	data.CreatedAt = types.StringValue(db.CreatedAt.Format("2006-01-02T15:04:05Z"))
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

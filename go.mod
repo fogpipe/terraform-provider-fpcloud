@@ -5,7 +5,7 @@ go 1.26.1
 toolchain go1.26.9
 
 require (
-	github.com/fogpipe/cloud-cli v0.215.0
+	github.com/fogpipe/cloud-cli v0.215.1-0.20261015143438-3d2e9a0a3f7c
 	github.com/hashicorp/terraform-plugin-framework v1.19.0
 	github.com/hashicorp/terraform-plugin-go v0.31.0
 	github.com/hashicorp/terraform-plugin-testing v1.15.0

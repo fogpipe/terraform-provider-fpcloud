@@ -213,37 +213,13 @@ func (r *ServiceAccountResource) Read(ctx context.Context, req resource.ReadRequ
 		return
 	}
 
-	// The API lists machine identities per owner and there is no get-by-id,
-	// so the owner in state decides which listing ours is in. An org account
-	// is not in any project's listing and vice versa.
-	var (
-		accounts []*client.ServiceAccount
-		err      error
-	)
-	if !state.OrganizationID.IsNull() {
-		accounts, err = r.client.ListOrgServiceAccounts(ctx, state.OrganizationID.ValueString())
-	} else {
-		accounts, err = r.client.ListServiceAccounts(ctx, state.ProjectID.ValueString())
-	}
+	found, err := r.client.GetServiceAccount(ctx, state.ID.ValueString())
 	if err != nil {
 		if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Error reading service accounts", err.Error())
-		return
-	}
-
-	var found *client.ServiceAccount
-	for _, sa := range accounts {
-		if sa.ID == state.ID.ValueString() {
-			found = sa
-			break
-		}
-	}
-
-	if found == nil {
-		resp.State.RemoveResource(ctx)
+		resp.Diagnostics.AddError("Error reading service account", err.Error())
 		return
 	}
 

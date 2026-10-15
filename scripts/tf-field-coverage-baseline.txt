@@ -31,6 +31,14 @@ Job.app_name
 # back onto `fpcloud_org_member` would make one grant two resources' state
 # (fogpipe/cloud-workspace#1111).
 OrgMember.projects
+# Who is handed a database, a bucket or a secret is each an
+# `fpcloud_iam_binding` with `resource`; reading the bindings back onto the
+# resource would make one grant two resources' state (ADR-284). The same for
+# everything an account holds.
+Bucket.access
+Database.access
+ProjectSecret.access
+ServiceAccount.bindings
 
 # --- deploy-time state, not configuration -------------------------------
 # What is running right now is the outcome of a deploy, which Terraform does

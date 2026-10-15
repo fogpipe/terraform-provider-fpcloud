@@ -3,12 +3,12 @@
 page_title: "fpcloud_iam_binding Resource - fpcloud"
 subcategory: ""
 description: |-
-  Manages an IAM role binding on a Fogpipe project.
+  Manages an IAM binding: a role on a Fogpipe project, or with resource a database, bucket or secret handed to a member (user on a database or a bucket, reader on a secret).
 ---
 
 # fpcloud_iam_binding (Resource)
 
-Manages an IAM role binding on a Fogpipe project.
+Manages an IAM binding: a role on a Fogpipe project, or with `resource` a database, bucket or secret handed to a member (`user` on a database or a bucket, `reader` on a secret).
 
 
 
@@ -21,6 +21,10 @@ Manages an IAM role binding on a Fogpipe project.
 - `member_type` (String) The type of member (user or serviceAccount).
 - `project_id` (String) The project to bind the role on.
 - `role` (String) The role to grant (owner, editor, viewer).
+
+### Optional
+
+- `resource` (String) A resource in the project handed to the member instead of a project role, as `<kind>/<id>`: `database/<id>`, `bucket/<id>` or `secret/<id>`. The role is then `user` (database, bucket) or `reader` (secret). Handing a resource over needs what reading its credential needs: write on the database, administration of the bucket, write on the project for a secret.
 
 ### Read-Only
 

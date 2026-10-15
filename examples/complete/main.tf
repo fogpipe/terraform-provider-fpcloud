@@ -59,6 +59,17 @@ resource "fpcloud_iam_binding" "web_identity" {
   member_id   = fpcloud_app.web.service_account
 }
 
+# A resource handed to the app's identity: a database or a bucket as its user,
+# a secret as its reader. Mounting the database's owner secret into the app
+# needs this grant, and writes it when the applier may make it.
+resource "fpcloud_iam_binding" "web_uses_db" {
+  project_id  = fpcloud_project.myapp.id
+  resource    = "database/${fpcloud_database.main.id}"
+  role        = "user"
+  member_type = "serviceAccount"
+  member_id   = fpcloud_app.web.service_account
+}
+
 # Custom domain
 resource "fpcloud_domain" "main" {
   app_id = fpcloud_app.web.id

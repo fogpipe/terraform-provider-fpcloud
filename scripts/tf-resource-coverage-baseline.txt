@@ -6,6 +6,11 @@
 # belongs to, with its reason.
 
 # auth / identity — not infrastructure state
+# A listing of accounts is a person's read (`fpcloud sa list`, the console);
+# `fpcloud_service_account` reads itself by id through GetServiceAccount
+# (ADR-284), so neither listing is a resource's.
+ListOrgServiceAccounts
+ListServiceAccounts
 GetMe
 # --- one-shot operations and cross-project reads (fogpipe/cloud-workspace#306
 #     bumped the client and surfaced these; each is a reviewed exclusion) -----

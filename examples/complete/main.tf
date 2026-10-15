@@ -31,21 +31,6 @@ resource "fpcloud_database" "main" {
   memory     = "2Gi"
 }
 
-# Service account for workload identity
-resource "fpcloud_service_account" "app_identity" {
-  project_id   = fpcloud_project.myapp.id
-  name         = "web-identity"
-  display_name = "Web App Workload Identity"
-}
-
-# Grant the service account viewer role on the project
-resource "fpcloud_iam_binding" "app_read_db" {
-  project_id  = fpcloud_project.myapp.id
-  role        = "viewer"
-  member_type = "serviceAccount"
-  member_id   = fpcloud_service_account.app_identity.id
-}
-
 # Web application
 resource "fpcloud_app" "web" {
   project_id      = fpcloud_project.myapp.id
@@ -53,7 +38,6 @@ resource "fpcloud_app" "web" {
   image           = "ghcr.io/myorg/webapp:latest"
   port            = 3000
   ingress         = "all"
-  service_account = fpcloud_service_account.app_identity.email
   min_scale       = 2
   max_scale       = 10
 
@@ -65,6 +49,14 @@ resource "fpcloud_app" "web" {
     STRIPE_SECRET_KEY = var.stripe_key
     SESSION_SECRET    = var.session_secret
   }
+}
+
+# The app runs as its own service account, which holds nothing until granted.
+resource "fpcloud_iam_binding" "web_identity" {
+  project_id  = fpcloud_project.myapp.id
+  role        = "viewer"
+  member_type = "serviceAccount"
+  member_id   = fpcloud_app.web.service_account
 }
 
 # Custom domain

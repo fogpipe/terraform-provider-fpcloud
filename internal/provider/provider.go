@@ -71,12 +71,7 @@ func (p *FogpipeProvider) Configure(ctx context.Context, req provider.ConfigureR
 	// login (`fpcloud login`) works with nothing in HCL or env — bare
 	// `tofu apply`, the AWS/GCP way.
 	apiKey := cli.APIKey
-	envKey, err := client.EnvAPIKey()
-	if err != nil {
-		resp.Diagnostics.AddError("Unreadable credential", err.Error())
-		return
-	}
-	if envKey != "" {
+	if envKey := client.EnvAPIKey(); envKey != "" {
 		apiKey = envKey
 	}
 	if !config.APIKey.IsNull() && !config.APIKey.IsUnknown() {

@@ -118,6 +118,13 @@ Runner.created_at
 Runner.updated_at
 ServiceAccount.updated_at
 
+# --- relative to whoever is reading -----------------------------------------
+# The caller's own role on the account's scope, read with the row so a console
+# offers only the grants the caller may make (ADR-283). It is a fact about the
+# credential the provider runs with, not about the account, and state that
+# changed with the operator's identity would be drift nobody declared.
+ServiceAccount.caller_role
+
 # --- a catalog instance is made, never declared (ADR-235) ------------------
 # `template` names the catalog entry an app was deployed from by the console or
 # the CLI, and `template_update` is the catalog's newer version on offer; an app

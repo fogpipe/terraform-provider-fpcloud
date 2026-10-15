@@ -298,8 +298,11 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"service_account": schema.StringAttribute{
-				Optional:    true,
-				Description: "Service account email to attach as workload identity. The app receives an API key for this service account as a mounted file, named by FPCLOUD_API_KEY_FILE, so fpcloud and this provider running inside it authenticate as the service account with nothing configured.",
+				Computed:    true,
+				Description: "The app's own identity: the email of the service account created with the app and deleted with it. Grant it roles and resource access with fpcloud_iam_binding; it holds nothing until granted.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"env": schema.MapAttribute{
 				Optional:    true,
@@ -558,9 +561,6 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		Probes:              probes,
 		EnvVars:             envMap,
 		SecretMounts:        mountsMap,
-	}
-	if !plan.ServiceAccount.IsNull() && !plan.ServiceAccount.IsUnknown() {
-		createReq.ServiceAccount = plan.ServiceAccount.ValueString()
 	}
 	// Replicas is an always-on setting; leave it unset for serverless apps.
 	if plan.Mode.ValueString() != "serverless" {
@@ -1378,7 +1378,7 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	model.CreatedAt = types.StringValue(app.CreatedAt.String())
 	model.UpdatedAt = types.StringValue(app.UpdatedAt.String())
 	// Note: env and secret maps are preserved from the plan/state — not returned by API.
-	// Note: service_account is preserved from the plan/state — the API returns service_account_id.
+	model.ServiceAccount = types.StringValue(app.ServiceAccount)
 }
 
 // stringListFromAPI reads a string list the API echoed. The API's "none" is an

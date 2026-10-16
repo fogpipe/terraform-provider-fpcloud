@@ -320,7 +320,7 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			},
 			"secret_env": schema.MapNestedAttribute{
 				Optional: true,
-				Description: "Environment variables that reference a project secret, keyed by variable " +
+				Description: "Environment variables that reference a secret (a project secret by name, an organization secret as `org/<name>`), keyed by variable " +
 					"(ADR-284 §7). The variable holds the secret's value; with `path`, the file at that " +
 					"path holds the value and the variable holds the path. Referencing a database's owner " +
 					"`secret` is how the app is handed that database, a bucket's `secret` how it is handed " +

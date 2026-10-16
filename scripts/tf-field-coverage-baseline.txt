@@ -37,7 +37,7 @@ OrgMember.projects
 # everything an account holds.
 Bucket.access
 Database.access
-ProjectSecret.access
+Secret.access
 ServiceAccount.bindings
 
 # --- deploy-time state, not configuration -------------------------------
@@ -102,9 +102,6 @@ OrgMember.invited_by
 OrgMember.invited_email
 OrgMember.user_email
 OrgMember.user_name
-# The secret's names are listed by the API for display; the values are
-# write-only, so a key list would be half a resource.
-OrgSecret.keys
 # An SA key's lifetime is fixed at creation and the API returns no way to
 # change it; exposing the expiry alone would suggest otherwise.
 ServiceAccountKey.expires_at
@@ -157,5 +154,5 @@ Bucket.used_by
 # Set only on a database's or a bucket's secret, which the platform creates
 # and deletes with its resource — never on one Terraform manages, so a config
 # could never legitimately write it.
-ProjectSecret.owner_database_id
-ProjectSecret.owner_bucket_id
+Secret.owner_database_id
+Secret.owner_bucket_id

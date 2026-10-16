@@ -140,8 +140,7 @@ func (p *FogpipeProvider) Resources(_ context.Context) []func() resource.Resourc
 		NewBillingBindingResource,
 		NewBillingBudgetResource,
 		NewOrgMemberResource,
-		NewOrgSecretResource,
-		NewProjectSecretResource,
+		NewSecretResource,
 		NewRegistryRetentionPolicyResource,
 		NewRegistryVisibilityResource,
 		NewJobResource,
@@ -155,7 +154,6 @@ func (p *FogpipeProvider) DataSources(_ context.Context) []func() datasource.Dat
 		NewProjectDataSource,
 		NewAppDataSource,
 		NewDatabaseDataSource,
-		NewSecretDataSource,
 		NewTemplateDataSource,
 	}
 }

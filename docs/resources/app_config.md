@@ -3,12 +3,12 @@
 page_title: "fpcloud_app_config Resource - fpcloud"
 subcategory: ""
 description: |-
-  Manages one environment variable of a Fogpipe application: a literal value, or a reference to a project secret delivered as the variable or, with path, as a file the variable names.
+  Manages one environment variable of a Fogpipe application: a literal value, or a reference to a secret (org/<name> for an organization secret) delivered as the variable or, with path, as a file the variable names.
 ---
 
 # fpcloud_app_config (Resource)
 
-Manages one environment variable of a Fogpipe application: a literal `value`, or a reference to a project `secret` delivered as the variable or, with `path`, as a file the variable names.
+Manages one environment variable of a Fogpipe application: a literal `value`, or a reference to a `secret` (`org/<name>` for an organization secret) delivered as the variable or, with `path`, as a file the variable names.
 
 ## Example Usage
 
@@ -48,7 +48,7 @@ resource "fpcloud_app_config" "stripe_key_file" {
 
 - `path` (String) With `secret`: deliver the value as a file at this absolute path, and make the variable hold the path.
 - `secret` (String) The project secret the variable references: its value is the variable's, or the file's at `path`. Referencing a secret hands the app's identity the resource behind it.
-- `value` (String) The literal value. Env is plain: it reads back in full. A credential belongs in fpcloud_project_secret, referenced with `secret`. Exactly one of `value` and `secret` is set.
+- `value` (String) The literal value. Env is plain: it reads back in full. A credential belongs in fpcloud_secret, referenced with `secret` (as `org/<name>` for an organization secret). Exactly one of `value` and `secret` is set.
 
 ### Read-Only
 

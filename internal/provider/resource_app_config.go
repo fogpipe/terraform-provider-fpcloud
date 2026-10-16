@@ -31,7 +31,7 @@ type AppConfigResource struct {
 }
 
 // AppConfigResourceModel describes the resource data model: one env entry, a
-// literal value or a reference to a project secret delivered as the variable
+// literal value or a reference to a secret delivered as the variable
 // or as a file the variable names (ADR-284 §7).
 type AppConfigResourceModel struct {
 	ID     types.String `tfsdk:"id"`
@@ -49,7 +49,7 @@ func (r *AppConfigResource) Metadata(_ context.Context, req resource.MetadataReq
 func (r *AppConfigResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages one environment variable of a Fogpipe application: a literal `value`, or a " +
-			"reference to a project `secret` delivered as the variable or, with `path`, as a file the variable names.",
+			"reference to a `secret` (`org/<name>` for an organization secret) delivered as the variable or, with `path`, as a file the variable names.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "The unique identifier of the config entry.",
@@ -74,7 +74,7 @@ func (r *AppConfigResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			},
 			"value": schema.StringAttribute{
 				Description: "The literal value. Env is plain: it reads back in full. A credential belongs " +
-					"in fpcloud_project_secret, referenced with `secret`. Exactly one of `value` and `secret` is set.",
+					"in fpcloud_secret, referenced with `secret` (as `org/<name>` for an organization secret). Exactly one of `value` and `secret` is set.",
 				Optional: true,
 			},
 			"secret": schema.StringAttribute{

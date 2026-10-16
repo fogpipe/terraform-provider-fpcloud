@@ -9,13 +9,13 @@ resource "fpcloud_app_config" "api_url" {
 resource "fpcloud_app_config" "stripe_key" {
   app_id = fpcloud_app.web.id
   key    = "STRIPE_KEY"
-  secret = fpcloud_project_secret.stripe.name
+  secret = fpcloud_secret.stripe.name
 }
 
 # The same secret delivered as a file; the variable holds the path.
 resource "fpcloud_app_config" "stripe_key_file" {
   app_id = fpcloud_app.web.id
   key    = "STRIPE_KEY_FILE"
-  secret = fpcloud_project_secret.stripe.name
+  secret = fpcloud_secret.stripe.name
   path   = "/secrets/stripe"
 }

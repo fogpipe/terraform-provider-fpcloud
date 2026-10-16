@@ -331,7 +331,7 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					Attributes: map[string]schema.Attribute{
 						"secret": schema.StringAttribute{
 							Required:    true,
-							Description: "The secret's name in the project (fpcloud_project_secret.name, fpcloud_database.secret, fpcloud_bucket.secret).",
+							Description: "The secret's name in the project (fpcloud_secret.name, fpcloud_database.secret, fpcloud_bucket.secret), or `org/<name>` for an organization secret.",
 						},
 						"path": schema.StringAttribute{
 							Optional:    true,

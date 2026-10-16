@@ -24,14 +24,14 @@ resource "fpcloud_app_config" "api_url" {
 resource "fpcloud_app_config" "stripe_key" {
   app_id = fpcloud_app.web.id
   key    = "STRIPE_KEY"
-  secret = fpcloud_project_secret.stripe.name
+  secret = fpcloud_secret.stripe.name
 }
 
 # The same secret delivered as a file; the variable holds the path.
 resource "fpcloud_app_config" "stripe_key_file" {
   app_id = fpcloud_app.web.id
   key    = "STRIPE_KEY_FILE"
-  secret = fpcloud_project_secret.stripe.name
+  secret = fpcloud_secret.stripe.name
   path   = "/secrets/stripe"
 }
 ```
@@ -47,7 +47,7 @@ resource "fpcloud_app_config" "stripe_key_file" {
 ### Optional
 
 - `path` (String) With `secret`: deliver the value as a file at this absolute path, and make the variable hold the path.
-- `secret` (String) The project secret the variable references: its value is the variable's, or the file's at `path`. Referencing a secret hands the app's identity the resource behind it.
+- `secret` (String) The secret the variable references, by name in the project or as `org/<name>`: its value is the variable's, or the file's at `path`. Referencing a secret hands the app's identity the resource behind it.
 - `value` (String) The literal value. Env is plain: it reads back in full. A credential belongs in fpcloud_secret, referenced with `secret` (as `org/<name>` for an organization secret). Exactly one of `value` and `secret` is set.
 
 ### Read-Only

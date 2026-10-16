@@ -78,7 +78,7 @@ func (r *AppConfigResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Optional: true,
 			},
 			"secret": schema.StringAttribute{
-				Description: "The project secret the variable references: its value is the variable's, or the file's at `path`. " +
+				Description: "The secret the variable references, by name in the project or as `org/<name>`: its value is the variable's, or the file's at `path`. " +
 					"Referencing a secret hands the app's identity the resource behind it.",
 				Optional: true,
 			},

@@ -175,7 +175,7 @@ Optional:
 
 Required:
 
-- `secret` (String) The secret's name in the project (fpcloud_project_secret.name, fpcloud_database.secret, fpcloud_bucket.secret).
+- `secret` (String) The secret's name in the project (fpcloud_secret.name, fpcloud_database.secret, fpcloud_bucket.secret), or `org/<name>` for an organization secret.
 
 Optional:
 

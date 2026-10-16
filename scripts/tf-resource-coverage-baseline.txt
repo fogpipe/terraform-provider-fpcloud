@@ -183,3 +183,8 @@ DisconnectGitHub
 # reads it back by id; enumerating a project's secrets is a CLI/console read
 # (`fpcloud secret list`), not state anyone declares.
 ListProjectSecrets
+
+# --- not a method of the surface ------------------------------------------
+# The unexported request builder behind SetConfig and SetSecretEnv, both of
+# which fpcloud_app and fpcloud_app_config call.
+setConfig

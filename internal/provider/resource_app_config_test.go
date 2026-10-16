@@ -44,9 +44,9 @@ resource "fpcloud_app_config" "test" {
 	})
 }
 
-// The project-secret flow end to end (#1069): the secret is created, an app
-// mounts it at a path, the database of who-mounts-what answers, and the value
-// never reads back from anything.
+// The project-secret flow end to end (#1069, ADR-284 §7): the secret is
+// created, an app references it from its env, the record of who-uses-what
+// answers, and the value never reads back from anything.
 func TestAccProjectSecretResource(t *testing.T) {
 	proj := accName("cfsp")
 	app := accName("cfsa")
@@ -81,13 +81,15 @@ resource "fpcloud_app" "mounter" {
   name       = "` + accName("cfsm") + `"
   image      = "nginx:latest"
   ingress    = "internal"
-  secret_mounts = {
-    "/secrets/stripe" = fpcloud_project_secret.stripe.name
+  secret_env = {
+    STRIPE_KEY      = { secret = fpcloud_project_secret.stripe.name }
+    STRIPE_KEY_FILE = { secret = fpcloud_project_secret.stripe.name, path = "/secrets/stripe" }
   }
 ` + accRootImageOptOut + `}
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("fpcloud_app.mounter", "secret_mounts./secrets/stripe", "stripe-key"),
+					resource.TestCheckResourceAttr("fpcloud_app.mounter", "secret_env.STRIPE_KEY.secret", "stripe-key"),
+					resource.TestCheckResourceAttr("fpcloud_app.mounter", "secret_env.STRIPE_KEY_FILE.path", "/secrets/stripe"),
 				),
 			},
 		},

@@ -144,12 +144,16 @@ App.template
 App.template_update
 
 # --- project secrets (#1069) ----------------------------------------------
-# Which apps mount a database's or a bucket's secret is live state a read
-# reports, not configuration: fpcloud_app's secret_mounts is where the binding
+# A reference is expressed on fpcloud_app_config as `secret` and `path`, and on
+# fpcloud_app as the secret_env map; the nested object the API answers with is
+# the same two values under one name.
+AppConfig.secret_ref
+# Which apps reference a database's or a bucket's secret is live state a read
+# reports, not configuration: fpcloud_app's secret_env is where the binding
 # is declared, and expressing the reverse index as an attribute would put the
 # same fact in two places of one plan.
-Database.mounted_by
-Bucket.mounted_by
+Database.used_by
+Bucket.used_by
 # Set only on a database's or a bucket's secret, which the platform creates
 # and deletes with its resource — never on one Terraform manages, so a config
 # could never legitimately write it.

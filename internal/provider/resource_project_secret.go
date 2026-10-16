@@ -23,8 +23,8 @@ func NewProjectSecretResource() resource.Resource {
 }
 
 // ProjectSecretResource manages one named secret in a project. The value is
-// write-only: the API never returns it, and an app reads it as a file mounted
-// through fpcloud_app's secret_mounts.
+// write-only: the API never returns it, and an app reaches it through an env
+// entry referencing it (fpcloud_app's secret_env), as the variable or a file.
 type ProjectSecretResource struct {
 	client *client.Client
 }
@@ -35,7 +35,7 @@ type ProjectSecretResourceModel struct {
 	ProjectID types.String `tfsdk:"project_id"`
 	Name      types.String `tfsdk:"name"`
 	Value     types.String `tfsdk:"value"`
-	MountedBy types.List   `tfsdk:"mounted_by"`
+	UsedBy    types.List   `tfsdk:"used_by"`
 	CreatedAt types.String `tfsdk:"created_at"`
 	UpdatedAt types.String `tfsdk:"updated_at"`
 }
@@ -47,10 +47,10 @@ func (r *ProjectSecretResource) Metadata(_ context.Context, req resource.Metadat
 func (r *ProjectSecretResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a named secret in a project. The value goes in here and never comes " +
-			"back out: an app reads it as a file, mounted at a path through fpcloud_app's " +
-			"secret_mounts. A database's owner credential is a secret of this kind too " +
-			"(<database>-owner), created with the database and rotated by its rotate-password — " +
-			"mount it, never manage it here.",
+			"back out: an app reaches it through an environment variable that references it " +
+			"(fpcloud_app's secret_env), as the variable's value or as a file the variable names. " +
+			"A database's owner credential is a secret of this kind too (<database>-owner), created " +
+			"with the database and rotated by its rotate-password — reference it, never manage it here.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Secret ID.",
@@ -67,7 +67,7 @@ func (r *ProjectSecretResource) Schema(_ context.Context, _ resource.SchemaReque
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "Secret name, unique in the project; what a mount references.",
+				Description: "Secret name, unique in the project; what an env entry references.",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
@@ -76,12 +76,12 @@ func (r *ProjectSecretResource) Schema(_ context.Context, _ resource.SchemaReque
 			"value": schema.StringAttribute{
 				Description: "The secret value. Write-only: the API never returns it, so what the " +
 					"configuration says is what the state holds. Changing it rolls every app " +
-					"mounting the secret onto the new value.",
+					"referencing the secret onto the new value.",
 				Required:  true,
 				Sensitive: true,
 			},
-			"mounted_by": schema.ListAttribute{
-				Description: "Apps in the project mounting this secret. The mount is the bind.",
+			"used_by": schema.ListAttribute{
+				Description: "Apps in the project whose env references this secret. The reference is the bind.",
 				Computed:    true,
 				ElementType: types.StringType,
 			},
@@ -182,8 +182,8 @@ func mapProjectSecretToModel(ctx context.Context, sec *client.ProjectSecret, m *
 	m.ID = types.StringValue(sec.ID)
 	m.ProjectID = types.StringValue(sec.ProjectID)
 	m.Name = types.StringValue(sec.Name)
-	mounted, _ := types.ListValueFrom(ctx, types.StringType, sec.MountedBy)
-	m.MountedBy = mounted
+	used, _ := types.ListValueFrom(ctx, types.StringType, sec.UsedBy)
+	m.UsedBy = used
 	m.CreatedAt = types.StringValue(sec.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	m.UpdatedAt = types.StringValue(sec.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 }

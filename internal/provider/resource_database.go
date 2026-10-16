@@ -191,7 +191,7 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			},
 			"host": schema.StringAttribute{
 				Description: "Cluster-internal hostname of the database's primary. Not reachable from " +
-					"outside the cluster — an app in the same project mounts the owner `secret`, and " +
+					"outside the cluster — an app in the same project references the owner `secret`, and " +
 					"`fpcloud db connect` tunnels in from a workstation.",
 				Computed: true,
 			},
@@ -205,15 +205,16 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			},
 			"secret": schema.StringAttribute{
 				Description: "Name of the project secret holding this database's owner connection URL " +
-					"(`<name>-owner`), created with the database and rewritten by a rotation. Mount it on " +
-					"an app (fpcloud_app's `secret_mounts`) to hand the app the database.",
+					"(`<name>-owner`), created with the database and rewritten by a rotation. Reference it " +
+					"from the app's env (fpcloud_app's `secret_env`, `DATABASE_URL = { secret = ... }`) to hand " +
+					"the app the database.",
 				Computed: true,
 			},
 			"password_rotation": schema.StringAttribute{
 				Description: "Change this value to rotate the database password — any string of your choosing, " +
 					"a date or a counter. The platform issues a new password, waits for the database to accept it, " +
-					"and rolls every app mounting the owner `secret` onto it; the old one stops authenticating new " +
-					"connections. The resource carries no password: an app has it through the mounted secret, and " +
+					"and rolls every app referencing the owner `secret` onto it; the old one stops authenticating new " +
+					"connections. The resource carries no password: an app has it through the referenced secret, and " +
 					"`fpcloud db connect` reads a live credential.",
 				Optional: true,
 			},
@@ -373,7 +374,7 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 
 	// A changed rotation value is the request to rotate (#297): the platform
 	// issues the new password, waits for the role to carry it and rolls every
-	// app mounting the owner secret before answering. Nothing of it reaches
+	// app referencing the owner secret before answering. Nothing of it reaches
 	// state: the resource carries no password (ADR-281), and the answer is the
 	// database as a read returns it.
 	if rotationRequested(state.PasswordRotation, plan.PasswordRotation) {

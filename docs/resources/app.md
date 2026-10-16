@@ -95,7 +95,7 @@ resource "fpcloud_app" "web" {
 - `release_command` (List of String) Command run once per deploy — from the exact image being deployed, with the app's env/secrets — before the new version goes live; a failure aborts the deploy (e.g. DB migrations). A single element containing spaces runs via 'sh -c'; use multiple elements for exec form. Changed alongside the image, it is sent as part of that deploy and gates it, so the apply that introduces a migration is the apply that runs it. Read back from the API, so a change made outside Terraform shows as drift.
 - `replicas` (Number) Fixed replica count for always-on apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.
 - `routes` (Attributes List) Per-path visibility carve-outs. A route marked internal is withheld from the external ingress — on the app's own URL and on every custom domain attached to it — while staying reachable at the app's in-cluster address, so a scheduled job calling it keeps working. External requests are refused at the edge. Matching is by path prefix on segment boundaries ('/internal/' covers '/internal/sync' but not '/internalx'). Always-on apps with ingress = "all" only. (see [below for nested schema](#nestedatt--routes))
-- `secret_mounts` (Map of String) Project secrets mounted as files: map of container file path to secret name (fpcloud_project_secret). The only way a secret reaches the app — env is plain. Mounting a database's owner secret is how the app is handed that database. Set as part of the create, so a release command that reads one is not gated before it arrives.
+- `secret_env` (Attributes Map) Environment variables that reference a project secret, keyed by variable (ADR-284 §7). The variable holds the secret's value; with `path`, the file at that path holds the value and the variable holds the path. Referencing a database's owner `secret` is how the app is handed that database, a bucket's `secret` how it is handed the bucket: the grant to the app's identity is written with the reference when you may make it, and the write is refused naming the grant when you may not. Set as part of the create, so a release command that reads one is not gated before it arrives. (see [below for nested schema](#nestedatt--secret_env))
 - `security_context` (Attributes) Opt-in pod/container hardening. When set, the container is locked to the PSS-restricted baseline (drop ALL capabilities, no privilege escalation, RuntimeDefault seccomp) plus the run-as identity below. Updated in place: removing the block clears it, which is how an app that once needed root returns to the platform default. (see [below for nested schema](#nestedatt--security_context))
 - `traffic` (Attributes List) Traffic routing configuration. Each block specifies a revision and its traffic percentage. Use '@latest' to route to the latest revision. (see [below for nested schema](#nestedatt--traffic))
 - `type` (String) Process type: 'web' (default) serves HTTP behind a Service, or 'worker' — a long-running process with no port, Service, ingress, URL or health checks. A worker is always-on only. Changing this replaces the app: it decides whether the app has an address at all.
@@ -168,6 +168,18 @@ Optional:
 
 - `path` (String) Path prefix to carve out, e.g. '/internal/'. Must start with '/'; '/' alone is rejected (use ingress = "internal" to make every path cluster-only).
 - `visibility` (String) 'internal' (not externally routable) or 'public'. Defaults to 'internal'.
+
+
+<a id="nestedatt--secret_env"></a>
+### Nested Schema for `secret_env`
+
+Required:
+
+- `secret` (String) The secret's name in the project (fpcloud_project_secret.name, fpcloud_database.secret, fpcloud_bucket.secret).
+
+Optional:
+
+- `path` (String) Deliver the value as a file at this absolute path in the container; the variable then holds the path.
 
 
 <a id="nestedatt--security_context"></a>

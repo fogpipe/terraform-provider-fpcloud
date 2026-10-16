@@ -53,7 +53,7 @@ type AppResourceModel struct {
 	ServiceAccount      types.String `tfsdk:"service_account"`
 	IdentityTokenFile   types.String `tfsdk:"identity_token_file"`
 	Env                 types.Map    `tfsdk:"env"`
-	SecretMounts        types.Map    `tfsdk:"secret_mounts"`
+	SecretEnv           types.Map    `tfsdk:"secret_env"`
 	Replicas            types.Int64  `tfsdk:"replicas"`
 	MinScale            types.Int64  `tfsdk:"min_scale"`
 	MaxScale            types.Int64  `tfsdk:"max_scale"`
@@ -318,14 +318,27 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Description: "Environment variables (plaintext). Set as part of the create, so a release " +
 					"command on a new app reads them on its first run.",
 			},
-			"secret_mounts": schema.MapAttribute{
-				Optional:    true,
-				Computed:    true,
-				ElementType: types.StringType,
-				Description: "Project secrets mounted as files: map of container file path to secret name " +
-					"(fpcloud_project_secret). The only way a secret reaches the app — env is plain. " +
-					"Mounting a database's owner secret is how the app is handed that database. " +
-					"Set as part of the create, so a release command that reads one is not gated before it arrives.",
+			"secret_env": schema.MapNestedAttribute{
+				Optional: true,
+				Description: "Environment variables that reference a project secret, keyed by variable " +
+					"(ADR-284 §7). The variable holds the secret's value; with `path`, the file at that " +
+					"path holds the value and the variable holds the path. Referencing a database's owner " +
+					"`secret` is how the app is handed that database, a bucket's `secret` how it is handed " +
+					"the bucket: the grant to the app's identity is written with the reference when you may " +
+					"make it, and the write is refused naming the grant when you may not. Set as part of the " +
+					"create, so a release command that reads one is not gated before it arrives.",
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"secret": schema.StringAttribute{
+							Required:    true,
+							Description: "The secret's name in the project (fpcloud_project_secret.name, fpcloud_database.secret, fpcloud_bucket.secret).",
+						},
+						"path": schema.StringAttribute{
+							Optional:    true,
+							Description: "Deliver the value as a file at this absolute path in the container; the variable then holds the path.",
+						},
+					},
+				},
 			},
 			"replicas": schema.Int64Attribute{
 				Description: "Fixed replica count for always-on apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.",
@@ -517,11 +530,11 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 	asked := plan
 
-	// env and secret_mounts ride the create request (ADR-112): an app created
+	// env and secret_env ride the create request (ADR-112): an app created
 	// with a release command is gated on it before it serves, so config written
 	// after the create call arrives after the migration that reads it has
 	// already run.
-	var envMap, mountsMap map[string]string
+	var envMap map[string]string
 
 	if !plan.Env.IsNull() && !plan.Env.IsUnknown() {
 		resp.Diagnostics.Append(plan.Env.ElementsAs(ctx, &envMap, false)...)
@@ -529,11 +542,9 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 			return
 		}
 	}
-	if !plan.SecretMounts.IsNull() && !plan.SecretMounts.IsUnknown() {
-		resp.Diagnostics.Append(plan.SecretMounts.ElementsAs(ctx, &mountsMap, false)...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
+	secretEnv := secretEnvFromModel(ctx, plan.SecretEnv, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	command := stringListToSlice(ctx, plan.Command, &resp.Diagnostics)
@@ -568,7 +579,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		HealthCheckRetries:  int(plan.HealthCheckRetries.ValueInt64()),
 		Probes:              probes,
 		EnvVars:             envMap,
-		SecretMounts:        mountsMap,
+		SecretEnv:           secretEnv,
 	}
 	// Replicas is an always-on setting; leave it unset for serverless apps.
 	if plan.Mode.ValueString() != "serverless" {
@@ -848,20 +859,6 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
-	// Replace the secret mounts when they changed: the map is the unit — a
-	// mount has no id — and an empty map is a deliberate unmount-everything.
-	if !plan.SecretMounts.Equal(state.SecretMounts) && !plan.SecretMounts.IsUnknown() {
-		var mounts map[string]string
-		resp.Diagnostics.Append(plan.SecretMounts.ElementsAs(ctx, &mounts, false)...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		if _, err := r.client.SetSecretMounts(ctx, appID, mounts); err != nil {
-			resp.Diagnostics.AddError("Error updating app secret mounts", err.Error())
-			return
-		}
-	}
-
 	// Apply a changed security context. Updated in place rather than replacing the
 	// app: this block is how an app opts out of the non-root requirement, and
 	// destroying and recreating an app to revoke an exception would make the
@@ -947,9 +944,11 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
-	// Sync env vars: compute the diff between old and new env maps and update
-	// configs. Env is plain by definition (#1069); a secret is a mounted
-	// project secret, handled above.
+	// Sync env: the diff between the old and new maps, literals and secret
+	// references alike, written one entry at a time. A variable that moves
+	// between the two maps is one entry replaced, never unset: the write of
+	// the new shape drops the old one, so the removal loops skip a key the
+	// other map now holds.
 	var planEnv, stateEnv map[string]string
 	if !plan.Env.IsNull() && !plan.Env.IsUnknown() {
 		resp.Diagnostics.Append(plan.Env.ElementsAs(ctx, &planEnv, false)...)
@@ -957,24 +956,50 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	if !state.Env.IsNull() && !state.Env.IsUnknown() {
 		resp.Diagnostics.Append(state.Env.ElementsAs(ctx, &stateEnv, false)...)
 	}
+	planSecretEnv := secretEnvFromModel(ctx, plan.SecretEnv, &resp.Diagnostics)
+	stateSecretEnv := secretEnvFromModel(ctx, state.SecretEnv, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Remove old env keys no longer present.
 	for k := range stateEnv {
-		if _, exists := planEnv[k]; !exists {
-			if err := r.client.UnsetConfig(ctx, appID, k); err != nil {
-				resp.Diagnostics.AddError("Error unsetting env config", fmt.Sprintf("key %q: %s", k, err.Error()))
+		if _, literal := planEnv[k]; literal {
+			continue
+		}
+		if _, ref := planSecretEnv[k]; ref {
+			continue
+		}
+		if err := r.client.UnsetConfig(ctx, appID, k); err != nil {
+			resp.Diagnostics.AddError("Error unsetting env config", fmt.Sprintf("key %q: %s", k, err.Error()))
+			return
+		}
+	}
+	for k := range stateSecretEnv {
+		if _, literal := planEnv[k]; literal {
+			continue
+		}
+		if _, ref := planSecretEnv[k]; ref {
+			continue
+		}
+		if err := r.client.UnsetConfig(ctx, appID, k); err != nil {
+			resp.Diagnostics.AddError("Error unsetting env config", fmt.Sprintf("key %q: %s", k, err.Error()))
+			return
+		}
+	}
+	for k, v := range planEnv {
+		_, wasRef := stateSecretEnv[k]
+		if oldVal, exists := stateEnv[k]; !exists || oldVal != v || wasRef {
+			if _, err := r.client.SetConfig(ctx, appID, k, v); err != nil {
+				resp.Diagnostics.AddError("Error setting env config", fmt.Sprintf("key %q: %s", k, err.Error()))
 				return
 			}
 		}
 	}
-	// Set new/changed env keys.
-	for k, v := range planEnv {
-		if oldVal, exists := stateEnv[k]; !exists || oldVal != v {
-			if _, err := r.client.SetConfig(ctx, appID, k, v); err != nil {
-				resp.Diagnostics.AddError("Error setting env config", fmt.Sprintf("key %q: %s", k, err.Error()))
+	for k, ref := range planSecretEnv {
+		_, wasLiteral := stateEnv[k]
+		if old, exists := stateSecretEnv[k]; !exists || old != ref || wasLiteral {
+			if _, err := r.client.SetSecretEnv(ctx, appID, k, ref.Secret, ref.Path); err != nil {
+				resp.Diagnostics.AddError("Error setting env secret reference", fmt.Sprintf("key %q: %s", k, err.Error()))
 				return
 			}
 		}
@@ -1364,9 +1389,6 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	model.Name = types.StringValue(app.Name)
 	model.DisplayName = types.StringValue(app.DisplayName)
 	model.URLSlug = types.StringValue(app.URLSlug)
-	mounts, mountDiags := types.MapValueFrom(context.Background(), types.StringType, app.SecretMounts)
-	diags.Append(mountDiags...)
-	model.SecretMounts = mounts
 	model.Image = types.StringValue(app.Image)
 	model.Port = types.Int64Value(int64(app.Port))
 	model.Ingress = types.StringValue(app.Ingress)
@@ -1542,5 +1564,29 @@ func stringListToSlice(ctx context.Context, l types.List, diags *diag.Diagnostic
 	}
 	var out []string
 	diags.Append(l.ElementsAs(ctx, &out, false)...)
+	return out
+}
+
+// secretEnvModel is one secret_env entry as the configuration writes it.
+type secretEnvModel struct {
+	Secret types.String `tfsdk:"secret"`
+	Path   types.String `tfsdk:"path"`
+}
+
+// secretEnvFromModel reads a secret_env map into the client's shape; a null or
+// unknown map is no entries.
+func secretEnvFromModel(ctx context.Context, m types.Map, diags *diag.Diagnostics) map[string]client.SecretRef {
+	if m.IsNull() || m.IsUnknown() {
+		return nil
+	}
+	var entries map[string]secretEnvModel
+	diags.Append(m.ElementsAs(ctx, &entries, false)...)
+	if diags.HasError() {
+		return nil
+	}
+	out := make(map[string]client.SecretRef, len(entries))
+	for k, e := range entries {
+		out[k] = client.SecretRef{Secret: e.Secret.ValueString(), Path: e.Path.ValueString()}
+	}
 	return out
 }

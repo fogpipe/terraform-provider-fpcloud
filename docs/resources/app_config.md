@@ -3,22 +3,36 @@
 page_title: "fpcloud_app_config Resource - fpcloud"
 subcategory: ""
 description: |-
-  Manages an individual configuration key-value pair for a Fogpipe application.
+  Manages one environment variable of a Fogpipe application: a literal value, or a reference to a project secret delivered as the variable or, with path, as a file the variable names.
 ---
 
 # fpcloud_app_config (Resource)
 
-Manages an individual configuration key-value pair for a Fogpipe application.
+Manages one environment variable of a Fogpipe application: a literal `value`, or a reference to a project `secret` delivered as the variable or, with `path`, as a file the variable names.
 
 ## Example Usage
 
 ```terraform
-# A plain environment variable. A credential belongs in fpcloud_project_secret,
-# mounted as a file through fpcloud_app's secret_mounts.
+# A plain environment variable.
 resource "fpcloud_app_config" "api_url" {
   app_id = fpcloud_app.web.id
   key    = "NEXT_PUBLIC_API_URL"
   value  = "https://api.example.com"
+}
+
+# A credential: the variable references a project secret and holds its value.
+resource "fpcloud_app_config" "stripe_key" {
+  app_id = fpcloud_app.web.id
+  key    = "STRIPE_KEY"
+  secret = fpcloud_project_secret.stripe.name
+}
+
+# The same secret delivered as a file; the variable holds the path.
+resource "fpcloud_app_config" "stripe_key_file" {
+  app_id = fpcloud_app.web.id
+  key    = "STRIPE_KEY_FILE"
+  secret = fpcloud_project_secret.stripe.name
+  path   = "/secrets/stripe"
 }
 ```
 
@@ -29,7 +43,12 @@ resource "fpcloud_app_config" "api_url" {
 
 - `app_id` (String) The application ID this config belongs to.
 - `key` (String) The configuration key (environment variable name).
-- `value` (String) The configuration value. Env is plain: it reads back in full. A credential belongs in fpcloud_project_secret, mounted on the app as a file.
+
+### Optional
+
+- `path` (String) With `secret`: deliver the value as a file at this absolute path, and make the variable hold the path.
+- `secret` (String) The project secret the variable references: its value is the variable's, or the file's at `path`. Referencing a secret hands the app's identity the resource behind it.
+- `value` (String) The literal value. Env is plain: it reads back in full. A credential belongs in fpcloud_project_secret, referenced with `secret`. Exactly one of `value` and `secret` is set.
 
 ### Read-Only
 

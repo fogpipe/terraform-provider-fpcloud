@@ -115,8 +115,8 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"secret": schema.StringAttribute{
 				Description: "Name of the project secret holding this bucket's read+write key as an AWS " +
 					"config file (`<name>-key`: key, region and endpoint), created and deleted with the " +
-					"bucket. Mount it on an app (fpcloud_app's `secret_mounts`) and point `AWS_CONFIG_FILE` " +
-					"at the path to hand the app the bucket.",
+					"bucket. Reference it from the app's env as a file (fpcloud_app's `secret_env`, " +
+					"`AWS_CONFIG_FILE = { secret = ..., path = \"/secrets/s3\" }`) to hand the app the bucket.",
 				Computed: true,
 			},
 			"secret_access_key": schema.StringAttribute{

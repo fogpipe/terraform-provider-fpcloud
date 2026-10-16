@@ -87,6 +87,7 @@ Database.replication_lag_seconds
 Database.backups_disabled
 
 # --- derived by the platform, addressable by nothing --------------------
+IAMBinding.resource_name
 App.cluster_token
 Bucket.garage_bucket_id
 Project.namespace
@@ -132,6 +133,7 @@ ServiceAccount.updated_at
 # credential the provider runs with, not about the account, and state that
 # changed with the operator's identity would be drift nobody declared.
 ServiceAccount.caller_role
+Project.caller_role
 
 # --- a catalog instance is made, never declared (ADR-235) ------------------
 # `template` names the catalog entry an app was deployed from by the console or

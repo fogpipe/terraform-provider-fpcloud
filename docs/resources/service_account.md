@@ -27,11 +27,10 @@ Manages a Fogpipe service account.
 
 ### Read-Only
 
-- `app` (String) The app this account is the identity of, when `kind` is `app`; null otherwise.
+- `app` (String) The app this account is the identity of; null for an account declared here. An app's own identity is read from the app's `service_account`, never declared (ADR-283).
 - `created_at` (String) Timestamp when the service account was created.
 - `email` (String) Auto-generated email address for this service account.
 - `id` (String) Service account ID.
-- `kind` (String) `standalone` for an account declared here. An app's own identity is `app` and is read from the app's `service_account`, never declared (ADR-283).
 - `status` (String) Current status of the service account.
 
 ## Import

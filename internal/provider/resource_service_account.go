@@ -45,7 +45,6 @@ type ServiceAccountResourceModel struct {
 	Email          types.String `tfsdk:"email"`
 	Status         types.String `tfsdk:"status"`
 	CreatedAt      types.String `tfsdk:"created_at"`
-	Kind           types.String `tfsdk:"kind"`
 	App            types.String `tfsdk:"app"`
 }
 
@@ -102,12 +101,8 @@ func (r *ServiceAccountResource) Schema(_ context.Context, _ resource.SchemaRequ
 				Description: "Timestamp when the service account was created.",
 				Computed:    true,
 			},
-			"kind": schema.StringAttribute{
-				Description: "`standalone` for an account declared here. An app's own identity is `app` and is read from the app's `service_account`, never declared (ADR-283).",
-				Computed:    true,
-			},
 			"app": schema.StringAttribute{
-				Description: "The app this account is the identity of, when `kind` is `app`; null otherwise.",
+				Description: "The app this account is the identity of; null for an account declared here. An app's own identity is read from the app's `service_account`, never declared (ADR-283).",
 				Computed:    true,
 			},
 		},
@@ -171,7 +166,6 @@ func applyServiceAccount(m *ServiceAccountResourceModel, sa *client.ServiceAccou
 	m.Email = types.StringValue(sa.Email)
 	m.Status = types.StringValue(sa.Status)
 	m.CreatedAt = types.StringValue(sa.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
-	m.Kind = types.StringValue(sa.Kind)
 	m.App = optionalString(sa.App)
 }
 

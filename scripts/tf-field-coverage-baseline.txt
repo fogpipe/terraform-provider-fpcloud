@@ -87,7 +87,7 @@ Database.replication_lag_seconds
 Database.backups_disabled
 
 # --- derived by the platform, addressable by nothing --------------------
-App.kube_service_account
+App.cluster_token
 Bucket.garage_bucket_id
 Project.namespace
 # The parent is already the resource's own reference, so the id it echoes

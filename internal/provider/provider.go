@@ -42,7 +42,7 @@ func (p *FogpipeProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 		Description: "The Fogpipe provider manages resources on the Fogpipe PaaS platform. Guides for every capability are at https://cloud.fogpipe.com/llms.txt.",
 		Attributes: map[string]schema.Attribute{
 			"api_key": schema.StringAttribute{
-				Description: "API key for Fogpipe. Can also be set via the FPCLOUD_API_KEY environment variable (or a file named by FPCLOUD_API_KEY_FILE, which is how an app with a service account is given its key), or inherited from the fpcloud CLI login — an API key in the fpcloud config.yaml (the nearest .fpcloud/ at or above the working directory, else ~/.fpcloud), or the OIDC token from `fpcloud login` via `fpcloud get-token` (requires the fpcloud CLI on PATH).",
+				Description: "API key for Fogpipe. Can also be set via the FPCLOUD_API_KEY environment variable, or inherited from the fpcloud CLI login — an API key in the fpcloud config.yaml (the nearest .fpcloud/ at or above the working directory, else ~/.fpcloud), or the OIDC token from `fpcloud login` via `fpcloud get-token` (requires the fpcloud CLI on PATH).",
 				Optional:    true,
 				Sensitive:   true,
 			},
@@ -66,24 +66,34 @@ func (p *FogpipeProvider) Configure(ctx context.Context, req provider.ConfigureR
 	// AWS/GCP model (env var wins, CLI config file is the login-based fallback).
 	cli := loadCLIConfig()
 
-	// Resolve API key: config > env var > CLI config key > CLI OIDC login.
-	// The last step delegates to `fpcloud get-token`, so the default Google
-	// login (`fpcloud login`) works with nothing in HCL or env — bare
-	// `tofu apply`, the AWS/GCP way.
-	apiKey := cli.APIKey
-	if envKey := client.EnvAPIKey(); envKey != "" {
-		apiKey = envKey
-	}
+	// Resolve the credential: config > env var > the pod's identity token >
+	// CLI config key > CLI OIDC login. Inside an app's pod there is no config
+	// file and no browser, and the token (exchanged per request by the client,
+	// ADR-285) is what the pod has; a key set on purpose still wins. The last
+	// step delegates to `fpcloud get-token`, so the default login
+	// (`fpcloud login`) works with nothing in HCL or env — bare `tofu apply`,
+	// the AWS/GCP way.
+	apiKey := ""
 	if !config.APIKey.IsNull() && !config.APIKey.IsUnknown() {
 		apiKey = config.APIKey.ValueString()
 	}
 	if apiKey == "" {
+		apiKey = client.EnvAPIKey()
+	}
+	identityTokenFile := ""
+	if apiKey == "" {
+		identityTokenFile = client.IdentityTokenFile()
+	}
+	if apiKey == "" && identityTokenFile == "" {
+		apiKey = cli.APIKey
+	}
+	if apiKey == "" && identityTokenFile == "" {
 		apiKey = cliOIDCToken()
 	}
-	if apiKey == "" {
+	if apiKey == "" && identityTokenFile == "" {
 		resp.Diagnostics.AddError(
 			"Missing credentials",
-			"The provider found no credentials. Log in with the fpcloud CLI (`fpcloud login`), set FPCLOUD_API_KEY (or FPCLOUD_API_KEY_FILE), or set api_key in the provider configuration.",
+			"The provider found no credentials. Log in with the fpcloud CLI (`fpcloud login`), set FPCLOUD_API_KEY, or set api_key in the provider configuration.",
 		)
 		return
 	}
@@ -101,6 +111,9 @@ func (p *FogpipeProvider) Configure(ctx context.Context, req provider.ConfigureR
 	}
 
 	c := client.New(apiURL, apiKey)
+	if apiKey == "" {
+		c = client.NewWithPodIdentity(apiURL, identityTokenFile)
+	}
 	resp.DataSourceData = c
 	resp.ResourceData = c
 }

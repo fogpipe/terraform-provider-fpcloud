@@ -51,6 +51,7 @@ type AppResourceModel struct {
 	Mode                types.String `tfsdk:"mode"`
 	Type                types.String `tfsdk:"type"`
 	ServiceAccount      types.String `tfsdk:"service_account"`
+	IdentityTokenFile   types.String `tfsdk:"identity_token_file"`
 	Env                 types.Map    `tfsdk:"env"`
 	SecretMounts        types.Map    `tfsdk:"secret_mounts"`
 	Replicas            types.Int64  `tfsdk:"replicas"`
@@ -300,6 +301,13 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			"service_account": schema.StringAttribute{
 				Computed:    true,
 				Description: "The app's own identity: the email of the service account created with the app and deleted with it. Grant it roles and resource access with fpcloud_iam_binding; it holds nothing until granted.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"identity_token_file": schema.StringAttribute{
+				Computed:    true,
+				Description: "Where each of the app's pods finds the token proving it is that service account, named in the pod by FPCLOUD_IDENTITY_TOKEN_FILE. The Fogpipe API exchanges it for a short-lived credential; the Go client and fpcloud do so on their own.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -1379,6 +1387,7 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	model.UpdatedAt = types.StringValue(app.UpdatedAt.String())
 	// Note: env and secret maps are preserved from the plan/state — not returned by API.
 	model.ServiceAccount = types.StringValue(app.ServiceAccount)
+	model.IdentityTokenFile = types.StringValue(app.IdentityTokenFile)
 }
 
 // stringListFromAPI reads a string list the API echoed. The API's "none" is an

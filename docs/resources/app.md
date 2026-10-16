@@ -106,6 +106,7 @@ resource "fpcloud_app" "web" {
 
 - `created_at` (String) Timestamp when the app was created.
 - `id` (String) App ID.
+- `identity_token_file` (String) Where each of the app's pods finds the token proving it is that service account, named in the pod by FPCLOUD_IDENTITY_TOKEN_FILE. The Fogpipe API exchanges it for a short-lived credential; the Go client and fpcloud do so on their own.
 - `service_account` (String) The app's own identity: the email of the service account created with the app and deleted with it. Grant it roles and resource access with fpcloud_iam_binding; it holds nothing until granted.
 - `status` (String) Current status of the app.
 - `updated_at` (String) Timestamp when the app was last updated.

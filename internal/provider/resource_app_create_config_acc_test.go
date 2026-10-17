@@ -26,7 +26,7 @@ resource "fpcloud_project" "test" {
   name = %[1]q
 }
 
-resource "fpcloud_project_secret" "token" {
+resource "fpcloud_secret" "token" {
   project_id = fpcloud_project.test.id
   name       = "api-token"
   value      = "s3cr3t"
@@ -45,8 +45,8 @@ resource "fpcloud_app" "test" {
     HOST_URL = "https://shop.example"
   }
   secret_env = {
-    API_TOKEN      = { secret = fpcloud_project_secret.token.name }
-    API_TOKEN_FILE = { secret = fpcloud_project_secret.token.name, path = "/secrets/api-token" }
+    API_TOKEN      = { secret = fpcloud_secret.token.name }
+    API_TOKEN_FILE = { secret = fpcloud_secret.token.name, path = "/secrets/api-token" }
   }
 %[3]s}
 `, projName, appName, accRootImageOptOut)

@@ -57,20 +57,20 @@ func TestAccProjectSecretResource(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: testAccAppScaffold(proj, app) + `
-resource "fpcloud_project_secret" "stripe" {
+resource "fpcloud_secret" "stripe" {
   project_id = fpcloud_project.scaffold.id
   name       = "stripe-key"
   value      = "sk_test_123"
 }
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("fpcloud_project_secret.stripe", "id"),
-					resource.TestCheckResourceAttr("fpcloud_project_secret.stripe", "name", "stripe-key"),
+					resource.TestCheckResourceAttrSet("fpcloud_secret.stripe", "id"),
+					resource.TestCheckResourceAttr("fpcloud_secret.stripe", "name", "stripe-key"),
 				),
 			},
 			{
 				Config: testAccAppScaffold(proj, app) + `
-resource "fpcloud_project_secret" "stripe" {
+resource "fpcloud_secret" "stripe" {
   project_id = fpcloud_project.scaffold.id
   name       = "stripe-key"
   value      = "sk_test_456"
@@ -82,8 +82,8 @@ resource "fpcloud_app" "mounter" {
   image      = "nginx:latest"
   ingress    = "internal"
   secret_env = {
-    STRIPE_KEY      = { secret = fpcloud_project_secret.stripe.name }
-    STRIPE_KEY_FILE = { secret = fpcloud_project_secret.stripe.name, path = "/secrets/stripe" }
+    STRIPE_KEY      = { secret = fpcloud_secret.stripe.name }
+    STRIPE_KEY_FILE = { secret = fpcloud_secret.stripe.name, path = "/secrets/stripe" }
   }
 ` + accRootImageOptOut + `}
 `,

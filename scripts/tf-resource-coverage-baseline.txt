@@ -184,6 +184,11 @@ DisconnectGitHub
 ListProjectSecrets
 ListOrgSecrets
 
+# A secret's value read (ADR-289): `fpcloud secret access`, `secret get
+# --reveal` and the console's Reveal. fpcloud_secret.value is what the
+# configuration wrote, already in state, so nothing in TF reads it back.
+AccessSecret
+
 # --- not a method of the surface ------------------------------------------
 # The unexported request builder behind SetConfig and SetSecretEnv, both of
 # which fpcloud_app and fpcloud_app_config call.

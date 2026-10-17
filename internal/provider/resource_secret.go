@@ -124,6 +124,11 @@ func (r *SecretResource) ValidateConfig(ctx context.Context, req resource.Valida
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	// The API refuses an empty value, and Terraform counts "" as set, so
+	// without this the refusal arrives mid-apply (fogpipe/cloud-workspace#1278).
+	if !cfg.Value.IsUnknown() && cfg.Value.ValueString() == "" {
+		resp.Diagnostics.AddAttributeError(path.Root("value"), "A secret holds a value", "value is empty; a secret with nothing to hold is not created. Leave the resource out instead.")
+	}
 	if cfg.ProjectID.IsUnknown() || cfg.OrganizationID.IsUnknown() {
 		return
 	}

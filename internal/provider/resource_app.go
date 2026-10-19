@@ -323,7 +323,7 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Description: "Environment variables that reference a secret (a project secret by name, an organization secret as `org/<name>`), keyed by variable " +
 					"(ADR-284 §7). The variable holds the secret's value; with `path`, the file at that " +
 					"path holds the value and the variable holds the path. Referencing a database's owner " +
-					"`secret` is how the app is handed that database, a bucket's `secret` how it is handed " +
+					"`secrets[\"url\"]` is how the app is handed that database, a bucket's `secrets[\"access_key_id\"]` and `secrets[\"secret_access_key\"]` how it is handed " +
 					"the bucket: the grant to the app's identity is written with the reference when you may " +
 					"make it, and the write is refused naming the grant when you may not. Set as part of the " +
 					"create, so a release command that reads one is not gated before it arrives.",

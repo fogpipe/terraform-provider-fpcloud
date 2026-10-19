@@ -191,7 +191,7 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			},
 			"host": schema.StringAttribute{
 				Description: "Cluster-internal hostname of the database's primary. Not reachable from " +
-					"outside the cluster — an app in the same project references the owner `secret`, and " +
+					"outside the cluster — an app in the same project references `secrets[\"url\"]`, and " +
 					"`fpcloud db connect` tunnels in from a workstation.",
 				Computed: true,
 			},
@@ -215,7 +215,7 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			"password_rotation": schema.StringAttribute{
 				Description: "Change this value to rotate the database password — any string of your choosing, " +
 					"a date or a counter. The platform issues a new password, waits for the database to accept it, " +
-					"and rolls every app referencing the owner `secret` onto it; the old one stops authenticating new " +
+					"and rolls every app referencing `secrets[\"url\"]` or `secrets[\"password\"]` onto it; the old one stops authenticating new " +
 					"connections. The resource carries no password: an app has it through the referenced secret, and " +
 					"`fpcloud db connect` reads a live credential.",
 				Optional: true,

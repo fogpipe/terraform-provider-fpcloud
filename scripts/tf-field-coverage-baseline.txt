@@ -156,6 +156,9 @@ Bucket.used_by
 # could never legitimately write it.
 Secret.owner_database_id
 Secret.owner_bucket_id
+# The app a template generated the secret for (ADR-297): set by instantiate
+# and upgrade, deleted with the app, never written by a config.
+Secret.owner_app_id
 # Which value of its owner's credential an owned secret holds (ADR-296):
 # set by the platform on the rows above and on nothing a config writes.
 Secret.part

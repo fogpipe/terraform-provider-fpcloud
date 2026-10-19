@@ -26,9 +26,10 @@ resource "fpcloud_app" "web" {
     API_URL  = "https://api.example.com"
   }
 
-  secret = {
-    STRIPE_KEY     = var.stripe_key
-    SESSION_SECRET = var.session_secret
+  # A secret is a project resource referenced by name; the value never sits in
+  # the app's configuration. Referencing it hands the app's identity the secret.
+  secret_env = {
+    STRIPE_KEY = { secret = fpcloud_secret.stripe_key.name }
   }
 
   # Serve /api/* publicly but keep /internal/* off the external ingress. It stays

@@ -30,10 +30,12 @@ jobs:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.PASSPHRASE }}
       # The notes come from the annotated tag's message, which the workspace
-      # release recipe wrote them into (fogpipe/cloud-workspace#1045). GoReleaser
-      # keeps `changelog: disable` — a commit list is not release notes, and one
+      # release recipe wrote them into (fogpipe/cloud-workspace#1045). One
       # version names a release of all three repos, so the text is the same on
-      # every one of them and on `fpcloud changelog`.
+      # every one of them and on `fpcloud changelog`. --release-notes makes
+      # GoReleaser use the file instead of generating a commit list; the
+      # changelog pipe must stay enabled for the file to be read at all
+      # (fogpipe/cloud-workspace#1288).
       - name: Read the release notes off the tag
         shell: bash
         run: |

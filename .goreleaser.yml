@@ -62,5 +62,8 @@ release:
     - glob: "terraform-registry-manifest.json"
       name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
 
-changelog:
-  disable: true
+# No changelog block: the release notes are the annotated tag's message, passed
+# as --release-notes by .github/workflows/release.yml, which skips GoReleaser's
+# own generation. `changelog: disable: true` would skip the pipe that loads that
+# file too, and every provider release from v0.196.0 to v0.220.0 shipped with an
+# empty body because of it (fogpipe/cloud-workspace#1288).

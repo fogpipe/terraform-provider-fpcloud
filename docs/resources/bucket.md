@@ -76,8 +76,8 @@ resource "fpcloud_app" "uploader" {
 - `global_alias` (String) The bucket's name in the object store's global namespace — the value S3 itself uses, and the website host label. Derived as <name>-<project>-<org>, but read it from here rather than composing it: buckets created before that scheme kept an older alias. This is what an `aws s3` command or a `backend "s3"` block needs.
 - `id` (String) Bucket ID.
 - `region` (String) S3 region for the bucket.
-- `secret` (String) Name of the project secret holding this bucket's read+write key as an AWS config file (`<name>-key`: key, region and endpoint), created and deleted with the bucket. Reference it from the app's env as a file (fpcloud_app's `secret_env`, `AWS_CONFIG_FILE = { secret = ..., path = "/secrets/s3" }`) to hand the app the bucket.
 - `secret_access_key` (String, Sensitive) S3 secret access key for the bucket's initial access key. Returned only on creation — an imported bucket leaves this empty.
+- `secrets` (Map of String) Names of the project secrets holding this bucket's read+write key, by part: `access_key_id` is `<name>-access-key-id`, `secret_access_key` is `<name>-secret-access-key`. Created and deleted with the bucket. Reference them from the app's env (fpcloud_app's `secret_env`, `AWS_ACCESS_KEY_ID = { secret = fpcloud_bucket.x.secrets["access_key_id"] }` and `AWS_SECRET_ACCESS_KEY = { secret = fpcloud_bucket.x.secrets["secret_access_key"] }`) to hand the app the bucket; `endpoint` and `region` are plain config.
 - `status` (String) Current status of the bucket.
 - `url` (String) Where the bucket answers, present whenever public_read is set: the platform host while it is served, or the oldest active custom domain once one exists — an active domain replaces the platform host (ADR-130).
 

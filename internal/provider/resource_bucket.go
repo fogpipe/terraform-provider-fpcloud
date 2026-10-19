@@ -35,7 +35,7 @@ type BucketResourceModel struct {
 	Status          types.String `tfsdk:"status"`
 	AccessKeyID     types.String `tfsdk:"access_key_id"`
 	SecretAccessKey types.String `tfsdk:"secret_access_key"`
-	Secret          types.String `tfsdk:"secret"`
+	Secrets         types.Map    `tfsdk:"secrets"`
 
 	PublicRead           types.Bool   `tfsdk:"public_read"`
 	WebsiteEnabled       types.Bool   `tfsdk:"website_enabled"`
@@ -112,11 +112,14 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"secret": schema.StringAttribute{
-				Description: "Name of the project secret holding this bucket's read+write key as an AWS " +
-					"config file (`<name>-key`: key, region and endpoint), created and deleted with the " +
-					"bucket. Reference it from the app's env as a file (fpcloud_app's `secret_env`, " +
-					"`AWS_CONFIG_FILE = { secret = ..., path = \"/secrets/s3\" }`) to hand the app the bucket.",
+			"secrets": schema.MapAttribute{
+				ElementType: types.StringType,
+				Description: "Names of the project secrets holding this bucket's read+write key, by part: " +
+					"`access_key_id` is `<name>-access-key-id`, `secret_access_key` is `<name>-secret-access-key`. " +
+					"Created and deleted with the bucket. Reference them from the app's env (fpcloud_app's " +
+					"`secret_env`, `AWS_ACCESS_KEY_ID = { secret = fpcloud_bucket.x.secrets[\"access_key_id\"] }` and " +
+					"`AWS_SECRET_ACCESS_KEY = { secret = fpcloud_bucket.x.secrets[\"secret_access_key\"] }`) to hand " +
+					"the app the bucket; `endpoint` and `region` are plain config.",
 				Computed: true,
 			},
 			"secret_access_key": schema.StringAttribute{
@@ -410,7 +413,7 @@ func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 	m.URLSlug = types.StringValue(bucket.URLSlug)
 	m.URL = types.StringValue(bucket.URL)
 	m.GlobalAlias = types.StringValue(bucket.GlobalAlias)
-	m.Secret = types.StringValue(bucket.Secret)
+	m.Secrets, _ = types.MapValueFrom(context.Background(), types.StringType, orEmptyMap(bucket.Secrets))
 }
 
 // optionalInt64 is a nullable/unknown TF number as a pointer, so an attribute

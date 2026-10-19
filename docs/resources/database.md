@@ -58,7 +58,7 @@ resource "fpcloud_database" "main" {
 - `plan` (String) Legacy size tier, derived by the server from cpu/memory (e.g. "starter", "custom"). Read-only — size the database with cpu/memory/storage instead.
 - `port` (Number) The database port.
 - `read_host` (String) Cluster-internal hostname of the database's REPLICA (CNPG's `-ro` Service), on the same `port` and with the same credential — a replica is not a second identity. Every managed database has one, because every one is two instances. **Reads here can be stale**: replication is asynchronous, so a read-your-own-write can miss; send anything that must see everything committed so far to `host`. Empty when the platform cannot derive a replica endpoint for the database, which means there is none — never fall back to `host` under this name.
-- `secret` (String) Name of the project secret holding this database's owner connection URL (`<name>-owner`), created with the database and rewritten by a rotation. Reference it from the app's env (fpcloud_app's `secret_env`, `DATABASE_URL = { secret = ... }`) to hand the app the database.
+- `secrets` (Map of String) Names of the project secrets holding this database's credential, by part: `url` is `<name>-owner`, the owner connection URL; `password` is `<name>-owner-password`. Created with the database, rewritten together by a rotation. Reference one from the app's env (fpcloud_app's `secret_env`, `DATABASE_URL = { secret = fpcloud_database.x.secrets["url"] }`) to hand the app the database. The read replica is the same credential at `read_host`.
 - `status` (String) The current status of the database.
 
 <a id="nestedatt--backup"></a>

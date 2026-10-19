@@ -58,7 +58,7 @@ type DatabaseResourceModel struct {
 	Status      types.String `tfsdk:"status"`
 	Host        types.String `tfsdk:"host"`
 	ReadHost    types.String `tfsdk:"read_host"`
-	Secret      types.String `tfsdk:"secret"`
+	Secrets     types.Map    `tfsdk:"secrets"`
 	Port        types.Int64  `tfsdk:"port"`
 	// PasswordRotation is a value of the practitioner's choosing; changing it
 	// is the request to rotate (fogpipe/cloud-workspace#297). The resource
@@ -203,11 +203,13 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Description: "The database port.",
 				Computed:    true,
 			},
-			"secret": schema.StringAttribute{
-				Description: "Name of the project secret holding this database's owner connection URL " +
-					"(`<name>-owner`), created with the database and rewritten by a rotation. Reference it " +
-					"from the app's env (fpcloud_app's `secret_env`, `DATABASE_URL = { secret = ... }`) to hand " +
-					"the app the database.",
+			"secrets": schema.MapAttribute{
+				ElementType: types.StringType,
+				Description: "Names of the project secrets holding this database's credential, by part: " +
+					"`url` is `<name>-owner`, the owner connection URL; `password` is `<name>-owner-password`. " +
+					"Created with the database, rewritten together by a rotation. Reference one from the app's " +
+					"env (fpcloud_app's `secret_env`, `DATABASE_URL = { secret = fpcloud_database.x.secrets[\"url\"] }`) " +
+					"to hand the app the database. The read replica is the same credential at `read_host`.",
 				Computed: true,
 			},
 			"password_rotation": schema.StringAttribute{
@@ -525,7 +527,7 @@ func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 	// an app would otherwise send stale-tolerant reads to the primary while the
 	// attribute claimed a replica served them (fogpipe/cloud-workspace#862).
 	state.ReadHost = types.StringValue(db.ReadHost)
-	state.Secret = types.StringValue(db.Secret)
+	state.Secrets, _ = types.MapValueFrom(context.Background(), types.StringType, orEmptyMap(db.Secrets))
 	state.Port = types.Int64Value(int64(db.Port))
 }
 

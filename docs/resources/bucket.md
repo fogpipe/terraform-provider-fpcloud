@@ -31,22 +31,22 @@ resource "fpcloud_bucket" "site" {
   url_slug               = "mysite"     # optional vanity host: mysite.web.<platform domain>
 }
 
-# Wire the bucket's S3 credentials into an app. The secret access key is only
-# returned once, at creation — Terraform keeps it in state (marked sensitive).
+# Hand the bucket to an app. The bucket owns two project secrets holding its
+# key; referencing them is the grant, and no key value sits in this file.
 resource "fpcloud_app" "uploader" {
   project_id = fpcloud_project.production.id
   name       = "uploader"
   image      = "ghcr.io/myorg/uploader:latest"
 
   env = {
-    S3_ENDPOINT = fpcloud_bucket.assets.endpoint
-    S3_REGION   = fpcloud_bucket.assets.region
-    S3_BUCKET   = fpcloud_bucket.assets.name
+    AWS_ENDPOINT_URL = fpcloud_bucket.assets.endpoint
+    AWS_REGION       = fpcloud_bucket.assets.region
+    S3_BUCKET        = fpcloud_bucket.assets.name
   }
 
-  secret = {
-    S3_ACCESS_KEY_ID     = fpcloud_bucket.assets.access_key_id
-    S3_SECRET_ACCESS_KEY = fpcloud_bucket.assets.secret_access_key
+  secret_env = {
+    AWS_ACCESS_KEY_ID     = { secret = fpcloud_bucket.assets.secrets["access_key_id"] }
+    AWS_SECRET_ACCESS_KEY = { secret = fpcloud_bucket.assets.secrets["secret_access_key"] }
   }
 }
 ```

@@ -39,7 +39,6 @@ func TestAccBucketResource(t *testing.T) {
 					resource.TestCheckResourceAttrSet("fpcloud_bucket.test", "quota_max_size"),
 					resource.TestCheckResourceAttrSet("fpcloud_bucket.test", "quota_max_objects"),
 					resource.TestCheckResourceAttrSet("fpcloud_bucket.test", "endpoint"),
-					resource.TestCheckResourceAttrSet("fpcloud_bucket.test", "access_key_id"),
 				),
 			},
 			// Step 2: set explicit quotas — mutable in place, no re-create.
@@ -60,13 +59,12 @@ func TestAccBucketResource(t *testing.T) {
 					resource.TestCheckResourceAttr("fpcloud_bucket.test", "quota_max_objects", "1000"),
 				),
 			},
-			// Step 4: import — secret_access_key is create-only and not
-			// recoverable on import, so it is ignored.
+			// Step 4: import. The bucket carries no key, so every attribute
+			// reads back from the API and nothing is ignored.
 			{
-				ResourceName:            "fpcloud_bucket.test",
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"secret_access_key"},
+				ResourceName:      "fpcloud_bucket.test",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})

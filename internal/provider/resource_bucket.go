@@ -33,8 +33,6 @@ type BucketResourceModel struct {
 	Endpoint        types.String `tfsdk:"endpoint"`
 	Region          types.String `tfsdk:"region"`
 	Status          types.String `tfsdk:"status"`
-	AccessKeyID     types.String `tfsdk:"access_key_id"`
-	SecretAccessKey types.String `tfsdk:"secret_access_key"`
 	Secrets         types.Map    `tfsdk:"secrets"`
 
 	PublicRead           types.Bool   `tfsdk:"public_read"`
@@ -103,33 +101,15 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Description: "Current status of the bucket.",
 				Computed:    true,
 			},
-			"access_key_id": schema.StringAttribute{
-				Description: "S3 access key ID for the bucket's initial access key.",
-				Computed:    true,
-				// GetBucket doesn't echo the key, so keep the create-time value
-				// across refreshes/updates instead of going unknown.
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
 			"secrets": schema.MapAttribute{
 				ElementType: types.StringType,
-				Description: "Names of the project secrets holding this bucket's read+write key, by part: " +
+				Description: "Names of the project secrets holding this bucket's read+write key, by part, the only place the key is reached from: " +
 					"`access_key_id` is `<name>-access-key-id`, `secret_access_key` is `<name>-secret-access-key`. " +
 					"Created and deleted with the bucket. Reference them from the app's env (fpcloud_app's " +
 					"`secret_env`, `AWS_ACCESS_KEY_ID = { secret = fpcloud_bucket.x.secrets[\"access_key_id\"] }` and " +
 					"`AWS_SECRET_ACCESS_KEY = { secret = fpcloud_bucket.x.secrets[\"secret_access_key\"] }`) to hand " +
 					"the app the bucket; `endpoint` and `region` are plain config.",
 				Computed: true,
-			},
-			"secret_access_key": schema.StringAttribute{
-				Description: "S3 secret access key for the bucket's initial access key. Returned only " +
-					"on creation — an imported bucket leaves this empty.",
-				Computed:  true,
-				Sensitive: true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
 			},
 			"public_read": schema.BoolAttribute{
 				Description: "Serve the bucket's objects to anyone with the URL, without a signature. " +
@@ -214,9 +194,6 @@ func (r *BucketResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	// The one-time secret access key is only present on the create response.
-	plan.SecretAccessKey = types.StringValue(bucket.SecretAccessKey)
-
 	// Website serving + vanity slug are separate API calls layered on the bucket.
 	if plan.WebsiteEnabled.ValueBool() {
 		bucket, err = r.client.SetBucketWebsite(ctx, bucket.ID, client.SetBucketWebsiteRequest{
@@ -258,7 +235,6 @@ func (r *BucketResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
-	// secret_access_key is never returned by Get — it is preserved from state.
 	r.apply(&state, bucket)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -346,8 +322,6 @@ func (r *BucketResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 	}
 
-	// None of the update calls return the secret — preserve it from prior state.
-	plan.SecretAccessKey = state.SecretAccessKey
 	r.apply(&plan, bucket)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -384,8 +358,8 @@ func (r *BucketResource) ImportState(ctx context.Context, req resource.ImportSta
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 }
 
-// apply maps an API Bucket response onto the model. secret_access_key is handled
-// by the caller (populated only from the create response, else preserved).
+// apply maps an API Bucket response onto the model. The bucket carries no key:
+// its two values are the project secrets `secrets` names (ADR-296, ADR-303).
 func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 	m.ID = types.StringValue(bucket.ID)
 	// Preserve the configured project when the API does not echo it back, so a
@@ -399,13 +373,6 @@ func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 	m.Endpoint = types.StringValue(bucket.Endpoint)
 	m.Region = types.StringValue(bucket.Region)
 	m.Status = types.StringValue(bucket.Status)
-	// GetBucket does not echo the access key back (only create does), so only
-	// overwrite it when present — otherwise the post-create refresh would blank
-	// the value that create captured. Mirrors secret_access_key, which apply
-	// never touches.
-	if bucket.AccessKeyID != "" {
-		m.AccessKeyID = types.StringValue(bucket.AccessKeyID)
-	}
 	m.PublicRead = types.BoolValue(bucket.PublicRead)
 	m.WebsiteEnabled = types.BoolValue(bucket.WebsiteEnabled)
 	m.WebsiteIndexDocument = types.StringValue(bucket.WebsiteIndexDocument)

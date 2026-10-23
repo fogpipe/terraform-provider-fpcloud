@@ -16,12 +16,15 @@ GetMe
 #     bumped the client and surfaced these; each is a reviewed exclusion) -----
 # The database tunnel's connection details (ADR-045, ADR-154): a credential
 # minted per call and valid for that call. There is no state to converge on.
-databaseConnection
+GetDatabaseConnection
+GetReadOnlyDatabaseConnection
 # A pool recycle (#145) is an operation with a lifetime, not a state. `apply`
 # has no way to say "restart now and not again", so an attribute over it would
 # either recycle on every apply or sit as permanent drift. `fpcloud runner
 # restart` is the surface.
 RestartRunner
+# Waiting for that recycle to finish is the same operation, watched to its end.
+WaitRunnerRestarted
 # Deploying a catalog template (ADR-235) creates an app, a database and a
 # bucket the practitioner did not declare, and `app upgrade` is an action on
 # one of them, not a state. OpenTofu's surface is `data.fpcloud_template`,
@@ -84,6 +87,7 @@ ScanImage
 
 # read-only observability — not something you reference as TF resource state
 GetAppLogs
+GetWebsiteLogs
 GetAppVersion
 # app events (#126) — warnings recorded against an app right now. They age out
 # on their own, so a data source over them returns a different set on every
@@ -188,8 +192,3 @@ ListOrgSecrets
 # --reveal` and the console's Reveal. fpcloud_secret.value is what the
 # configuration wrote, already in state, so nothing in TF reads it back.
 AccessSecret
-
-# --- not a method of the surface ------------------------------------------
-# The unexported request builder behind SetConfig and SetSecretEnv, both of
-# which fpcloud_app and fpcloud_app_config call.
-setConfig

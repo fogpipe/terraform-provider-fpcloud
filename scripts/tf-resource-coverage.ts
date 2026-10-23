@@ -49,29 +49,44 @@ if (Deno.args.includes("--update-baseline")) {
 const root = new URL("../", import.meta.url).pathname;
 const baselinePath = root + "scripts/tf-resource-coverage-baseline.txt";
 
-// --- client.go: every *Client method that actually wraps an API call ---
+// --- client.go: every exported *Client method that reaches an API call ---
+// A method reaches one when its own body calls newRequest(), or calls another
+// *Client method that does: a shared helper is where the request moved to, not
+// a surface of its own, and an unexported one is nothing the provider could
+// call. Read per body alone, a method that delegates to such a helper drops
+// out of the set and the helper takes its place — a gap nobody can close and a
+// baseline entry reported as covered.
 function clientMethods(clientGoPath: string): Set<string> {
   const lines = Deno.readTextFileSync(clientGoPath).split("\n");
-  const methods = new Set<string>();
+  const direct = new Set<string>();
+  const calls = new Map<string, Set<string>>();
   let current: string | null = null;
-  let sawRequest = false;
-  const flush = () => {
-    if (current && sawRequest) methods.add(current);
-    current = null;
-    sawRequest = false;
-  };
   for (const line of lines) {
     const fn = line.match(/^func \(c \*Client\) ([A-Za-z0-9_]+)\(/);
     if (fn) {
-      flush();
       current = fn[1];
+      calls.set(current, new Set());
       continue;
     }
-    if (current && /\bnewRequest\(/.test(line)) sawRequest = true;
-    if (current && /^}$/.test(line)) flush();
+    if (!current) continue;
+    if (/\bnewRequest\(/.test(line)) direct.add(current);
+    for (const m of line.matchAll(/\bc\.([A-Za-z0-9_]+)\(/g)) {
+      calls.get(current)!.add(m[1]);
+    }
+    if (/^}$/.test(line)) current = null;
   }
-  flush();
-  return methods;
+  const reaches = new Set(direct);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [name, callees] of calls) {
+      if (reaches.has(name)) continue;
+      if ([...callees].some((callee) => reaches.has(callee))) {
+        reaches.add(name);
+        grew = true;
+      }
+    }
+  }
+  return new Set([...reaches].filter((m) => /^[A-Z]/.test(m)));
 }
 
 // --- internal/provider/*.go: every `.client.Method(` call site ---

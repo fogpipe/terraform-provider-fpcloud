@@ -24,7 +24,7 @@ Use this data source to read a Fogpipe application by ID.
 - `created_at` (String) The creation timestamp of the application.
 - `image` (String) The container image for the application.
 - `max_scale` (Number) The maximum number of instances.
-- `min_scale` (Number) The minimum number of instances.
+- `min_scale` (Number) The fewest instances the app runs; 0 is an app that sleeps when idle and wakes on its next request.
 - `name` (String) The application name.
 - `port` (Number) The port the application listens on.
 - `project_id` (String) The ID of the project this app belongs to.

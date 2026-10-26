@@ -78,7 +78,7 @@ func (d *AppDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, re
 				Computed:    true,
 			},
 			"min_scale": schema.Int64Attribute{
-				Description: "The minimum number of instances.",
+				Description: "The fewest instances the app runs; 0 is an app that sleeps when idle and wakes on its next request.",
 				Computed:    true,
 			},
 			"max_scale": schema.Int64Attribute{

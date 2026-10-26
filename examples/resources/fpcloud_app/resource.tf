@@ -3,8 +3,7 @@ resource "fpcloud_app" "web" {
   name       = "web"
   image      = "ghcr.io/myorg/webapp:latest"
   port       = 3000
-  ingress    = "all"       # "all" = public, "internal" = default
-  mode       = "always-on" # "always-on" (plain Deployment, default) | "serverless" (Knative)
+  ingress    = "all" # "all" = public, "internal" = default
 
   env = {
     APP_NAME = "My App"
@@ -42,7 +41,7 @@ resource "fpcloud_app" "web" {
     }
   }
 
-  replicas     = 2 # fixed replica count (always-on mode)
+  replicas     = 2 # fixed replica count
   min_scale    = 1
   max_scale    = 5
   cpu_limit    = "500m"

@@ -24,7 +24,7 @@ func TestAppImport_AnAdoptingApplyLeavesNoTimestampUnknown(t *testing.T) {
 	var mu sync.Mutex
 	stamp := time.Date(2026, 9, 2, 17, 0, 0, 0, time.UTC)
 	app := client.App{ID: "app-1", ProjectID: "proj-1", Name: "web", DisplayName: "Web", Image: "ghcr.io/acme/web:v1",
-		Mode: "always-on", Type: "web", Port: 8080, Ingress: "internal", Status: "running", Replicas: 1,
+		Type: "web", Port: 8080, Ingress: "internal", Status: "running", Replicas: 1,
 		CPULimit: "500m", MemoryLimit: "512Mi",
 		HealthCheckPath: "/", HealthCheckTimeout: 5, HealthCheckInterval: 10, HealthCheckRetries: 3,
 		CreatedAt: stamp, UpdatedAt: stamp}
@@ -34,13 +34,6 @@ func TestAppImport_AnAdoptingApplyLeavesNoTimestampUnknown(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/apps/app-1":
 			_ = json.NewEncoder(w).Encode(app)
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/apps/app-1/traffic":
-			// The traffic read fails on this apply, as it can mid-rollout. It is
-			// the one computed attribute Update did not settle when the API
-			// would not answer, and the unknown it left is the same error as
-			// the timestamps once produced.
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to get traffic"})
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/apps/app-1":
 			var req client.UpdateAppRequest
 			_ = json.NewDecoder(r.Body).Decode(&req)
@@ -77,7 +70,6 @@ resource "fpcloud_app" "web" {
 					resource.TestCheckResourceAttr("fpcloud_app.web", "display_name", "Web, adopted"),
 					resource.TestCheckResourceAttr("fpcloud_app.web", "updated_at", stamp.Add(time.Minute).String()),
 					resource.TestCheckResourceAttr("fpcloud_app.web", "created_at", stamp.String()),
-					resource.TestCheckNoResourceAttr("fpcloud_app.web", "traffic.0.revision"),
 				),
 			},
 		},

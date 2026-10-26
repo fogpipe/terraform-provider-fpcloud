@@ -56,7 +56,7 @@ func TestAppCreate_FailedReleaseGateIsStillRecorded(t *testing.T) {
 	// What the API echoes back for a create that states nothing but the
 	// defaults, so the second apply's result is consistent with its plan.
 	app := client.App{ID: "app-1", ProjectID: "proj-1", Name: "web", Image: "ghcr.io/acme/web:v1",
-		Mode: "always-on", Type: "web", Port: 8080, Ingress: "internal", Status: "failed", Replicas: 1,
+		Type: "web", Port: 8080, Ingress: "internal", Status: "failed", Replicas: 1,
 		ReleaseCommand: []string{"migrate"}, CPULimit: "500m", MemoryLimit: "512Mi",
 		HealthCheckPath: "/", HealthCheckTimeout: 5, HealthCheckInterval: 10, HealthCheckRetries: 3}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

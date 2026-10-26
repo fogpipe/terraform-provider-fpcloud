@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 )
 
 var (
@@ -48,7 +50,6 @@ type AppResourceModel struct {
 	SecurityContext     types.Object `tfsdk:"security_context"`
 	Port                types.Int64  `tfsdk:"port"`
 	Ingress             types.String `tfsdk:"ingress"`
-	Mode                types.String `tfsdk:"mode"`
 	Type                types.String `tfsdk:"type"`
 	ServiceAccount      types.String `tfsdk:"service_account"`
 	IdentityTokenFile   types.String `tfsdk:"identity_token_file"`
@@ -66,7 +67,6 @@ type AppResourceModel struct {
 	Probes              types.Object `tfsdk:"probes"`
 	AdoptExisting       types.Bool   `tfsdk:"adopt_existing"`
 	Routes              types.List   `tfsdk:"routes"`
-	Traffic             types.List   `tfsdk:"traffic"`
 	Status              types.String `tfsdk:"status"`
 	URL                 types.String `tfsdk:"url"`
 	CreatedAt           types.String `tfsdk:"created_at"`
@@ -77,13 +77,6 @@ type AppResourceModel struct {
 type RouteModel struct {
 	Path       types.String `tfsdk:"path"`
 	Visibility types.String `tfsdk:"visibility"`
-}
-
-// TrafficTargetModel describes a traffic target in Terraform state.
-type TrafficTargetModel struct {
-	Revision types.String `tfsdk:"revision"`
-	Percent  types.Int64  `tfsdk:"percent"`
-	URL      types.String `tfsdk:"url"`
 }
 
 // VolumeMountModel describes a file/scratch volume mount in Terraform state.
@@ -136,6 +129,7 @@ func (r *AppResource) Metadata(_ context.Context, req resource.MetadataRequest, 
 func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a Fogpipe application.",
+		Version:     1,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "App ID.",
@@ -168,9 +162,9 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"url_slug": schema.StringAttribute{
-				Description: "Optional vanity host override (ADR-040): sets the app's public host to " +
+				Description: "Optional vanity host override: sets the app's public host to " +
 					"'<url_slug>.app.<platform_domain>'. When empty, the host is derived from the app/" +
-					"project/org names. Globally unique, a DNS-1123 label, always-on mode only. Set to an " +
+					"project/org names. Globally unique, a DNS-1123 label. Set to an " +
 					"empty string to clear it back to the derived host.",
 				Optional: true,
 				Computed: true,
@@ -283,12 +277,6 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Default:     stringdefault.StaticString("internal"),
 				Description: "Ingress setting: 'all' for public access, 'internal' for project-only (default)",
 			},
-			"mode": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     stringdefault.StaticString("always-on"),
-				Description: "Hosting mode: 'always-on' (plain Deployment, default) or 'serverless' (scale-to-zero Knative). Mutable in place — switches the running app over without recreating it.",
-			},
 			"type": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
@@ -341,15 +329,14 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"replicas": schema.Int64Attribute{
-				Description: "Fixed replica count for always-on apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.",
+				Description: "Fixed replica count. Defaults to 1.",
 				Optional:    true,
 				Computed:    true,
 				Default:     int64default.StaticInt64(1),
 			},
 			"min_scale": schema.Int64Attribute{
-				// No static default: min_scale is mode-dependent (always-on and
-				// serverless resolve it differently server-side), so a fixed
-				// default would fight the API's computed value and produce a
+				// No static default: the API computes min_scale when unset, so a
+				// fixed default would fight the API's computed value and produce a
 				// "provider produced inconsistent result after apply". Left
 				// Computed, the API value flows in when unset; UseStateForUnknown
 				// keeps it stable across updates that don't touch scaling.
@@ -452,41 +439,6 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					},
 				},
 			},
-			"traffic": schema.ListNestedAttribute{
-				Description: "Traffic routing configuration. Each block specifies a revision and its traffic percentage. Use '@latest' to route to the latest revision.",
-				Optional:    true,
-				Computed:    true,
-				NestedObject: schema.NestedAttributeObject{
-					// Optional+Computed rather than Required, because the whole
-					// attribute is Optional+Computed and the API fills it in. On
-					// a config that never writes a traffic block, Terraform's
-					// proposed new state descends into the element the provider
-					// read back and nulls every nested attribute the config does
-					// not supply — a Required one has nowhere to take a value
-					// from. That difference from prior state can never be
-					// reconciled, and it marks every other config-null computed
-					// attribute unknown, so the plan is non-empty forever
-					// (fogpipe/cloud-workspace#226). Only a serverless app has
-					// traffic at all, which is why the mode switch was where it
-					// showed.
-					Attributes: map[string]schema.Attribute{
-						"revision": schema.StringAttribute{
-							Description: "Revision name or '@latest' to route to the latest revision.",
-							Optional:    true,
-							Computed:    true,
-						},
-						"percent": schema.Int64Attribute{
-							Description: "Traffic percentage (0-100). All percentages must sum to 100.",
-							Optional:    true,
-							Computed:    true,
-						},
-						"url": schema.StringAttribute{
-							Description: "URL for this traffic target (computed by Knative).",
-							Computed:    true,
-						},
-					},
-				},
-			},
 			"status": schema.StringAttribute{
 				Description: "Current status of the app.",
 				Computed:    true,
@@ -571,7 +523,6 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		Port:                int(plan.Port.ValueInt64()),
 		Ingress:             plan.Ingress.ValueString(),
 		Routes:              routes,
-		Mode:                plan.Mode.ValueString(),
 		Type:                plan.Type.ValueString(),
 		HealthCheckPath:     plan.HealthCheckPath.ValueString(),
 		HealthCheckTimeout:  int(plan.HealthCheckTimeout.ValueInt64()),
@@ -581,10 +532,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		EnvVars:             envMap,
 		SecretEnv:           secretEnv,
 	}
-	// Replicas is an always-on setting; leave it unset for serverless apps.
-	if plan.Mode.ValueString() != "serverless" {
-		createReq.Replicas = int(plan.Replicas.ValueInt64())
-	}
+	createReq.Replicas = int(plan.Replicas.ValueInt64())
 
 	app, err := r.client.CreateApp(ctx, plan.ProjectID.ValueString(), createReq)
 	if err != nil {
@@ -600,9 +548,6 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 			// Record the existing app in state as-is. Image/env/secret/scaling are
 			// not pushed here; a subsequent apply reconciles them against the config.
 			r.setModelFromApp(&plan, existing, &resp.Diagnostics)
-			if targets, terr := r.client.GetTraffic(ctx, existing.ID); terr == nil {
-				r.setTrafficOnModel(ctx, &plan, targets, &resp.Diagnostics)
-			}
 			resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 			return
 		}
@@ -611,16 +556,13 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 
 	// The app exists from here on, whatever the steps below report. Record it
-	// now, so a failure further down — the release gate, a binding, a scale,
-	// traffic — leaves a tainted resource Terraform replaces on the next apply,
+	// now, so a failure further down — the release gate, a binding, a scale —
+	// leaves a tainted resource Terraform replaces on the next apply,
 	// not an app it knows nothing about and collides with on the name
 	// (fogpipe/cloud-workspace#224). The framework hands back the plan when
 	// Create returns early, and the plan's id is unknown, which is saved as
 	// null: a record that names nothing to destroy.
 	r.setModelFromApp(&plan, app, &resp.Diagnostics)
-	if asked.Traffic.IsNull() || asked.Traffic.IsUnknown() {
-		r.setTrafficOnModel(ctx, &plan, nil, &resp.Diagnostics)
-	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -637,18 +579,17 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	// Reconcile scaling after create. min/max scale are sent only when the user
 	// set them (they have no static default now — see the schema), so an unset
-	// value picks up the API's mode-appropriate default without a plan-vs-apply
+	// value picks up the API's default without a plan-vs-apply
 	// drift.
 	replicas := int32(asked.Replicas.ValueInt64())
 	cpuLimit := asked.CPULimit.ValueString()
 	memoryLimit := asked.MemoryLimit.ValueString()
-	alwaysOn := asked.Mode.ValueString() != "serverless"
 
 	scaleReq := client.ScaleRequest{
 		CPULimit:    cpuLimit,
 		MemoryLimit: memoryLimit,
 	}
-	sendScale := cpuLimit != "500m" || memoryLimit != "512Mi" || (alwaysOn && replicas != 1)
+	sendScale := cpuLimit != "500m" || memoryLimit != "512Mi" || replicas != 1
 	if !asked.MinScale.IsNull() {
 		m := int32(asked.MinScale.ValueInt64())
 		scaleReq.MinScale = &m
@@ -659,10 +600,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		scaleReq.MaxScale = &m
 		sendScale = true
 	}
-	// Replicas is an always-on setting; sending it on a serverless app is a 400.
-	if alwaysOn {
-		scaleReq.Replicas = &replicas
-	}
+	scaleReq.Replicas = &replicas
 	if sendScale {
 		scaled, err := r.client.ScaleApp(ctx, app.ID, scaleReq)
 		if err != nil {
@@ -672,44 +610,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		app = scaled
 	}
 
-	// Apply traffic configuration if specified.
-	if !asked.Traffic.IsNull() && !asked.Traffic.IsUnknown() {
-		var trafficModels []TrafficTargetModel
-		resp.Diagnostics.Append(asked.Traffic.ElementsAs(ctx, &trafficModels, false)...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-
-		if len(trafficModels) > 0 {
-			targets := make([]client.TrafficTarget, len(trafficModels))
-			for i, tm := range trafficModels {
-				targets[i] = client.TrafficTarget{
-					Revision: tm.Revision.ValueString(),
-					Percent:  tm.Percent.ValueInt64(),
-				}
-			}
-
-			result, err := r.client.SetTraffic(ctx, app.ID, targets)
-			if err != nil {
-				resp.Diagnostics.AddError("Error setting traffic", err.Error())
-				return
-			}
-			r.setTrafficOnModel(ctx, &plan, result, &resp.Diagnostics)
-		}
-	}
-
 	r.setModelFromApp(&plan, app, &resp.Diagnostics)
-	if asked.Traffic.IsNull() || asked.Traffic.IsUnknown() {
-		// Read current traffic from the API. On error (e.g. a freshly-created
-		// serverless app with no ready revision yet) fall back to an empty set so
-		// traffic resolves to a known value — a Computed attribute left unknown
-		// after apply is an "invalid result object" error.
-		targets, err := r.client.GetTraffic(ctx, app.ID)
-		if err != nil {
-			targets = nil
-		}
-		r.setTrafficOnModel(ctx, &plan, targets, &resp.Diagnostics)
-	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -731,12 +632,6 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	}
 
 	r.setModelFromApp(&state, app, &resp.Diagnostics)
-
-	// Read current traffic.
-	targets, err := r.client.GetTraffic(ctx, state.ID.ValueString())
-	if err == nil {
-		r.setTrafficOnModel(ctx, &state, targets, &resp.Diagnostics)
-	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -876,19 +771,6 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
-	// Switch hosting mode if it changed, before scaling — replicas is only valid
-	// on an always-on app, so scaling below needs the post-switch mode.
-	if plan.Mode.ValueString() != state.Mode.ValueString() {
-		_, err := r.client.SwitchMode(ctx, appID, plan.Mode.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError("Error switching app mode", err.Error())
-			return
-		}
-	}
-
-	// Route carve-outs are validated against the app's mode and ingress, so this
-	// runs after the mode switch above — a serverless→always-on move plus new
-	// routes has to be applied in that order or the server rejects the routes.
 	// An unknown plan value is not a request to change anything — sending it would
 	// serialize to no routes and silently clear the carve-outs the app already has.
 	if !plan.Routes.IsUnknown() && !plan.Routes.Equal(state.Routes) {
@@ -902,9 +784,7 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
-	// Probes are validated against the app's mode, so like routes above this runs
-	// after the mode switch. Also like routes, an unknown plan value is not a
-	// request to change anything — sending it would clear the overrides the app
+	// Like routes, an unknown plan value is not a request to change anything — sending it would clear the overrides the app
 	// already has back to the shared health check.
 	if !plan.Probes.IsUnknown() && !plan.Probes.Equal(state.Probes) {
 		_, err := r.client.UpdateAppProbes(ctx, appID, probesFromModel(ctx, plan.Probes, &resp.Diagnostics))
@@ -933,10 +813,7 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			CPULimit:    plan.CPULimit.ValueString(),
 			MemoryLimit: plan.MemoryLimit.ValueString(),
 		}
-		// Replicas is an always-on setting; sending it on a serverless app is a 400.
-		if plan.Mode.ValueString() != "serverless" {
-			scaleReq.Replicas = &replicas
-		}
+		scaleReq.Replicas = &replicas
 		_, err := r.client.ScaleApp(ctx, appID, scaleReq)
 		if err != nil {
 			resp.Diagnostics.AddError("Error scaling app", err.Error())
@@ -1005,34 +882,11 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
-	// Update traffic if changed.
-	if !plan.Traffic.IsNull() && !plan.Traffic.IsUnknown() {
-		var trafficModels []TrafficTargetModel
-		resp.Diagnostics.Append(plan.Traffic.ElementsAs(ctx, &trafficModels, false)...)
-		if !resp.Diagnostics.HasError() && len(trafficModels) > 0 {
-			targets := make([]client.TrafficTarget, len(trafficModels))
-			for i, tm := range trafficModels {
-				targets[i] = client.TrafficTarget{
-					Revision: tm.Revision.ValueString(),
-					Percent:  tm.Percent.ValueInt64(),
-				}
-			}
-
-			result, err := r.client.SetTraffic(ctx, appID, targets)
-			if err != nil {
-				resp.Diagnostics.AddError("Error setting traffic", err.Error())
-				return
-			}
-			r.setTrafficOnModel(ctx, &plan, result, &resp.Diagnostics)
-		}
-	}
-
 	// Read the settled app and write THAT, rather than whichever call above
 	// happened to run last. Every one of them answers with the app as it stood
-	// mid-request — SwitchMode returns it while the new revision is still
-	// rolling out — so the response that reached state depended on which
-	// attributes the config changed, and a mode switch recorded a half-applied
-	// app whose computed attributes never matched what the API then served
+	// mid-request, so the response that reached state depended on which
+	// attributes the config changed, and a half-applied app's computed
+	// attributes never matched what the API then served
 	// (fogpipe/cloud-workspace#226).
 	app, err := r.client.GetApp(ctx, appID)
 	if err != nil {
@@ -1041,20 +895,6 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	r.setModelFromApp(&plan, app, &resp.Diagnostics)
-
-	// Read current traffic if not already set by the update above. A read
-	// that fails is an empty set, as it is on Create: the attribute is
-	// computed and unknown in the plan, and leaving it that way is an
-	// "invalid result object" on every apply that reaches here — which an
-	// adopting apply does on its first run, and then passes on the second,
-	// reading as a flake rather than a defect (fogpipe/cloud-workspace#257).
-	if plan.Traffic.IsNull() || plan.Traffic.IsUnknown() {
-		targets, err := r.client.GetTraffic(ctx, appID)
-		if err != nil {
-			targets = nil
-		}
-		r.setTrafficOnModel(ctx, &plan, targets, &resp.Diagnostics)
-	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -1142,37 +982,6 @@ func (r *AppResource) findAppByName(ctx context.Context, projectRef, name string
 		}
 	}
 	return nil, fmt.Errorf("app %q in project %q is %w", name, projectRef, errNotAccessible)
-}
-
-// trafficTargetAttrTypes returns the attribute types for the traffic target object.
-func trafficTargetAttrTypes() map[string]attr.Type {
-	return map[string]attr.Type{
-		"revision": types.StringType,
-		"percent":  types.Int64Type,
-		"url":      types.StringType,
-	}
-}
-
-// setTrafficOnModel converts API traffic targets to the Terraform model.
-func (r *AppResource) setTrafficOnModel(_ context.Context, model *AppResourceModel, targets []client.TrafficTarget, diags *diag.Diagnostics) {
-	if len(targets) == 0 {
-		model.Traffic = types.ListNull(types.ObjectType{AttrTypes: trafficTargetAttrTypes()})
-		return
-	}
-
-	elems := make([]attr.Value, len(targets))
-	for i, t := range targets {
-		obj, d := types.ObjectValue(trafficTargetAttrTypes(), map[string]attr.Value{
-			"revision": types.StringValue(t.Revision),
-			"percent":  types.Int64Value(t.Percent),
-			"url":      types.StringValue(t.URL),
-		})
-		diags.Append(d...)
-		elems[i] = obj
-	}
-	list, d := types.ListValue(types.ObjectType{AttrTypes: trafficTargetAttrTypes()}, elems)
-	diags.Append(d...)
-	model.Traffic = list
 }
 
 // routeAttrTypes returns the attribute types for the route object.
@@ -1392,7 +1201,6 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	model.Image = types.StringValue(app.Image)
 	model.Port = types.Int64Value(int64(app.Port))
 	model.Ingress = types.StringValue(app.Ingress)
-	model.Mode = types.StringValue(app.Mode)
 	model.Type = types.StringValue(app.Type)
 	model.Replicas = types.Int64Value(int64(app.Replicas))
 	model.MinScale = types.Int64Value(int64(app.MinScale))
@@ -1589,4 +1397,32 @@ func secretEnvFromModel(ctx context.Context, m types.Map, diags *diag.Diagnostic
 		out[k] = client.SecretRef{Secret: e.Secret.ValueString(), Path: e.Path.ValueString()}
 	}
 	return out
+}
+
+var _ resource.ResourceWithUpgradeState = &AppResource{}
+
+// UpgradeState moves a state written against schema version 0 forward. `mode`
+// and `traffic` left the schema when the serverless runtime was deleted, and
+// the framework refuses prior state carrying an attribute the schema no longer
+// has, so both keys are dropped from the raw state and nothing else moves.
+func (r *AppResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
+	return map[int64]resource.StateUpgrader{
+		0: {StateUpgrader: upgradeAppStateV0},
+	}
+}
+
+func upgradeAppStateV0(_ context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(req.RawState.JSON, &raw); err != nil {
+		resp.Diagnostics.AddError("Error reading prior app state", err.Error())
+		return
+	}
+	delete(raw, "mode")
+	delete(raw, "traffic")
+	out, err := json.Marshal(raw)
+	if err != nil {
+		resp.Diagnostics.AddError("Error writing upgraded app state", err.Error())
+		return
+	}
+	resp.DynamicValue = &tfprotov6.DynamicValue{JSON: out}
 }

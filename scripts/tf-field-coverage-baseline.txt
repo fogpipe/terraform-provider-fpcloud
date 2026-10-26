@@ -89,7 +89,6 @@ Database.backups_disabled
 # --- derived by the platform, addressable by nothing --------------------
 IAMBinding.resource_name
 App.cluster_token
-Bucket.garage_bucket_id
 Project.namespace
 # The parent is already the resource's own reference, so the id it echoes
 # adds nothing to configure.

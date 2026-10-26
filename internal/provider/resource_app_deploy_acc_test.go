@@ -40,7 +40,6 @@ resource "fpcloud_app" "test" {
   name       = %[2]q
   image      = %[3]q
   type       = "worker"
-  mode       = "always-on"
   replicas   = %[4]d
   command    = ["sleep"]
   args       = ["infinity"]

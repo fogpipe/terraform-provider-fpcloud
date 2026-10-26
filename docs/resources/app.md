@@ -18,8 +18,7 @@ resource "fpcloud_app" "web" {
   name       = "web"
   image      = "ghcr.io/myorg/webapp:latest"
   port       = 3000
-  ingress    = "all"       # "all" = public, "internal" = default
-  mode       = "always-on" # "always-on" (plain Deployment, default) | "serverless" (Knative)
+  ingress    = "all" # "all" = public, "internal" = default
 
   env = {
     APP_NAME = "My App"
@@ -57,7 +56,7 @@ resource "fpcloud_app" "web" {
     }
   }
 
-  replicas     = 2 # fixed replica count (always-on mode)
+  replicas     = 2 # fixed replica count
   min_scale    = 1
   max_scale    = 5
   cpu_limit    = "500m"
@@ -127,24 +126,6 @@ resource "fpcloud_app" "uploader" {
     AWS_ACCESS_KEY_ID     = { secret = fpcloud_bucket.uploads.secrets["access_key_id"] }
     AWS_SECRET_ACCESS_KEY = { secret = fpcloud_bucket.uploads.secrets["secret_access_key"] }
   }
-}
-```
-
-## Example Usage - Serverless
-
-```terraform
-# Scale to zero between requests. A serverless app has no fixed replica count:
-# min_scale 0 lets it sleep, max_scale bounds a burst. Switching mode later
-# moves the running app over in place.
-resource "fpcloud_app" "preview" {
-  project_id = fpcloud_project.production.id
-  name       = "preview"
-  image      = "ghcr.io/myorg/preview:latest"
-  port       = 3000
-  ingress    = "all"
-  mode       = "serverless"
-  min_scale  = 0
-  max_scale  = 10
 }
 ```
 
@@ -224,17 +205,15 @@ resource "fpcloud_iam_binding" "reporter_reads_stripe" {
 - `max_scale` (Number) Maximum number of instances. Server-computed when unset.
 - `memory_limit` (String) Memory limit (e.g. 512Mi). Defaults to 512Mi.
 - `min_scale` (Number) Minimum number of instances. Server-computed when unset.
-- `mode` (String) Hosting mode: 'always-on' (plain Deployment, default) or 'serverless' (scale-to-zero Knative). Mutable in place — switches the running app over without recreating it.
 - `port` (Number) Container port. Defaults to 8080 on a web app; not valid on a worker.
 - `probes` (Attributes) Per-probe overrides for liveness, readiness and startup. By default all three run the app's health_check_* settings, so one request decides both whether traffic reaches the app and whether the pod is restarted. Point liveness at a cheap path that touches no downstream and readiness at the one that does, and a dependency blip pulls the pod out of the load balancer without killing it. Any attribute left unset keeps the matching health_check_* value, so overriding a path never means restating the timing. Always-on apps only. (see [below for nested schema](#nestedatt--probes))
 - `release_command` (List of String) Command run once per deploy — from the exact image being deployed, with the app's env/secrets — before the new version goes live; a failure aborts the deploy (e.g. DB migrations). A single element containing spaces runs via 'sh -c'; use multiple elements for exec form. Changed alongside the image, it is sent as part of that deploy and gates it, so the apply that introduces a migration is the apply that runs it. Read back from the API, so a change made outside Terraform shows as drift.
-- `replicas` (Number) Fixed replica count for always-on apps. Defaults to 1. Ignored for serverless apps, which scale via min_scale/max_scale.
+- `replicas` (Number) Fixed replica count. Defaults to 1.
 - `routes` (Attributes List) Per-path visibility carve-outs. A route marked internal is withheld from the external ingress — on the app's own URL and on every custom domain attached to it — while staying reachable at the app's in-cluster address, so a scheduled job calling it keeps working. External requests are refused at the edge. Matching is by path prefix on segment boundaries ('/internal/' covers '/internal/sync' but not '/internalx'). Always-on apps with ingress = "all" only. (see [below for nested schema](#nestedatt--routes))
 - `secret_env` (Attributes Map) Environment variables that reference a secret (a project secret by name, an organization secret as `org/<name>`), keyed by variable (ADR-284 §7). The variable holds the secret's value; with `path`, the file at that path holds the value and the variable holds the path. Referencing a database's owner `secrets["url"]` is how the app is handed that database, a bucket's `secrets["access_key_id"]` and `secrets["secret_access_key"]` how it is handed the bucket: the grant to the app's identity is written with the reference when you may make it, and the write is refused naming the grant when you may not. Set as part of the create, so a release command that reads one is not gated before it arrives. (see [below for nested schema](#nestedatt--secret_env))
 - `security_context` (Attributes) Opt-in pod/container hardening. When set, the container is locked to the PSS-restricted baseline (drop ALL capabilities, no privilege escalation, RuntimeDefault seccomp) plus the run-as identity below. Updated in place: removing the block clears it, which is how an app that once needed root returns to the platform default. (see [below for nested schema](#nestedatt--security_context))
-- `traffic` (Attributes List) Traffic routing configuration. Each block specifies a revision and its traffic percentage. Use '@latest' to route to the latest revision. (see [below for nested schema](#nestedatt--traffic))
 - `type` (String) Process type: 'web' (default) serves HTTP behind a Service, or 'worker' — a long-running process with no port, Service, ingress, URL or health checks. A worker is always-on only. Changing this replaces the app: it decides whether the app has an address at all.
-- `url_slug` (String) Optional vanity host override (ADR-040): sets the app's public host to '<url_slug>.app.<platform_domain>'. When empty, the host is derived from the app/project/org names. Globally unique, a DNS-1123 label, always-on mode only. Set to an empty string to clear it back to the derived host.
+- `url_slug` (String) Optional vanity host override: sets the app's public host to '<url_slug>.app.<platform_domain>'. When empty, the host is derived from the app/project/org names. Globally unique, a DNS-1123 label. Set to an empty string to clear it back to the derived host.
 - `volume_mounts` (Attributes List) Mount a ConfigMap or Secret as read-only files, or an emptyDir as writable scratch, at a container path. Create-only — the API has no update path, so any change, including one made outside Terraform, forces the app to be replaced. (see [below for nested schema](#nestedatt--volume_mounts))
 
 ### Read-Only
@@ -327,19 +306,6 @@ Optional:
 - `run_as_group` (Number) GID to run the container process as.
 - `run_as_non_root` (Boolean) Require the container to run as a non-root user. Defaults to false.
 - `run_as_user` (Number) UID to run the container process as.
-
-
-<a id="nestedatt--traffic"></a>
-### Nested Schema for `traffic`
-
-Optional:
-
-- `percent` (Number) Traffic percentage (0-100). All percentages must sum to 100.
-- `revision` (String) Revision name or '@latest' to route to the latest revision.
-
-Read-Only:
-
-- `url` (String) URL for this traffic target (computed by Knative).
 
 
 <a id="nestedatt--volume_mounts"></a>

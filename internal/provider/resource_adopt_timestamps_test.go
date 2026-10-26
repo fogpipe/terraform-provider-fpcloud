@@ -24,7 +24,7 @@ func TestAppImport_AnAdoptingApplyLeavesNoTimestampUnknown(t *testing.T) {
 	var mu sync.Mutex
 	stamp := time.Date(2026, 9, 2, 17, 0, 0, 0, time.UTC)
 	app := client.App{ID: "app-1", ProjectID: "proj-1", Name: "web", DisplayName: "Web", Image: "ghcr.io/acme/web:v1",
-		Type: "web", Port: 8080, Ingress: "internal", Status: "running", Replicas: 1,
+		Type: "web", Port: 8080, Ingress: "internal", Status: "running", MinScale: 1, MaxScale: 1,
 		CPULimit: "500m", MemoryLimit: "512Mi",
 		HealthCheckPath: "/", HealthCheckTimeout: 5, HealthCheckInterval: 10, HealthCheckRetries: 3,
 		CreatedAt: stamp, UpdatedAt: stamp}

@@ -18,7 +18,7 @@ import (
 // inconsistent result after apply" — an error that reports a deploy that
 // actually succeeded as a failed one, so CI gating on the exit code stops.
 //
-// Nothing in the provider's own test set changed `image` or `replicas`, which
+// Nothing in the provider's own test set changed `image` or the size, which
 // is why both went unnoticed here. Each step's apply is followed by the
 // framework's own empty-plan check, so an attribute drifting on a deploy fails
 // this test whether it drifts during the apply or after it.
@@ -29,7 +29,7 @@ func TestAccAppResource_deployKeepsWhatItWasNotAsked(t *testing.T) {
 	projName := accName("appdep")
 	appName := accName("dep")
 
-	config := func(image string, replicas int) string {
+	config := func(image string, size int) string {
 		return fmt.Sprintf(`
 resource "fpcloud_project" "test" {
   name = %[1]q
@@ -40,7 +40,8 @@ resource "fpcloud_app" "test" {
   name       = %[2]q
   image      = %[3]q
   type       = "worker"
-  replicas   = %[4]d
+  min_scale  = %[4]d
+  max_scale  = %[4]d
   command    = ["sleep"]
   args       = ["infinity"]
 
@@ -54,7 +55,7 @@ resource "fpcloud_app" "test" {
     run_as_non_root = false
   }
 }
-`, projName, appName, image, replicas)
+`, projName, appName, image, size)
 	}
 
 	resource.Test(t, resource.TestCase{
@@ -65,17 +66,19 @@ resource "fpcloud_app" "test" {
 				Config: config("busybox:1.36", 2),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("fpcloud_app.test", "image", "busybox:1.36"),
-					resource.TestCheckResourceAttr("fpcloud_app.test", "replicas", "2"),
+					resource.TestCheckResourceAttr("fpcloud_app.test", "min_scale", "2"),
+					resource.TestCheckResourceAttr("fpcloud_app.test", "max_scale", "2"),
 				),
 			},
 			{
-				// The deploy: image changes, replicas is not mentioned. It has to
+				// The deploy: image changes, the size is not mentioned. It has to
 				// survive, and the image has to read back as the tag that was asked
 				// for rather than the digest it resolves to.
 				Config: config("busybox:1.37", 2),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("fpcloud_app.test", "image", "busybox:1.37"),
-					resource.TestCheckResourceAttr("fpcloud_app.test", "replicas", "2"),
+					resource.TestCheckResourceAttr("fpcloud_app.test", "min_scale", "2"),
+					resource.TestCheckResourceAttr("fpcloud_app.test", "max_scale", "2"),
 				),
 			},
 			{
@@ -83,7 +86,8 @@ resource "fpcloud_app" "test" {
 				Config: config("busybox:1.37", 3),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("fpcloud_app.test", "image", "busybox:1.37"),
-					resource.TestCheckResourceAttr("fpcloud_app.test", "replicas", "3"),
+					resource.TestCheckResourceAttr("fpcloud_app.test", "min_scale", "3"),
+					resource.TestCheckResourceAttr("fpcloud_app.test", "max_scale", "3"),
 				),
 			},
 			{
@@ -92,7 +96,8 @@ resource "fpcloud_app" "test" {
 				Config: config("busybox:1.36", 2),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("fpcloud_app.test", "image", "busybox:1.36"),
-					resource.TestCheckResourceAttr("fpcloud_app.test", "replicas", "2"),
+					resource.TestCheckResourceAttr("fpcloud_app.test", "min_scale", "2"),
+					resource.TestCheckResourceAttr("fpcloud_app.test", "max_scale", "2"),
 				),
 			},
 		},

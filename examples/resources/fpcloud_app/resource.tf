@@ -41,8 +41,7 @@ resource "fpcloud_app" "web" {
     }
   }
 
-  replicas     = 2 # fixed replica count
-  min_scale    = 1
+  min_scale    = 1 # equal bounds are a fixed size; apart, the app grows on CPU between them
   max_scale    = 5
   cpu_limit    = "500m"
   memory_limit = "512Mi"

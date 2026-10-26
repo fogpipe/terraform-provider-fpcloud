@@ -15,7 +15,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
@@ -55,7 +54,6 @@ type AppResourceModel struct {
 	IdentityTokenFile   types.String `tfsdk:"identity_token_file"`
 	Env                 types.Map    `tfsdk:"env"`
 	SecretEnv           types.Map    `tfsdk:"secret_env"`
-	Replicas            types.Int64  `tfsdk:"replicas"`
 	MinScale            types.Int64  `tfsdk:"min_scale"`
 	MaxScale            types.Int64  `tfsdk:"max_scale"`
 	CPULimit            types.String `tfsdk:"cpu_limit"`
@@ -328,32 +326,17 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					},
 				},
 			},
-			"replicas": schema.Int64Attribute{
-				Description: "Fixed replica count. Defaults to 1.",
+			"min_scale": schema.Int64Attribute{
+				Description: "Fewest instances the app runs. Defaults to 1. Equal to max_scale is a fixed size; below it, the app grows on CPU load between the two.",
 				Optional:    true,
 				Computed:    true,
 				Default:     int64default.StaticInt64(1),
 			},
-			"min_scale": schema.Int64Attribute{
-				// No static default: the API computes min_scale when unset, so a
-				// fixed default would fight the API's computed value and produce a
-				// "provider produced inconsistent result after apply". Left
-				// Computed, the API value flows in when unset; UseStateForUnknown
-				// keeps it stable across updates that don't touch scaling.
-				Description: "Minimum number of instances. Server-computed when unset.",
-				Optional:    true,
-				Computed:    true,
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.UseStateForUnknown(),
-				},
-			},
 			"max_scale": schema.Int64Attribute{
-				Description: "Maximum number of instances. Server-computed when unset.",
+				Description: "Most instances the app grows to, at most 10. Defaults to 1, a fixed size of one.",
 				Optional:    true,
 				Computed:    true,
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.UseStateForUnknown(),
-				},
+				Default:     int64default.StaticInt64(1),
 			},
 			"cpu_limit": schema.StringAttribute{
 				Description: "CPU limit (e.g. 500m). Defaults to 500m.",
@@ -532,7 +515,8 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		EnvVars:             envMap,
 		SecretEnv:           secretEnv,
 	}
-	createReq.Replicas = int(plan.Replicas.ValueInt64())
+	minScale, maxScale := int32(plan.MinScale.ValueInt64()), int32(plan.MaxScale.ValueInt64())
+	createReq.MinScale, createReq.MaxScale = &minScale, &maxScale
 
 	app, err := r.client.CreateApp(ctx, plan.ProjectID.ValueString(), createReq)
 	if err != nil {
@@ -577,31 +561,15 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		}
 	}
 
-	// Reconcile scaling after create. min/max scale are sent only when the user
-	// set them (they have no static default now — see the schema), so an unset
-	// value picks up the API's default without a plan-vs-apply
-	// drift.
-	replicas := int32(asked.Replicas.ValueInt64())
+	// The bounds rode on the create; only the limits are set afterwards, and
+	// only when they differ from the platform's defaults.
 	cpuLimit := asked.CPULimit.ValueString()
 	memoryLimit := asked.MemoryLimit.ValueString()
-
 	scaleReq := client.ScaleRequest{
 		CPULimit:    cpuLimit,
 		MemoryLimit: memoryLimit,
 	}
-	sendScale := cpuLimit != "500m" || memoryLimit != "512Mi" || replicas != 1
-	if !asked.MinScale.IsNull() {
-		m := int32(asked.MinScale.ValueInt64())
-		scaleReq.MinScale = &m
-		sendScale = true
-	}
-	if !asked.MaxScale.IsNull() {
-		m := int32(asked.MaxScale.ValueInt64())
-		scaleReq.MaxScale = &m
-		sendScale = true
-	}
-	scaleReq.Replicas = &replicas
-	if sendScale {
+	if cpuLimit != "500m" || memoryLimit != "512Mi" {
 		scaled, err := r.client.ScaleApp(ctx, app.ID, scaleReq)
 		if err != nil {
 			resp.Diagnostics.AddError("Error scaling app after creation", err.Error())
@@ -800,20 +768,17 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	// Update scaling if any scaling attributes changed.
 	if plan.MinScale.ValueInt64() != state.MinScale.ValueInt64() ||
 		plan.MaxScale.ValueInt64() != state.MaxScale.ValueInt64() ||
-		plan.Replicas.ValueInt64() != state.Replicas.ValueInt64() ||
 		plan.CPULimit.ValueString() != state.CPULimit.ValueString() ||
 		plan.MemoryLimit.ValueString() != state.MemoryLimit.ValueString() {
 
 		minScale := int32(plan.MinScale.ValueInt64())
 		maxScale := int32(plan.MaxScale.ValueInt64())
-		replicas := int32(plan.Replicas.ValueInt64())
 		scaleReq := client.ScaleRequest{
 			MinScale:    &minScale,
 			MaxScale:    &maxScale,
 			CPULimit:    plan.CPULimit.ValueString(),
 			MemoryLimit: plan.MemoryLimit.ValueString(),
 		}
-		scaleReq.Replicas = &replicas
 		_, err := r.client.ScaleApp(ctx, appID, scaleReq)
 		if err != nil {
 			resp.Diagnostics.AddError("Error scaling app", err.Error())
@@ -1202,7 +1167,6 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	model.Port = types.Int64Value(int64(app.Port))
 	model.Ingress = types.StringValue(app.Ingress)
 	model.Type = types.StringValue(app.Type)
-	model.Replicas = types.Int64Value(int64(app.Replicas))
 	model.MinScale = types.Int64Value(int64(app.MinScale))
 	model.MaxScale = types.Int64Value(int64(app.MaxScale))
 	model.CPULimit = types.StringValue(app.CPULimit)
@@ -1419,6 +1383,20 @@ func upgradeAppStateV0(_ context.Context, req resource.UpgradeStateRequest, resp
 	}
 	delete(raw, "mode")
 	delete(raw, "traffic")
+	// `replicas` was a fixed size beside bounds nothing read; both bounds now
+	// equal the count it ran, so a config rewritten from `replicas = n` to
+	// `min_scale = max_scale = n` plans no change.
+	var replicas float64
+	if r, ok := raw["replicas"]; ok {
+		_ = json.Unmarshal(r, &replicas)
+	}
+	if replicas < 1 {
+		replicas = 1
+	}
+	count, _ := json.Marshal(replicas)
+	raw["min_scale"] = count
+	raw["max_scale"] = count
+	delete(raw, "replicas")
 	out, err := json.Marshal(raw)
 	if err != nil {
 		resp.Diagnostics.AddError("Error writing upgraded app state", err.Error())

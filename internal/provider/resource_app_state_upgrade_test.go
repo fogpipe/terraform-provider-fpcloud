@@ -28,8 +28,12 @@ func TestUpgradeAppStateV0DropsModeAndTraffic(t *testing.T) {
 			t.Errorf("%q should have left the state", gone)
 		}
 	}
-	if got["id"] != "app-1" || got["name"] != "web" || got["replicas"] != float64(2) {
+	if got["id"] != "app-1" || got["name"] != "web" {
 		t.Errorf("other attributes must be untouched, got %v", got)
+	}
+	// `replicas` leaves too, as both bounds (resource_app_state_test.go).
+	if _, ok := got["replicas"]; ok || got["min_scale"] != float64(2) || got["max_scale"] != float64(2) {
+		t.Errorf("replicas should have become min_scale = max_scale = 2, got %v", got)
 	}
 	if _, ok := got["routes"]; !ok {
 		t.Errorf("a null attribute is kept as null, not dropped")

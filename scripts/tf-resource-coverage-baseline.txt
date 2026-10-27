@@ -12,6 +12,11 @@
 ListOrgServiceAccounts
 ListServiceAccounts
 GetMe
+# The role catalogue is the platform's, read by people (`fpcloud iam roles`,
+# the console's grant drawer) to see what a role carries; a binding's `role`
+# is a string the API validates against it on apply, so Terraform declares
+# bindings and never the catalogue.
+ListRoles
 # --- one-shot operations and cross-project reads (fogpipe/cloud-workspace#306
 #     bumped the client and surfaced these; each is a reviewed exclusion) -----
 # The database tunnel's connection details (ADR-045, ADR-154): a credential

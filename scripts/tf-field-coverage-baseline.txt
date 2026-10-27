@@ -124,12 +124,11 @@ Runner.updated_at
 ServiceAccount.updated_at
 
 # --- relative to whoever is reading -----------------------------------------
-# The caller's own role on the account's scope, read with the row so a console
-# offers only the grants the caller may make (ADR-283). It is a fact about the
-# credential the provider runs with, not about the account, and state that
-# changed with the operator's identity would be drift nobody declared.
-ServiceAccount.caller_role
-Project.caller_role
+# The caller's permissions on the scope, read with the project row so a
+# console draws what it offers from them. They are a fact about the credential
+# the provider runs with, not about the project, and state that changed with
+# the operator's identity would be drift nobody declared.
+Project.caller_permissions
 
 # --- a catalog instance is made, never declared (ADR-235) ------------------
 # `template` names the catalog entry an app was deployed from by the console or

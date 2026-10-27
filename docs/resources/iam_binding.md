@@ -3,12 +3,12 @@
 page_title: "fpcloud_iam_binding Resource - fpcloud"
 subcategory: ""
 description: |-
-  Manages an IAM binding: a role on a Fogpipe project, or with resource a database, bucket or secret handed to a member (user on a database or a bucket, reader on a secret).
+  Manages an IAM binding: a role on a Fogpipe project, or with resource a database, bucket or secret handed to a member (database.user, bucket.user or secret.reader).
 ---
 
 # fpcloud_iam_binding (Resource)
 
-Manages an IAM binding: a role on a Fogpipe project, or with `resource` a database, bucket or secret handed to a member (`user` on a database or a bucket, `reader` on a secret).
+Manages an IAM binding: a role on a Fogpipe project, or with `resource` a database, bucket or secret handed to a member (`database.user`, `bucket.user` or `secret.reader`).
 
 ## Example Usage
 
@@ -23,13 +23,13 @@ resource "fpcloud_iam_binding" "jane_editor" {
 
 # A resource handed to an app's own identity, with no secret reference in the
 # app's env: the binding alone is the grant. The role is the kind's handed
-# role, `user` on a database or a bucket, `reader` on a secret.
+# role: `database.user`, `bucket.user` or `secret.reader`.
 resource "fpcloud_iam_binding" "api_uses_orders" {
   project_id  = fpcloud_project.production.id
   resource    = "database/${fpcloud_database.orders.id}"
   member_type = "serviceAccount"
   member_id   = fpcloud_app.api.service_account
-  role        = "user"
+  role        = "database.user"
 }
 ```
 
@@ -45,7 +45,7 @@ resource "fpcloud_iam_binding" "api_uses_orders" {
 
 ### Optional
 
-- `resource` (String) A resource in the project handed to the member instead of a project role, as `<kind>/<id>`: `database/<id>`, `bucket/<id>` or `secret/<id>`. The role is then `user` (database, bucket) or `reader` (secret). Handing a resource over needs what reading its credential needs: write on the database, administration of the bucket, write on the project for a secret.
+- `resource` (String) A resource in the project handed to the member instead of a project role, as `<kind>/<id>`: `database/<id>`, `bucket/<id>` or `secret/<id>`. The role is then `database.user`, `bucket.user` or `secret.reader`. Handing a resource over needs what reading its credential needs: write on the database, administration of the bucket, write on the project for a secret.
 
 ### Read-Only
 

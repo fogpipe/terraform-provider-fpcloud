@@ -96,7 +96,7 @@ func (r *IAMBindingResource) Metadata(_ context.Context, req resource.MetadataRe
 
 func (r *IAMBindingResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages an IAM binding: a role on a Fogpipe project, or with `resource` a database, bucket or secret handed to a member (`user` on a database or a bucket, `reader` on a secret).",
+		Description: "Manages an IAM binding: a role on a Fogpipe project, or with `resource` a database, bucket or secret handed to a member (`database.user`, `bucket.user` or `secret.reader`).",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Binding ID.",
@@ -134,7 +134,7 @@ func (r *IAMBindingResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				},
 			},
 			"resource": schema.StringAttribute{
-				Description: "A resource in the project handed to the member instead of a project role, as `<kind>/<id>`: `database/<id>`, `bucket/<id>` or `secret/<id>`. The role is then `user` (database, bucket) or `reader` (secret). Handing a resource over needs what reading its credential needs: write on the database, administration of the bucket, write on the project for a secret.",
+				Description: "A resource in the project handed to the member instead of a project role, as `<kind>/<id>`: `database/<id>`, `bucket/<id>` or `secret/<id>`. The role is then `database.user`, `bucket.user` or `secret.reader`. Handing a resource over needs what reading its credential needs: write on the database, administration of the bucket, write on the project for a secret.",
 				Optional:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),

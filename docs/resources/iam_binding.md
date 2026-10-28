@@ -45,7 +45,7 @@ resource "fpcloud_iam_binding" "api_uses_orders" {
 
 ### Optional
 
-- `resource` (String) A resource in the project handed to the member instead of a project role, as `<kind>/<id>`: `database/<id>`, `bucket/<id>` or `secret/<id>`. The role is then `database.user`, `bucket.user` or `secret.reader`. Handing a resource over needs what reading its credential needs: write on the database, administration of the bucket, write on the project for a secret.
+- `resource` (String) A resource in the project handed to the member instead of a project role, as `<kind>/<id>`: `database/<id>`, `bucket/<id>` or `secret/<id>`. The role is then `database.user`, `bucket.user` or `secret.reader`. Granting it needs the same as granting a project role: `iam.set` on the project and everything the role carries, so an owner hands a resource over.
 
 ### Read-Only
 

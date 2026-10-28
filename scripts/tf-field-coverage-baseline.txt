@@ -10,11 +10,11 @@ App.service_account_id
 BucketKey.can_owner
 BucketKey.can_read
 BucketKey.can_write
-# The binding names its member as a type and an id, which is what the API
-# takes. `member` is the joined form the CLI prints.
-IAMBinding.member
-# The resource this binds to is `project_id` — the provider has one binding
-# resource per scope rather than one carrying a discriminator.
+# The binding's `member` is one string, `<type>:<address>`, the way every
+# client surface spells it; the API's two fields are split from it.
+IAMBinding.member_type
+# The target is `org_id` or `project_id`, with `resource` for a row held on a
+# resource in the scope, not the API's type-and-id pair.
 IAMBinding.resource_id
 IAMBinding.resource_type
 
@@ -88,6 +88,8 @@ Database.backups_disabled
 
 # --- derived by the platform, addressable by nothing --------------------
 IAMBinding.resource_name
+# An organization's row in a project's list, which is never the resource's own.
+IAMBinding.inherited
 App.cluster_token
 Project.namespace
 # The parent is already the resource's own reference, so the id it echoes

@@ -3,33 +3,40 @@
 page_title: "fpcloud_iam_binding Resource - fpcloud"
 subcategory: ""
 description: |-
-  Manages an IAM binding: a role on a Fogpipe project, or with resource a database, bucket or secret handed to a member (database.user, bucket.user or secret.reader).
+  Manages an IAM binding: a member holding a role on a Fogpipe organization or project, or, with resource, handed a database, bucket or secret in it (database.user, bucket.user or secret.reader). Billing is two roles on the organization, billing.viewer and billing.admin, which an owner holds by inclusion. A member may hold several roles on one target; each is its own binding.
 ---
 
 # fpcloud_iam_binding (Resource)
 
-Manages an IAM binding: a role on a Fogpipe project, or with `resource` a database, bucket or secret handed to a member (`database.user`, `bucket.user` or `secret.reader`).
+Manages an IAM binding: a member holding a role on a Fogpipe organization or project, or, with `resource`, handed a database, bucket or secret in it (`database.user`, `bucket.user` or `secret.reader`). Billing is two roles on the organization, `billing.viewer` and `billing.admin`, which an owner holds by inclusion. A member may hold several roles on one target; each is its own binding.
 
 ## Example Usage
 
 ```terraform
-# A person on a project. Roles contain each other: viewer < editor < owner.
+# A person on a project. A member may hold several roles on one target; each
+# is its own binding, and the scope roles contain each other: viewer < editor < owner.
 resource "fpcloud_iam_binding" "jane_editor" {
-  project_id  = fpcloud_project.production.id
-  member_type = "user"
-  member_id   = "jane@example.com"
-  role        = "editor"
+  project_id = fpcloud_project.production.id
+  member     = "user:jane@example.com"
+  role       = "editor"
+}
+
+# A billing role is a binding on the organization. An owner holds
+# billing.admin by inclusion; this gives someone the bill and nothing else.
+resource "fpcloud_iam_binding" "finance_reads_the_bill" {
+  org_id = fpcloud_project.production.organization_id
+  member = "user:finance@example.com"
+  role   = "billing.viewer"
 }
 
 # A resource handed to an app's own identity, with no secret reference in the
 # app's env: the binding alone is the grant. The role is the kind's handed
 # role: `database.user`, `bucket.user` or `secret.reader`.
 resource "fpcloud_iam_binding" "api_uses_orders" {
-  project_id  = fpcloud_project.production.id
-  resource    = "database/${fpcloud_database.orders.id}"
-  member_type = "serviceAccount"
-  member_id   = fpcloud_app.api.service_account
-  role        = "database.user"
+  project_id = fpcloud_project.production.id
+  resource   = "database/${fpcloud_database.orders.id}"
+  member     = "serviceAccount:${fpcloud_app.api.service_account}"
+  role       = "database.user"
 }
 ```
 
@@ -38,14 +45,14 @@ resource "fpcloud_iam_binding" "api_uses_orders" {
 
 ### Required
 
-- `member_id` (String) The ID of the member.
-- `member_type` (String) The type of member (user or serviceAccount).
-- `project_id` (String) The project to bind the role on.
-- `role` (String) The role to grant (owner, editor, viewer).
+- `member` (String) The member, `user:<email>` or `serviceAccount:<email>`.
+- `role` (String) The role: `owner`, `editor`, `viewer`, a fine role such as `app.deployer`, `billing.viewer` or `billing.admin` on an organization, or the handed role of a `resource`. `fpcloud iam roles` lists them.
 
 ### Optional
 
-- `resource` (String) A resource in the project handed to the member instead of a project role, as `<kind>/<id>`: `database/<id>`, `bucket/<id>` or `secret/<id>`. The role is then `database.user`, `bucket.user` or `secret.reader`. Granting it needs the same as granting a project role: `iam.set` on the project and everything the role carries, so an owner hands a resource over.
+- `org_id` (String) The organization the role is held on. Exactly one of `org_id` and `project_id`.
+- `project_id` (String) The project the role is held on. Exactly one of `org_id` and `project_id`.
+- `resource` (String) A resource in the scope handed to the member instead of a role on the scope, as `<kind>/<id>`: `database/<id>`, `bucket/<id>` or `secret/<id>` of the project, or `secret/<id>` for an organization's own secret. The role is then `database.user`, `bucket.user` or `secret.reader`. Handing a resource over needs `iam.set` on it and everything the role carries, so an owner does it.
 
 ### Read-Only
 
@@ -59,7 +66,9 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import by "project_id/binding_id": the API lists bindings per project. The
-# member comes back spelled the way the server canonicalized it (an email).
-terraform import fpcloud_iam_binding.viewer 6c1f0a2e-9d3b-4b7e-8f2a-0e5d7c4a1b9f/2a7e4c1d-5b8f-4e3a-9c6d-1f0b8a7e5d3c
+# Import by "project/<project_id>/<binding_id>" or "organization/<org_id>/<binding_id>":
+# the API lists bindings per scope. The member comes back spelled the way the
+# server canonicalized it, and the resource it is held on, if any, is read back.
+terraform import fpcloud_iam_binding.viewer project/6c1f0a2e-9d3b-4b7e-8f2a-0e5d7c4a1b9f/2a7e4c1d-5b8f-4e3a-9c6d-1f0b8a7e5d3c
+terraform import fpcloud_iam_binding.finance organization/4b9d2e7a-1c5f-4a8e-b3d6-9f0e8c7a5b1d/9e1c3b5a-7d2f-4c8e-a6b4-0f3d9e8c7b2a
 ```

@@ -51,7 +51,7 @@ func (r *BillingBudgetResource) Schema(_ context.Context, _ resource.SchemaReque
 			"about what runs — no deploy is refused and no workload is stopped. To bound " +
 			"what a project can actually consume, set its resource caps instead.\n\n" +
 			"There is at most one budget per organization, so the organization is the id. " +
-			"Managing it requires `billing.admin` (`fpcloud_billing_binding`).",
+			"Managing it requires `billing.admin`, a role on the organization (`fpcloud_iam_binding` with `org_id`).",
 		Attributes: map[string]schema.Attribute{
 			"org_id": schema.StringAttribute{
 				Description: "The organization this budget belongs to. Also the resource id — " +

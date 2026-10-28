@@ -5,7 +5,7 @@ subcategory: ""
 description: |-
   A spend target for a Fogpipe organization, and the percentages of it at which the organization is told.
   A budget alerts; it never caps. Crossing a threshold changes nothing about what runs — no deploy is refused and no workload is stopped. To bound what a project can actually consume, set its resource caps instead.
-  There is at most one budget per organization, so the organization is the id. Managing it requires billing.admin (fpcloud_billing_binding).
+  There is at most one budget per organization, so the organization is the id. Managing it requires billing.admin, a role on the organization (fpcloud_iam_binding with org_id).
 ---
 
 # fpcloud_billing_budget (Resource)
@@ -14,7 +14,7 @@ A spend target for a Fogpipe organization, and the percentages of it at which th
 
 **A budget alerts; it never caps.** Crossing a threshold changes nothing about what runs — no deploy is refused and no workload is stopped. To bound what a project can actually consume, set its resource caps instead.
 
-There is at most one budget per organization, so the organization is the id. Managing it requires `billing.admin` (`fpcloud_billing_binding`).
+There is at most one budget per organization, so the organization is the id. Managing it requires `billing.admin`, a role on the organization (`fpcloud_iam_binding` with `org_id`).
 
 ## Example Usage
 

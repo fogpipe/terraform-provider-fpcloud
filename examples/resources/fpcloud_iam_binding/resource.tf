@@ -15,8 +15,9 @@ resource "fpcloud_iam_binding" "finance_reads_the_bill" {
 }
 
 # A resource handed to an app's own identity, with no secret reference in the
-# app's env: the binding alone is the grant. The role is the kind's handed
-# role: `database.user`, `bucket.user` or `secret.reader`.
+# app's env: the binding alone is the grant. The role is one held on the kind:
+# `database.user`; `bucket.reader`, `bucket.user` or `bucket.publisher`;
+# `secret.reader`.
 resource "fpcloud_iam_binding" "api_uses_orders" {
   project_id = fpcloud_project.production.id
   resource   = "database/${fpcloud_database.orders.id}"

@@ -377,17 +377,22 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			},
 			"probes": schema.SingleNestedAttribute{
 				Description: "Per-probe overrides for liveness, readiness and startup. By default all " +
-					"three run the app's health_check_* settings, so one request decides both whether " +
-					"traffic reaches the app and whether the pod is restarted. Point liveness at a cheap " +
-					"path that touches no downstream and readiness at the one that does, and a dependency " +
-					"blip pulls the pod out of the load balancer without killing it. Any attribute left " +
-					"unset keeps the matching health_check_* value, so overriding a path never means " +
-					"restating the timing. Always-on apps only.",
+					"three request health_check_path, so one request decides both whether traffic " +
+					"reaches the app and whether the pod is restarted. Startup and readiness run on the " +
+					"health_check_* timing; liveness runs on its own, a check every 60s with a 5s timeout " +
+					"and a restart after 5 failures in a row, so a stall shorter than about five minutes " +
+					"only takes the pod out of the load balancer. Point liveness at a cheap path that " +
+					"touches no downstream and readiness at the one that does, and a dependency outage " +
+					"never restarts the pod. Any attribute left unset keeps that probe's default, so " +
+					"overriding a path never means restating the timing. Always-on apps only.",
 				Optional: true,
 				Attributes: map[string]schema.Attribute{
-					"liveness":  probeSchema("Restarts the pod when it fails. Kubernetes holds it off until the startup probe first succeeds."),
-					"readiness": probeSchema("Decides whether traffic reaches the pod. Failing it only pulls the pod out of the Service until it recovers."),
-					"startup":   probeSchema("Gates the other two until the app has booted. Raise failure_threshold for a slow start rather than delaying liveness."),
+					"liveness": probeSchema("Restarts the pod when it fails. Kubernetes holds it off until the startup probe first succeeds.",
+						"Unset attributes fall back to health_check_path and to liveness's own timing: period_seconds 60, timeout_seconds 5, failure_threshold 5."),
+					"readiness": probeSchema("Decides whether traffic reaches the pod. Failing it only pulls the pod out of the Service until it recovers.",
+						"Unset attributes fall back to the app's health_check_* values."),
+					"startup": probeSchema("Gates the other two until the app has booted. Raise failure_threshold for a slow start rather than delaying liveness.",
+						"Unset attributes fall back to the app's health_check_* values."),
 				},
 			},
 			"adopt_existing": schema.BoolAttribute{
@@ -960,9 +965,9 @@ func routeAttrTypes() map[string]attr.Type {
 // probeSchema builds one liveness/readiness/startup block. success_threshold is
 // offered on all three because the schema is shared, but the API rejects a value
 // above 1 on liveness and startup — Kubernetes requires it there.
-func probeSchema(description string) schema.SingleNestedAttribute {
+func probeSchema(description, fallback string) schema.SingleNestedAttribute {
 	return schema.SingleNestedAttribute{
-		Description: description + " Unset attributes fall back to the app's health_check_* values.",
+		Description: description + " " + fallback,
 		Optional:    true,
 		Attributes: map[string]schema.Attribute{
 			"path": schema.StringAttribute{
@@ -974,15 +979,15 @@ func probeSchema(description string) schema.SingleNestedAttribute {
 				Optional:    true,
 			},
 			"period_seconds": schema.Int64Attribute{
-				Description: "Seconds between checks. Defaults to health_check_interval.",
+				Description: "Seconds between checks. Defaults to health_check_interval, or 60 on liveness.",
 				Optional:    true,
 			},
 			"timeout_seconds": schema.Int64Attribute{
-				Description: "Seconds before a check counts as failed. Defaults to health_check_timeout.",
+				Description: "Seconds before a check counts as failed. Defaults to health_check_timeout, or 5 on liveness.",
 				Optional:    true,
 			},
 			"failure_threshold": schema.Int64Attribute{
-				Description: "Consecutive failures before the probe acts. Defaults to health_check_retries.",
+				Description: "Consecutive failures before the probe acts. Defaults to health_check_retries, or 5 on liveness.",
 				Optional:    true,
 			},
 			"success_threshold": schema.Int64Attribute{
@@ -1014,7 +1019,7 @@ func probesAttrTypes() map[string]attr.Type {
 // field it does not have, which decodes to the Go zero value — mapped back to
 // null here, not to 0. Writing 0 where the config said nothing would report an
 // inconsistent result after apply, and 0 is not what the field means: unset is
-// "inherit the health check".
+// "inherit the probe's default".
 func probeSpecToObject(spec *client.ProbeSpec, diags *diag.Diagnostics) attr.Value {
 	if spec == nil {
 		return types.ObjectNull(probeSpecAttrTypes())

@@ -27,14 +27,20 @@ Domain.bucket_id
 # A job's app is `app`, resolved by name like every other reference.
 Job.app_id
 Job.app_name
-# Who is handed a database, a bucket or a secret is each an
-# `fpcloud_iam_binding` with `resource`; reading the bindings back onto the
-# resource would make one grant two resources' state (ADR-284). The same for
-# everything an account holds.
+# Who reaches an app, a database, a bucket or a secret is each an
+# `fpcloud_iam_binding`, on the resource or on its project or organization;
+# reading them back onto the resource would make one grant two resources'
+# state. The same for everything an account holds.
+App.access
 Bucket.access
 Database.access
 Secret.access
 ServiceAccount.bindings
+# Where a binding is held relative to a resource it reaches is a fact about
+# that resource's access list, which the line above keeps off the resource;
+# on fpcloud_iam_binding itself the target is already org_id, project_id and
+# resource.
+IAMBinding.held_on
 
 # --- deploy-time state, not configuration -------------------------------
 # What is running right now is the outcome of a deploy, which Terraform does

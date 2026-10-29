@@ -74,7 +74,7 @@ DeleteBucketObject
 ListBucketObjects
 PresignBucketObject
 GetBucketCredentials
-MintBucketSessionCredentials
+GetS3Credentials
 ListRegistryRepositories
 ListRegistryTags
 DeleteRegistryTag

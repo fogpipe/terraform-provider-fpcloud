@@ -3,12 +3,12 @@
 page_title: "fpcloud_iam_binding Resource - fpcloud"
 subcategory: ""
 description: |-
-  Manages an IAM binding: a member holding a role on a Fogpipe organization or project, or, with resource, handed a database, bucket or secret in it (database.user, bucket.reader or bucket.user, secret.reader). Billing is two roles on the organization, billing.viewer and billing.admin, which an owner holds by inclusion. A member may hold several roles on one target; each is its own binding.
+  Manages an IAM binding: a member holding a role on a Fogpipe organization or project, or, with resource, handed an app, database, bucket or secret in it (app.deployer, database.user, bucket.reader or bucket.user, secret.reader). Billing is two roles on the organization, billing.viewer and billing.admin, which an owner holds by inclusion. A member may hold several roles on one target; each is its own binding. A binding to user:<email> is the person's invitation. A moved block from fpcloud_org_member or fpcloud_billing_binding carries their state over.
 ---
 
 # fpcloud_iam_binding (Resource)
 
-Manages an IAM binding: a member holding a role on a Fogpipe organization or project, or, with `resource`, handed a database, bucket or secret in it (`database.user`, `bucket.reader` or `bucket.user`, `secret.reader`). Billing is two roles on the organization, `billing.viewer` and `billing.admin`, which an owner holds by inclusion. A member may hold several roles on one target; each is its own binding.
+Manages an IAM binding: a member holding a role on a Fogpipe organization or project, or, with `resource`, handed an app, database, bucket or secret in it (`app.deployer`, `database.user`, `bucket.reader` or `bucket.user`, `secret.reader`). Billing is two roles on the organization, `billing.viewer` and `billing.admin`, which an owner holds by inclusion. A member may hold several roles on one target; each is its own binding. A binding to `user:<email>` is the person's invitation. A `moved` block from `fpcloud_org_member` or `fpcloud_billing_binding` carries their state over.
 
 ## Example Usage
 
@@ -53,7 +53,7 @@ resource "fpcloud_iam_binding" "api_uses_orders" {
 
 - `org_id` (String) The organization the role is held on. Exactly one of `org_id` and `project_id`.
 - `project_id` (String) The project the role is held on. Exactly one of `org_id` and `project_id`.
-- `resource` (String) A resource in the scope handed to the member instead of a role on the scope, as `<kind>/<id>`: `database/<id>`, `bucket/<id>` or `secret/<id>` of the project, or `secret/<id>` for an organization's own secret. The role is then one held on that kind, which `fpcloud iam roles` lists: `database.user` on a database, `bucket.reader`, `bucket.user` or `bucket.publisher` on a bucket, `secret.reader` on a secret. Handing a resource over needs `iam.set` on it and everything the role carries, so an owner does it.
+- `resource` (String) A resource in the scope handed to the member instead of a role on the scope, as `<kind>/<id>`: `app/<id>`, `database/<id>`, `bucket/<id>` or `secret/<id>` of the project, or `secret/<id>` for an organization's own secret. The role is then one held on that kind, which `fpcloud iam roles` lists: `app.deployer` on an app, `database.user` on a database, `bucket.reader`, `bucket.user` or `bucket.publisher` on a bucket, `secret.reader` on a secret. Handing a resource over needs `iam.set` on it and everything the role carries, so an owner does it.
 
 ### Read-Only
 

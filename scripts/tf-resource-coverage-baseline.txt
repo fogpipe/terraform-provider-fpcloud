@@ -17,6 +17,12 @@ GetMe
 # is a string the API validates against it on apply, so Terraform declares
 # bindings and never the catalogue.
 ListRoles
+# An organization's members are a read over the bindings that name them, and
+# removing one is an operation over every one of those bindings. Each grant is
+# an `fpcloud_iam_binding`; a resource over the person would hold the same rows
+# in two resources' state.
+ListOrgMembers
+RemoveOrgMember
 # --- one-shot operations and cross-project reads (fogpipe/cloud-workspace#306
 #     bumped the client and surfaced these; each is a reviewed exclusion) -----
 # The database tunnel's connection details (ADR-045, ADR-154): a credential

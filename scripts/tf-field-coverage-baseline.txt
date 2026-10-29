@@ -27,10 +27,6 @@ Domain.bucket_id
 # A job's app is `app`, resolved by name like every other reference.
 Job.app_id
 Job.app_name
-# A member's project roles are each an `fpcloud_iam_binding`; reading them
-# back onto `fpcloud_org_member` would make one grant two resources' state
-# (fogpipe/cloud-workspace#1111).
-OrgMember.projects
 # Who is handed a database, a bucket or a secret is each an
 # `fpcloud_iam_binding` with `resource`; reading the bindings back onto the
 # resource would make one grant two resources' state (ADR-284). The same for
@@ -98,11 +94,6 @@ Bucket.project_id
 Job.project_id
 Runner.project_id
 
-# --- an org member is invited, and the invitation is not the person -----
-OrgMember.invited_by
-OrgMember.invited_email
-OrgMember.user_email
-OrgMember.user_name
 # An SA key's lifetime is fixed at creation and the API returns no way to
 # change it; exposing the expiry alone would suggest otherwise.
 ServiceAccountKey.expires_at
@@ -119,8 +110,6 @@ Database.updated_at
 Domain.updated_at
 Job.created_at
 Job.updated_at
-OrgMember.created_at
-OrgMember.updated_at
 Runner.created_at
 Runner.updated_at
 ServiceAccount.updated_at

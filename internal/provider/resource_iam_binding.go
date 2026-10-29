@@ -72,9 +72,11 @@ func (r *IAMBindingResource) Schema(_ context.Context, _ resource.SchemaRequest,
 	resp.Schema = schema.Schema{
 		Version: 1,
 		Description: "Manages an IAM binding: a member holding a role on a Fogpipe organization or project, " +
-			"or, with `resource`, handed a database, bucket or secret in it (`database.user`, `bucket.reader` or `bucket.user`, `secret.reader`). " +
+			"or, with `resource`, handed an app, database, bucket or secret in it (`app.deployer`, `database.user`, `bucket.reader` or `bucket.user`, `secret.reader`). " +
 			"Billing is two roles on the organization, `billing.viewer` and `billing.admin`, which an owner holds by inclusion. " +
-			"A member may hold several roles on one target; each is its own binding.",
+			"A member may hold several roles on one target; each is its own binding. " +
+			"A binding to `user:<email>` is the person's invitation. " +
+			"A `moved` block from `fpcloud_org_member` or `fpcloud_billing_binding` carries their state over.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Binding ID.",
@@ -99,8 +101,8 @@ func (r *IAMBindingResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			},
 			"resource": schema.StringAttribute{
 				Description: "A resource in the scope handed to the member instead of a role on the scope, as `<kind>/<id>`: " +
-					"`database/<id>`, `bucket/<id>` or `secret/<id>` of the project, or `secret/<id>` for an organization's own secret. " +
-					"The role is then one held on that kind, which `fpcloud iam roles` lists: `database.user` on a database, `bucket.reader`, `bucket.user` or `bucket.publisher` on a bucket, `secret.reader` on a secret. Handing a resource over needs `iam.set` on it " +
+					"`app/<id>`, `database/<id>`, `bucket/<id>` or `secret/<id>` of the project, or `secret/<id>` for an organization's own secret. " +
+					"The role is then one held on that kind, which `fpcloud iam roles` lists: `app.deployer` on an app, `database.user` on a database, `bucket.reader`, `bucket.user` or `bucket.publisher` on a bucket, `secret.reader` on a secret. Handing a resource over needs `iam.set` on it " +
 					"and everything the role carries, so an owner does it.",
 				Optional: true,
 				PlanModifiers: []planmodifier.String{
@@ -345,12 +347,45 @@ func upgradeIAMBindingStateV0(_ context.Context, req resource.UpgradeStateReques
 	resp.DynamicValue = &tfprotov6.DynamicValue{JSON: out}
 }
 
-// MoveState accepts a `moved` block from fpcloud_billing_binding, the resource
-// this one replaced: a billing role is a binding on the organization, so the
-// state is the same triple with the organization as its target and the member
-// spelled with its type.
+// MoveState accepts a `moved` block from the two resources this one replaced:
+// fpcloud_billing_binding, a billing role being a binding on the
+// organization, and fpcloud_org_member, an organization role for a person.
+// Each moves as the same triple with the organization as its target and the
+// member spelled with its type.
 func (r *IAMBindingResource) MoveState(_ context.Context) []resource.StateMover {
 	return []resource.StateMover{{
+		StateMover: func(ctx context.Context, req resource.MoveStateRequest, resp *resource.MoveStateResponse) {
+			if req.SourceTypeName != "fpcloud_org_member" {
+				return
+			}
+			if req.SourceRawState == nil {
+				resp.Diagnostics.AddError("Unable to move fpcloud_org_member", "The source state is empty.")
+				return
+			}
+			// The member's id was the id of the binding that held their role,
+			// so the moved resource reads that binding back on its next refresh.
+			var src struct {
+				ID             string `json:"id"`
+				OrganizationID string `json:"organization_id"`
+				Email          string `json:"email"`
+				Role           string `json:"role"`
+			}
+			if err := json.Unmarshal(req.SourceRawState.JSON, &src); err != nil {
+				resp.Diagnostics.AddError("Unable to move fpcloud_org_member", err.Error())
+				return
+			}
+			target := IAMBindingResourceModel{
+				ID:        types.StringValue(src.ID),
+				OrgID:     types.StringValue(src.OrganizationID),
+				ProjectID: types.StringNull(),
+				Resource:  types.StringNull(),
+				Role:      types.StringValue(src.Role),
+				Member:    types.StringValue(joinMember("user", src.Email)),
+				CreatedAt: types.StringNull(),
+			}
+			resp.Diagnostics.Append(resp.TargetState.Set(ctx, target)...)
+		},
+	}, {
 		StateMover: func(ctx context.Context, req resource.MoveStateRequest, resp *resource.MoveStateResponse) {
 			if req.SourceTypeName != "fpcloud_billing_binding" {
 				return

@@ -138,7 +138,6 @@ func (p *FogpipeProvider) Resources(_ context.Context) []func() resource.Resourc
 		NewServiceAccountKeyResource,
 		NewIAMBindingResource,
 		NewBillingBudgetResource,
-		NewOrgMemberResource,
 		NewSecretResource,
 		NewRegistryRetentionPolicyResource,
 		NewRegistryVisibilityResource,

@@ -96,7 +96,7 @@ func (r *ProjectResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"egress": schema.StringAttribute{
-				Description: "Egress policy: \"restricted\" (default), \"https\" (TCP 443 anywhere), or \"all\" (any address outside the platform, any port; inside the platform the same as restricted). TCP 25 is refused on every mode, so mail goes through a relay on 587 or 465 rather than direct to MX.",
+				Description: "Egress policy: \"restricted\" (default: no internet, the platform's own API and S3 endpoint only), \"https\" (TCP 443 anywhere), or \"all\" (any address outside the platform, any port; inside the platform the same as restricted). TCP 25 is refused on every mode, so mail goes through a relay on 587 or 465 rather than direct to MX.",
 				Optional:    true,
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -792,10 +793,10 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	// Sync env: the diff between the old and new maps, literals and secret
-	// references alike, written one entry at a time. A variable that moves
-	// between the two maps is one entry replaced, never unset: the write of
-	// the new shape drops the old one, so the removal loops skip a key the
-	// other map now holds.
+	// references alike, sent as one change, so the app rolls once onto all of
+	// it and never starts a pod with part of it. A variable that moves between
+	// the two maps is one entry replaced, never unset: setting the new shape
+	// drops the old one, so a key the other map now holds is not removed.
 	var planEnv, stateEnv map[string]string
 	if !plan.Env.IsNull() && !plan.Env.IsUnknown() {
 		resp.Diagnostics.Append(plan.Env.ElementsAs(ctx, &planEnv, false)...)
@@ -809,46 +810,32 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
-	for k := range stateEnv {
-		if _, literal := planEnv[k]; literal {
-			continue
-		}
-		if _, ref := planSecretEnv[k]; ref {
-			continue
-		}
-		if err := r.client.UnsetConfig(ctx, appID, k); err != nil {
-			resp.Diagnostics.AddError("Error unsetting env config", fmt.Sprintf("key %q: %s", k, err.Error()))
-			return
+	var change client.UpdateConfigRequest
+	for _, k := range sortedKeys(stateEnv, stateSecretEnv) {
+		_, literal := planEnv[k]
+		_, ref := planSecretEnv[k]
+		if !literal && !ref {
+			change.Unset = append(change.Unset, k)
 		}
 	}
-	for k := range stateSecretEnv {
-		if _, literal := planEnv[k]; literal {
-			continue
-		}
-		if _, ref := planSecretEnv[k]; ref {
-			continue
-		}
-		if err := r.client.UnsetConfig(ctx, appID, k); err != nil {
-			resp.Diagnostics.AddError("Error unsetting env config", fmt.Sprintf("key %q: %s", k, err.Error()))
-			return
-		}
-	}
-	for k, v := range planEnv {
+	for _, k := range sortedKeys(planEnv, nil) {
+		v := planEnv[k]
 		_, wasRef := stateSecretEnv[k]
 		if oldVal, exists := stateEnv[k]; !exists || oldVal != v || wasRef {
-			if _, err := r.client.SetConfig(ctx, appID, k, v); err != nil {
-				resp.Diagnostics.AddError("Error setting env config", fmt.Sprintf("key %q: %s", k, err.Error()))
-				return
-			}
+			change.Set = append(change.Set, client.ConfigEntry{Key: k, Value: v})
 		}
 	}
-	for k, ref := range planSecretEnv {
+	for _, k := range sortedKeys(nil, planSecretEnv) {
+		ref := planSecretEnv[k]
 		_, wasLiteral := stateEnv[k]
 		if old, exists := stateSecretEnv[k]; !exists || old != ref || wasLiteral {
-			if _, err := r.client.SetSecretEnv(ctx, appID, k, ref.Secret, ref.Path); err != nil {
-				resp.Diagnostics.AddError("Error setting env secret reference", fmt.Sprintf("key %q: %s", k, err.Error()))
-				return
-			}
+			change.Set = append(change.Set, client.ConfigEntry{Key: k, SecretRef: &client.SecretRef{Secret: ref.Secret, Path: ref.Path}})
+		}
+	}
+	if len(change.Set) > 0 || len(change.Unset) > 0 {
+		if _, err := r.client.UpdateConfig(ctx, appID, change); err != nil {
+			resp.Diagnostics.AddError("Error updating env", err.Error())
+			return
 		}
 	}
 
@@ -1348,6 +1335,27 @@ func stringListToSlice(ctx context.Context, l types.List, diags *diag.Diagnostic
 type secretEnvModel struct {
 	Secret types.String `tfsdk:"secret"`
 	Path   types.String `tfsdk:"path"`
+}
+
+// sortedKeys is every key of either map, once each and in order, so a change
+// is sent the same way on every apply.
+func sortedKeys(literals map[string]string, refs map[string]client.SecretRef) []string {
+	seen := map[string]bool{}
+	var keys []string
+	for k := range literals {
+		if !seen[k] {
+			seen[k] = true
+			keys = append(keys, k)
+		}
+	}
+	for k := range refs {
+		if !seen[k] {
+			seen[k] = true
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // secretEnvFromModel reads a secret_env map into the client's shape; a null or

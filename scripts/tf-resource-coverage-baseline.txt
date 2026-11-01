@@ -23,6 +23,10 @@ ListRoles
 # in two resources' state.
 ListOrgMembers
 RemoveOrgMember
+# env is declared inline on fpcloud_app and kept as declared: the app read
+# carries no env, a key changed outside Terraform is reasserted by the next
+# apply (last write wins), so no resource reads the store back.
+ListConfig
 # --- one-shot operations and cross-project reads (fogpipe/cloud-workspace#306
 #     bumped the client and surfaced these; each is a reviewed exclusion) -----
 # The database tunnel's connection details (ADR-045, ADR-154): a credential

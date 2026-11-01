@@ -107,8 +107,6 @@ ServiceAccountKey.expires_at
 # --- timestamps ---------------------------------------------------------
 # `created_at` is exposed where it is useful; `updated_at` moves whenever
 # anything touches the resource, including things Terraform did not do.
-AppConfig.created_at
-AppConfig.updated_at
 BillingBudget.updated_at
 Bucket.created_at
 Bucket.updated_at
@@ -136,10 +134,6 @@ App.template
 App.template_update
 
 # --- project secrets (#1069) ----------------------------------------------
-# A reference is expressed on fpcloud_app_config as `secret` and `path`, and on
-# fpcloud_app as the secret_env map; the nested object the API answers with is
-# the same two values under one name.
-AppConfig.secret_ref
 # Which apps reference a database's or a bucket's secret is live state a read
 # reports, not configuration: fpcloud_app's secret_env is where the binding
 # is declared, and expressing the reverse index as an attribute would put the

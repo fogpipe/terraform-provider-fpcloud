@@ -50,7 +50,7 @@ const accRootImageOptOut = `
 `
 
 // testAccAppScaffold renders a real project + always-on public app that
-// dependent-resource acceptance tests (app_config, webhook, domain) can attach
+// dependent-resource acceptance tests (webhook, domain) can attach
 // to. Referencing real IDs — rather than literal "test-app"/"test-project"
 // strings — is what keeps those creates from being rejected as forbidden. The
 // app is always-on + ingress=all so custom domains are accepted (ADR-030).

@@ -3,12 +3,12 @@
 page_title: "fpcloud_secret Resource - fpcloud"
 subcategory: ""
 description: |-
-  Manages a named secret in a project or an organization. The value goes in here and never comes back out: an app reaches it through an environment variable that references it (fpcloud_app's secret_env, or fpcloud_app_config's secret), as the variable's value or as a file the variable names. An organization secret is referenced as org/<name> by an app in any of the organization's projects, once the app's identity is handed it (reader, granted with organization write). A database's owner credential is a project secret of this kind too (-owner), created with the database and rotated by its rotate-password; reference it, never manage it here.
+  Manages a named secret in a project or an organization. The value goes in here and never comes back out: an app reaches it through an environment variable that references it (fpcloud_app's secret_env), as the variable's value or as a file the variable names. An organization secret is referenced as org/<name> by an app in any of the organization's projects, once the app's identity is handed it (reader, granted with organization write). A database's owner credential is a project secret of this kind too (-owner), created with the database and rotated by its rotate-password; reference it, never manage it here.
 ---
 
 # fpcloud_secret (Resource)
 
-Manages a named secret in a project or an organization. The value goes in here and never comes back out: an app reaches it through an environment variable that references it (fpcloud_app's secret_env, or fpcloud_app_config's `secret`), as the variable's value or as a file the variable names. An organization secret is referenced as `org/<name>` by an app in any of the organization's projects, once the app's identity is handed it (`reader`, granted with organization write). A database's owner credential is a project secret of this kind too (<database>-owner), created with the database and rotated by its rotate-password; reference it, never manage it here.
+Manages a named secret in a project or an organization. The value goes in here and never comes back out: an app reaches it through an environment variable that references it (fpcloud_app's secret_env), as the variable's value or as a file the variable names. An organization secret is referenced as `org/<name>` by an app in any of the organization's projects, once the app's identity is handed it (`reader`, granted with organization write). A database's owner credential is a project secret of this kind too (<database>-owner), created with the database and rotated by its rotate-password; reference it, never manage it here.
 
 ## Example Usage
 

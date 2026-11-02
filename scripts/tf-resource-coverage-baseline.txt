@@ -177,6 +177,10 @@ GetInvoice
 # anything is declared against.
 OrgCost
 ProjectCost
+# the credit an organization holds: granted by the operator, read by the
+# tenant on its cost and its invoices; a term of the account, not desired
+# state anyone declares.
+GetOrgCredit
 # what a spec would cost before it exists: a quote at today's rates for a
 # body nothing has created yet. It moves when a rate card moves, so a data
 # source reading it would make a plan differ with nothing declared changed;

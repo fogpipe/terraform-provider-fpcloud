@@ -523,6 +523,9 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 	minScale, maxScale := int32(plan.MinScale.ValueInt64()), int32(plan.MaxScale.ValueInt64())
 	createReq.MinScale, createReq.MaxScale = &minScale, &maxScale
+	// The limits ride on the create too, so an app is born at the size the
+	// plan declares and never spends a rollout at the platform's default.
+	createReq.CPULimit, createReq.MemoryLimit = plan.CPULimit.ValueString(), plan.MemoryLimit.ValueString()
 
 	app, err := r.client.CreateApp(ctx, plan.ProjectID.ValueString(), createReq)
 	if err != nil {
@@ -565,23 +568,6 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 			resp.Diagnostics.AddError("Error running release command", err.Error())
 			return
 		}
-	}
-
-	// The bounds rode on the create; only the limits are set afterwards, and
-	// only when they differ from the platform's defaults.
-	cpuLimit := asked.CPULimit.ValueString()
-	memoryLimit := asked.MemoryLimit.ValueString()
-	scaleReq := client.ScaleRequest{
-		CPULimit:    cpuLimit,
-		MemoryLimit: memoryLimit,
-	}
-	if cpuLimit != "500m" || memoryLimit != "512Mi" {
-		scaled, err := r.client.ScaleApp(ctx, app.ID, scaleReq)
-		if err != nil {
-			resp.Diagnostics.AddError("Error scaling app after creation", err.Error())
-			return
-		}
-		app = scaled
 	}
 
 	r.setModelFromApp(&plan, app, &resp.Diagnostics)

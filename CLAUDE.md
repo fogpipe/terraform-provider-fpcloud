@@ -105,9 +105,15 @@ workflow), because teardown never runs. The webhook tests additionally need
 since creating a webhook calls the GitHub API; unset, they skip. With
 `FPCLOUD_ACC_SWEEP_ORG` set to the throwaway org's name, the suite first deletes
 that org's projects older than two hours, which is how those are reclaimed;
-leave it unset for a key that can see anything you want to keep. CI runs the suite on manual dispatch
-(optionally one test, by name) and weekly, never on a PR — it costs real
-resources.
+leave it unset for a key that can see anything you want to keep.
+
+CI runs the suite after every release, on manual dispatch (optionally one test,
+by name) and weekly, never on a PR — it costs real resources. Every CI run
+checks out the provider **at the tag the API serves**, read from its `/version`:
+the three repos share one version number, so that pair is what a tenant can
+actually install, and it is the only pair whose result means anything. A
+`main` ahead of the released API is tested from a checkout with `just testacc`,
+never by dispatching the workflow.
 
 ## Conventions
 

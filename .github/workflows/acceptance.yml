@@ -2,8 +2,11 @@ name: acceptance
 
 # Terraform acceptance tests (TF_ACC) run against a LIVE fpcloud API — they
 # create and destroy real projects, apps, and buckets. They are therefore NOT
-# run on every PR; trigger them manually via workflow_dispatch, or let the weekly
-# schedule catch "Provider produced inconsistent result after apply" regressions.
+# run on every PR: the release dispatches them once the new version is serving,
+# a person dispatches them by hand, and the weekly schedule catches "Provider
+# produced inconsistent result after apply" regressions in a week nothing
+# shipped. Whatever starts a run, it checks out the provider at the tag the API
+# serves (below), so every run tests a released pair.
 #
 # Required repo config:
 #   secrets.FPCLOUD_API_KEY      — an fpcloud API key (fp-...) for a throwaway org
@@ -32,7 +35,25 @@ jobs:
   acceptance:
     runs-on: ubuntu-latest
     steps:
+      # The suite tests the provider the API it talks to was released with. The
+      # three repos share one version number, so the version the API reports is
+      # the provider tag to check out. Testing main instead applied a provider
+      # nobody can install against an API that had not shipped its half of a
+      # wire change yet, and a scheduled run inside that window failed on
+      # nothing anyone could act on. An unreleased provider is tested with
+      # `just testacc` from a checkout.
+      - name: Read the version the API serves
+        id: served
+        env:
+          FPCLOUD_API_URL: ${{ vars.FPCLOUD_API_URL }}
+        run: |
+          tag="$(curl --fail --silent --show-error --max-time 10 "${FPCLOUD_API_URL:-https://api.cloud.fogpipe.com}/version" | jq --raw-output '.version // empty')"
+          [ -n "$tag" ] || { echo "::error::the API reported no version"; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "testing the provider at $tag"
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ steps.served.outputs.tag }}
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod

@@ -173,6 +173,9 @@ ListWebsiteVersions
 # The billing ROLES are declarative and do have a resource (fpcloud_billing_binding)
 ListInvoices
 GetInvoice
+# an invoice's statement and the usage it billed read the same closed period
+InvoiceStatement
+InvoiceUsage
 # what an org or a project cost (ADR-273, fogpipe/cloud-workspace#1144). Cost
 # moves every hour, so a data source reading it would make every plan differ
 # from the last with nothing changed; it is a read for people, not a value

@@ -72,7 +72,7 @@ func (r *IAMBindingResource) Schema(_ context.Context, _ resource.SchemaRequest,
 	resp.Schema = schema.Schema{
 		Version: 1,
 		Description: "Manages an IAM binding: a member holding a role on a Fogpipe organization or project, " +
-			"or, with `resource`, handed an app, database, bucket or secret in it (`app.deployer`, `database.user`, `bucket.reader` or `bucket.user`, `secret.reader`). " +
+			"or, with `resource`, handed an app, database, bucket or secret in it (`app.deployer`, `database.user`, `bucket.reader` or `bucket.user`, `secret.reader` or `secret.writer`). " +
 			"Billing is two roles on the organization, `billing.viewer` and `billing.admin`, which an owner holds by inclusion. " +
 			"A member may hold several roles on one target; each is its own binding. " +
 			"A binding to `user:<email>` is the person's invitation. " +
@@ -102,7 +102,7 @@ func (r *IAMBindingResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			"resource": schema.StringAttribute{
 				Description: "A resource in the scope handed to the member instead of a role on the scope, as `<kind>/<id>`: " +
 					"`app/<id>`, `database/<id>`, `bucket/<id>` or `secret/<id>` of the project, or `secret/<id>` for an organization's own secret. " +
-					"The role is then one held on that kind, which `fpcloud iam roles` lists: `app.deployer` on an app, `database.user` on a database, `bucket.reader`, `bucket.user` or `bucket.publisher` on a bucket, `secret.reader` on a secret. Handing a resource over needs `iam.set` on it " +
+					"The role is then one held on that kind, which `fpcloud iam roles` lists: `app.deployer` on an app, `database.user` on a database, `bucket.reader`, `bucket.user` or `bucket.publisher` on a bucket, `secret.reader` or `secret.writer` on a secret. Handing a resource over needs `iam.set` on it " +
 					"and everything the role carries, so an owner does it.",
 				Optional: true,
 				PlanModifiers: []planmodifier.String{

@@ -122,8 +122,13 @@ ServiceAccount.updated_at
 # The caller's permissions on the scope, read with the project row so a
 # console draws what it offers from them. They are a fact about the credential
 # the provider runs with, not about the project, and state that changed with
-# the operator's identity would be drift nobody declared.
+# the operator's identity would be drift nobody declared. The same holds for
+# the caller's permissions on one app, database, bucket or secret.
 Project.caller_permissions
+App.caller_permissions
+Bucket.caller_permissions
+Database.caller_permissions
+Secret.caller_permissions
 
 # --- a catalog instance is made, never declared (ADR-235) ------------------
 # `template` names the catalog entry an app was deployed from by the console or

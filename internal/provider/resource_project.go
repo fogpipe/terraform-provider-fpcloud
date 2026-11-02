@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -273,6 +274,10 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
+// projectDeleteWait bounds how long a destroy waits for the platform's teardown
+// to finish before reporting the deletion as accepted and still running.
+const projectDeleteWait = 10 * time.Minute
+
 func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state ProjectResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -294,9 +299,23 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 	// makes that true — otherwise the next apply recreates a project whose
 	// namespace and storage are still being reclaimed. The teardown continues
 	// server-side regardless of what this operation does (#865).
-	if err := r.client.WaitProjectDeleted(ctx, state.ID.ValueString(), 5*time.Second); err != nil {
+	//
+	// Bounded, because the client's wait is not: it polls until the project is
+	// gone or the context ends, and the framework hands Delete a context with
+	// no deadline. A teardown the platform cannot finish (a store it cannot
+	// reach, a bucket already gone) keeps the project visible for as long as
+	// the platform keeps retrying it, and a destroy that waited on one once
+	// held an acceptance run's whole budget. A healthy teardown takes well
+	// under a minute.
+	waitCtx, cancel := context.WithTimeout(ctx, projectDeleteWait)
+	defer cancel()
+	if err := r.client.WaitProjectDeleted(waitCtx, state.ID.ValueString(), 5*time.Second); err != nil {
+		detail := err.Error()
+		if errors.Is(err, context.DeadlineExceeded) {
+			detail = fmt.Sprintf("not finished after %s; `fpcloud project get %s` has its state", projectDeleteWait, state.ID.ValueString())
+		}
 		resp.Diagnostics.AddError("Error waiting for project deletion",
-			"The deletion was accepted and is still running server-side: "+err.Error())
+			"The deletion was accepted and is still running server-side: "+detail)
 	}
 }
 

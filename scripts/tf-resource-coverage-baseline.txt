@@ -177,6 +177,11 @@ GetInvoice
 # anything is declared against.
 OrgCost
 ProjectCost
+# what a spec would cost before it exists: a quote at today's rates for a
+# body nothing has created yet. It moves when a rate card moves, so a data
+# source reading it would make a plan differ with nothing declared changed;
+# the price list the quote is computed from is already public.
+Quote
 
 # what an org or a project holds against its bound, per axis (ADR-279,
 # fogpipe/cloud-workspace#1222). A read of live capacity, like cost: the

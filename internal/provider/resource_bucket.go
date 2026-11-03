@@ -41,6 +41,9 @@ type BucketResourceModel struct {
 	WebsiteErrorDocument types.String `tfsdk:"website_error_document"`
 	URLSlug              types.String `tfsdk:"url_slug"`
 	URL                  types.String `tfsdk:"url"`
+	TLSStatus            types.String `tfsdk:"tls_status"`
+	TLSReason            types.String `tfsdk:"tls_reason"`
+	TLSNextAttempt       types.String `tfsdk:"tls_next_attempt"`
 	GlobalAlias          types.String `tfsdk:"global_alias"`
 }
 
@@ -145,6 +148,18 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			},
 			"url": schema.StringAttribute{
 				Description: "Where the bucket answers, present whenever public_read is set: the platform host while it is served, or the oldest active custom domain once one exists — an active domain replaces the platform host (ADR-130).",
+				Computed:    true,
+			},
+			"tls_status": schema.StringAttribute{
+				Description: "The website's platform-host certificate, issued or pending; empty for a bucket with no website.",
+				Computed:    true,
+			},
+			"tls_reason": schema.StringAttribute{
+				Description: "What is in the certificate's way while an issuance or a renewal fails: dns (the name does not point here; the domain's verification says what to point it at), unreachable (something in front of the platform answers the check), rate_limited (the certificate authority, for now) or platform (ours, and alerted). Empty when nothing is.",
+				Computed:    true,
+			},
+			"tls_next_attempt": schema.StringAttribute{
+				Description: "When the next issuance attempt is, RFC 3339, while one is pending after a failure.",
 				Computed:    true,
 			},
 			"global_alias": schema.StringAttribute{
@@ -379,6 +394,9 @@ func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 	m.WebsiteErrorDocument = types.StringValue(bucket.WebsiteErrorDocument)
 	m.URLSlug = types.StringValue(bucket.URLSlug)
 	m.URL = types.StringValue(bucket.URL)
+	m.TLSStatus = types.StringValue(bucket.TLSStatus)
+	m.TLSReason = types.StringValue(bucket.TLSReason)
+	m.TLSNextAttempt = types.StringValue(rfc3339OrEmpty(bucket.TLSNextAttempt))
 	m.GlobalAlias = types.StringValue(bucket.GlobalAlias)
 	m.Secrets, _ = types.MapValueFrom(context.Background(), types.StringType, orEmptyMap(bucket.Secrets))
 }

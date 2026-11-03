@@ -32,12 +32,14 @@ type BucketDomainResource struct {
 
 // BucketDomainResourceModel describes the resource data model.
 type BucketDomainResourceModel struct {
-	ID        types.String `tfsdk:"id"`
-	BucketID  types.String `tfsdk:"bucket_id"`
-	Domain    types.String `tfsdk:"domain"`
-	Status    types.String `tfsdk:"status"`
-	TLSStatus types.String `tfsdk:"tls_status"`
-	CreatedAt types.String `tfsdk:"created_at"`
+	ID             types.String `tfsdk:"id"`
+	BucketID       types.String `tfsdk:"bucket_id"`
+	Domain         types.String `tfsdk:"domain"`
+	Status         types.String `tfsdk:"status"`
+	TLSStatus      types.String `tfsdk:"tls_status"`
+	TLSReason      types.String `tfsdk:"tls_reason"`
+	TLSNextAttempt types.String `tfsdk:"tls_next_attempt"`
+	CreatedAt      types.String `tfsdk:"created_at"`
 }
 
 func (r *BucketDomainResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -79,6 +81,14 @@ func (r *BucketDomainResource) Schema(_ context.Context, _ resource.SchemaReques
 			},
 			"tls_status": schema.StringAttribute{
 				Description: "The TLS certificate status for the domain.",
+				Computed:    true,
+			},
+			"tls_reason": schema.StringAttribute{
+				Description: "What is in the certificate's way while an issuance or a renewal fails: dns (the name does not point here; the domain's verification says what to point it at), unreachable (something in front of the platform answers the check), rate_limited (the certificate authority, for now) or platform (ours, and alerted). Empty when nothing is.",
+				Computed:    true,
+			},
+			"tls_next_attempt": schema.StringAttribute{
+				Description: "When the next issuance attempt is, RFC 3339, while one is pending after a failure.",
 				Computed:    true,
 			},
 			"created_at": schema.StringAttribute{
@@ -187,6 +197,8 @@ func mapBucketDomainToState(d *client.Domain, state *BucketDomainResourceModel) 
 	state.Domain = types.StringValue(d.Domain)
 	state.Status = types.StringValue(d.Status)
 	state.TLSStatus = types.StringValue(d.TLSStatus)
+	state.TLSReason = types.StringValue(d.TLSReason)
+	state.TLSNextAttempt = types.StringValue(rfc3339OrEmpty(d.TLSNextAttempt))
 	state.CreatedAt = types.StringValue(d.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 }
 

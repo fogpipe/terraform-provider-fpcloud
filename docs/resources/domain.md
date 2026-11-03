@@ -50,6 +50,8 @@ resource "fpcloud_domain" "shop" {
 - `created_at` (String) The time the domain was created.
 - `id` (String) The unique identifier of the domain.
 - `status` (String) The current status of the domain.
+- `tls_next_attempt` (String) When the next issuance attempt is, RFC 3339, while one is pending after a failure.
+- `tls_reason` (String) What is in the certificate's way while an issuance or a renewal fails: dns (the name does not point here; the domain's verification says what to point it at), unreachable (something in front of the platform answers the check), rate_limited (the certificate authority, for now) or platform (ours, and alerted). Empty when nothing is.
 - `tls_status` (String) The TLS certificate status for the domain.
 - `verification_token` (String) The value to publish as a TXT record at `_fpcloud-challenge.<domain>` to prove you own the name. Fogpipe issues it when the domain is created and checks for it before pointing anything at your app, so a plan that manages its own DNS feeds this straight into the record — there is nothing to copy by hand.
 - `verified_at` (String) The time ownership was last proved, or empty while it is still unproved.

@@ -77,6 +77,9 @@ resource "fpcloud_app" "uploader" {
 - `region` (String) S3 region for the bucket.
 - `secrets` (Map of String) Names of the project secrets holding this bucket's read+write key, by part, the only place the key is reached from: `access_key_id` is `<name>-access-key-id`, `secret_access_key` is `<name>-secret-access-key`. Created and deleted with the bucket. Reference them from the app's env (fpcloud_app's `secret_env`, `AWS_ACCESS_KEY_ID = { secret = fpcloud_bucket.x.secrets["access_key_id"] }` and `AWS_SECRET_ACCESS_KEY = { secret = fpcloud_bucket.x.secrets["secret_access_key"] }`) to hand the app the bucket; `endpoint` and `region` are plain config.
 - `status` (String) Current status of the bucket.
+- `tls_next_attempt` (String) When the next issuance attempt is, RFC 3339, while one is pending after a failure.
+- `tls_reason` (String) What is in the certificate's way while an issuance or a renewal fails: dns (the name does not point here; the domain's verification says what to point it at), unreachable (something in front of the platform answers the check), rate_limited (the certificate authority, for now) or platform (ours, and alerted). Empty when nothing is.
+- `tls_status` (String) The website's platform-host certificate, issued or pending; empty for a bucket with no website.
 - `url` (String) Where the bucket answers, present whenever public_read is set: the platform host while it is served, or the oldest active custom domain once one exists — an active domain replaces the platform host (ADR-130).
 
 ## Import

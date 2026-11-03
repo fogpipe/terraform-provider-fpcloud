@@ -34,13 +34,15 @@ type DomainResource struct {
 
 // DomainResourceModel describes the resource data model.
 type DomainResourceModel struct {
-	ID        types.String `tfsdk:"id"`
-	AppID     types.String `tfsdk:"app_id"`
-	Domain    types.String `tfsdk:"domain"`
-	Mode      types.String `tfsdk:"mode"`
-	Routes    types.List   `tfsdk:"routes"`
-	Status    types.String `tfsdk:"status"`
-	TLSStatus types.String `tfsdk:"tls_status"`
+	ID             types.String `tfsdk:"id"`
+	AppID          types.String `tfsdk:"app_id"`
+	Domain         types.String `tfsdk:"domain"`
+	Mode           types.String `tfsdk:"mode"`
+	Routes         types.List   `tfsdk:"routes"`
+	Status         types.String `tfsdk:"status"`
+	TLSStatus      types.String `tfsdk:"tls_status"`
+	TLSReason      types.String `tfsdk:"tls_reason"`
+	TLSNextAttempt types.String `tfsdk:"tls_next_attempt"`
 
 	VerificationToken types.String `tfsdk:"verification_token"`
 	VerifiedAt        types.String `tfsdk:"verified_at"`
@@ -134,6 +136,14 @@ func (r *DomainResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			},
 			"tls_status": schema.StringAttribute{
 				Description: "The TLS certificate status for the domain.",
+				Computed:    true,
+			},
+			"tls_reason": schema.StringAttribute{
+				Description: "What is in the certificate's way while an issuance or a renewal fails: dns (the name does not point here; the domain's verification says what to point it at), unreachable (something in front of the platform answers the check), rate_limited (the certificate authority, for now) or platform (ours, and alerted). Empty when nothing is.",
+				Computed:    true,
+			},
+			"tls_next_attempt": schema.StringAttribute{
+				Description: "When the next issuance attempt is, RFC 3339, while one is pending after a failure.",
 				Computed:    true,
 			},
 			"verification_token": schema.StringAttribute{
@@ -306,6 +316,8 @@ func mapDomainToState(d *client.Domain, state *DomainResourceModel, diags *diag.
 	state.Mode = types.StringValue(d.Mode)
 	state.Status = types.StringValue(d.Status)
 	state.TLSStatus = types.StringValue(d.TLSStatus)
+	state.TLSReason = types.StringValue(d.TLSReason)
+	state.TLSNextAttempt = types.StringValue(rfc3339OrEmpty(d.TLSNextAttempt))
 	state.VerificationToken = types.StringValue(d.VerificationToken)
 	if d.VerifiedAt != nil {
 		state.VerifiedAt = types.StringValue(d.VerifiedAt.Format("2006-01-02T15:04:05Z07:00"))

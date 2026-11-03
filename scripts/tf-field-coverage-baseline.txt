@@ -45,7 +45,6 @@ IAMBinding.held_on
 # --- deploy-time state, not configuration -------------------------------
 # What is running right now is the outcome of a deploy, which Terraform does
 # not perform — declaring it would make every push show as drift.
-App.release
 Bucket.website_version
 Job.last_run
 Runner.message

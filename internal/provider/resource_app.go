@@ -43,6 +43,7 @@ type AppResourceModel struct {
 	DisplayName         types.String `tfsdk:"display_name"`
 	URLSlug             types.String `tfsdk:"url_slug"`
 	Image               types.String `tfsdk:"image"`
+	Release             types.String `tfsdk:"release"`
 	Command             types.List   `tfsdk:"command"`
 	Args                types.List   `tfsdk:"args"`
 	ReleaseCommand      types.List   `tfsdk:"release_command"`
@@ -174,6 +175,16 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			"image": schema.StringAttribute{
 				Description: "Container image to deploy.",
 				Required:    true,
+			},
+			"release": schema.StringAttribute{
+				Description: "The name of the revision the image is deployed as, which a rollback aims at. " +
+					"Left out, the platform derives it from the image's tag (web:v1.2.3 is v1.2.3; a tag that " +
+					"repeats on another build gets the build's short digest after it) and it is read back here.",
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					releaseFollowsImage{},
+				},
 			},
 			"command": schema.ListAttribute{
 				Description: "Container entrypoint override (ENTRYPOINT). Read back from the API, so a " +
@@ -504,6 +515,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		DisplayName:         plan.DisplayName.ValueString(),
 		URLSlug:             plan.URLSlug.ValueString(),
 		Image:               plan.Image.ValueString(),
+		Release:             plan.Release.ValueString(),
 		Command:             command,
 		Args:                args,
 		ReleaseCommand:      releaseCommand,
@@ -675,6 +687,9 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	// Deploy new image if it changed.
 	if deployingImage {
 		deployReq := client.DeployRequest{Image: plan.Image.ValueString()}
+		if !plan.Release.IsUnknown() && !plan.Release.IsNull() {
+			deployReq.Release = plan.Release.ValueString()
+		}
 		if releaseCommandChanged {
 			v := stringListToSlice(ctx, plan.ReleaseCommand, &resp.Diagnostics)
 			if resp.Diagnostics.HasError() {
@@ -1142,6 +1157,7 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	model.DisplayName = types.StringValue(app.DisplayName)
 	model.URLSlug = types.StringValue(app.URLSlug)
 	model.Image = types.StringValue(app.Image)
+	model.Release = types.StringValue(app.Release)
 	model.Port = types.Int64Value(int64(app.Port))
 	model.Ingress = types.StringValue(app.Ingress)
 	model.Type = types.StringValue(app.Type)
@@ -1402,4 +1418,36 @@ func upgradeAppStateV0(_ context.Context, req resource.UpgradeStateRequest, resp
 		return
 	}
 	resp.DynamicValue = &tfprotov6.DynamicValue{JSON: out}
+}
+
+// releaseFollowsImage keeps a derived release name stable across plans and
+// lets it change with the image: a release the practitioner did not set is
+// unknown in a plan that changes the image, since the platform derives a new
+// one, and otherwise the one in state.
+type releaseFollowsImage struct{}
+
+func (releaseFollowsImage) Description(context.Context) string {
+	return "unknown when the image changes, else the value in state"
+}
+
+func (m releaseFollowsImage) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (releaseFollowsImage) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if !req.ConfigValue.IsNull() {
+		return // the practitioner's own name
+	}
+	if req.State.Raw.IsNull() {
+		return // create: unknown until the platform derives it
+	}
+	var planImage, stateImage types.String
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("image"), &planImage)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("image"), &stateImage)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if planImage.Equal(stateImage) {
+		resp.PlanValue = req.StateValue
+	}
 }

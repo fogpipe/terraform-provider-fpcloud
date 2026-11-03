@@ -67,8 +67,8 @@ resource "fpcloud_database" "main" {
 Optional:
 
 - `enabled` (Boolean) Whether scheduled backups are enabled.
-- `retention` (String) Backup retention period (e.g. 30d).
-- `schedule` (String) Cron schedule for automated backups.
+- `retention` (String) How far back a restore can reach, a count and a unit (30d, 4w, 6m). Left out, the platform's default is read back.
+- `schedule` (String) 5-field cron schedule for automated backups, in UTC. Left out, the platform's default (a weekly full copy) is read back.
 
 ## Import
 

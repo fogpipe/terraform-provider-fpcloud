@@ -235,16 +235,14 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 						Default:     booldefault.StaticBool(true),
 					},
 					"schedule": schema.StringAttribute{
-						Description: "Cron schedule for automated backups.",
+						Description: "5-field cron schedule for automated backups, in UTC. Left out, the platform's default (a weekly full copy) is read back.",
 						Optional:    true,
 						Computed:    true,
-						Default:     stringdefault.StaticString("0 3 * * *"),
 					},
 					"retention": schema.StringAttribute{
-						Description: "Backup retention period (e.g. 30d).",
+						Description: "How far back a restore can reach, a count and a unit (30d, 4w, 6m). Left out, the platform's default is read back.",
 						Optional:    true,
 						Computed:    true,
-						Default:     stringdefault.StaticString("30d"),
 					},
 				},
 			},
@@ -308,11 +306,7 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 
 	// Configure backup if specified.
 	if plan.Backup != nil && plan.Backup.Enabled.ValueBool() {
-		err := r.client.UpdateBackupConfig(ctx, db.ID, client.UpdateBackupConfigRequest{
-			Enabled:   plan.Backup.Enabled.ValueBool(),
-			Schedule:  plan.Backup.Schedule.ValueString(),
-			Retention: plan.Backup.Retention.ValueString(),
-		})
+		err := r.client.UpdateBackupConfig(ctx, db.ID, backupConfigChange(plan.Backup))
 		if err != nil {
 			resp.Diagnostics.AddWarning("Error configuring backup", err.Error())
 		}
@@ -390,20 +384,35 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 
 	// Reconcile backup config toward the desired state (idempotent).
 	if plan.Backup != nil {
-		if err := r.client.UpdateBackupConfig(ctx, state.ID.ValueString(), client.UpdateBackupConfigRequest{
-			Enabled:   plan.Backup.Enabled.ValueBool(),
-			Schedule:  plan.Backup.Schedule.ValueString(),
-			Retention: plan.Backup.Retention.ValueString(),
-		}); err != nil {
+		if err := r.client.UpdateBackupConfig(ctx, state.ID.ValueString(), backupConfigChange(plan.Backup)); err != nil {
 			resp.Diagnostics.AddWarning("Error updating backup configuration", err.Error())
 		}
 	} else if state.Backup != nil {
-		if err := r.client.UpdateBackupConfig(ctx, state.ID.ValueString(), client.UpdateBackupConfigRequest{Enabled: false}); err != nil {
+		disabled := false
+		if err := r.client.UpdateBackupConfig(ctx, state.ID.ValueString(), client.UpdateBackupConfigRequest{Enabled: &disabled}); err != nil {
 			resp.Diagnostics.AddWarning("Error disabling backup configuration", err.Error())
 		}
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// backupConfigChange sends what the practitioner wrote and nothing else: a
+// schedule or retention left out of the block is unknown at plan time, stays
+// off the wire so the platform keeps or defaults it, and is read back into
+// state by Read.
+func backupConfigChange(backup *DatabaseBackupModel) client.UpdateBackupConfigRequest {
+	enabled := backup.Enabled.ValueBool()
+	req := client.UpdateBackupConfigRequest{Enabled: &enabled}
+	if !backup.Schedule.IsUnknown() && !backup.Schedule.IsNull() {
+		schedule := backup.Schedule.ValueString()
+		req.Schedule = &schedule
+	}
+	if !backup.Retention.IsUnknown() && !backup.Retention.IsNull() {
+		retention := backup.Retention.ValueString()
+		req.Retention = &retention
+	}
+	return req
 }
 
 // rotationRequested reports whether the practitioner changed password_rotation

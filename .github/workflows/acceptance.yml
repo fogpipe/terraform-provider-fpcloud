@@ -13,9 +13,10 @@ name: acceptance
 #   vars.FPCLOUD_API_URL         — API base URL (defaults to prod if unset)
 #   vars.FPCLOUD_ACC_SWEEP_ORG   — the throwaway org's name. Before the tests
 #                                  start, the suite deletes that org's projects
-#                                  older than two hours — what a cancelled run
-#                                  left behind, since a killed process never
-#                                  reaches its teardown. Unset, nothing is swept
+#                                  older than 35 minutes — what a cancelled run
+#                                  or a failed teardown left behind, since a
+#                                  killed process never reaches its teardown.
+#                                  Unset, nothing is swept
 #                                  and leaks count against the org's project
 #                                  bound until someone clears them by hand.
 on:
@@ -30,6 +31,13 @@ on:
 
 permissions:
   contents: read
+
+# One run at a time. Every run shares the throwaway org's ceilings, which hold
+# only a couple of databases, so two overlapping runs refuse each other's.
+# The running one is never cancelled; a newer dispatch waits behind it.
+concurrency:
+  group: acceptance
+  cancel-in-progress: false
 
 jobs:
   acceptance:

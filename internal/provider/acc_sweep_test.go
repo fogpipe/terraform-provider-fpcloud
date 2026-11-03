@@ -17,8 +17,10 @@ import (
 // accSweepAge is how old a project in the acceptance org has to be before a
 // run reclaims it. Every test runs under `go test -timeout 30m`, so nothing a
 // live run owns — this one or a concurrent one — can be this old; a project
-// that is belongs to a run that was killed before its teardown.
-const accSweepAge = 2 * time.Hour
+// that is belongs to a run that was killed, or whose teardown failed. Kept
+// just past the timeout: the org holds two default databases, so a leak that
+// outlives the next run's start starves it.
+const accSweepAge = 35 * time.Minute
 
 // TestMain reclaims what an earlier run left behind before this one starts
 // (fogpipe/cloud-workspace#70). The framework destroys a test's resources in

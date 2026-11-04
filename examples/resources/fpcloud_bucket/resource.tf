@@ -1,9 +1,6 @@
 resource "fpcloud_bucket" "assets" {
   project = fpcloud_project.production.id
   name    = "assets"
-
-  quota_max_size    = 10737418240 # 10 GiB in bytes; reserved against the org ceiling
-  quota_max_objects = 100000      # 0 = unlimited
 }
 
 # Serve a bucket as a public static website (world-readable over HTTP).

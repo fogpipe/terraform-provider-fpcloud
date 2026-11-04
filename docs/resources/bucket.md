@@ -16,9 +16,6 @@ Manages a Fogpipe S3-compatible object-storage bucket (backed by Garage). The cr
 resource "fpcloud_bucket" "assets" {
   project = fpcloud_project.production.id
   name    = "assets"
-
-  quota_max_size    = 10737418240 # 10 GiB in bytes; reserved against the org ceiling
-  quota_max_objects = 100000      # 0 = unlimited
 }
 
 # Serve a bucket as a public static website (world-readable over HTTP).
@@ -62,8 +59,6 @@ resource "fpcloud_app" "uploader" {
 ### Optional
 
 - `public_read` (Boolean) Serve the bucket's objects to anyone with the URL, without a signature. This is the property a website needs and can be had without one: an asset origin is public_read and nothing else, with no index document and no versioned publishing. Setting website_enabled sets this; clearing this clears website_enabled, because a site nobody can read is not a site. Mutable in place.
-- `quota_max_objects` (Number) Maximum number of objects; unset takes the platform default. Reserved against the organization's object-count ceiling the same way as quota_max_size, and 0 is refused for the same reason. Mutable in place.
-- `quota_max_size` (Number) Maximum total size in bytes; unset takes the platform default. It is a reservation against the organization's object-storage ceiling, so a size the ceiling cannot hold is refused — and so is 0, which is not a size. Mutable in place.
 - `url_slug` (String) Vanity website host label: the site moves to <url_slug>.web.<platform domain>. Globally unique; empty reverts to the derived host. Mutable in place.
 - `website_enabled` (Boolean) Add the static-website serving conventions to a public bucket: an index document for a directory request, an error document for a miss, and eligibility for SPA fallback and versioned publishing. Implies public_read. Mutable in place.
 - `website_error_document` (String) Document served on a miss (e.g. 404.html; set it to the index document for SPA fallback).

@@ -25,15 +25,13 @@ type BucketResource struct {
 
 // BucketResourceModel describes the resource data model.
 type BucketResourceModel struct {
-	ID              types.String `tfsdk:"id"`
-	Project         types.String `tfsdk:"project"`
-	Name            types.String `tfsdk:"name"`
-	QuotaMaxSize    types.Int64  `tfsdk:"quota_max_size"`
-	QuotaMaxObjects types.Int64  `tfsdk:"quota_max_objects"`
-	Endpoint        types.String `tfsdk:"endpoint"`
-	Region          types.String `tfsdk:"region"`
-	Status          types.String `tfsdk:"status"`
-	Secrets         types.Map    `tfsdk:"secrets"`
+	ID       types.String `tfsdk:"id"`
+	Project  types.String `tfsdk:"project"`
+	Name     types.String `tfsdk:"name"`
+	Endpoint types.String `tfsdk:"endpoint"`
+	Region   types.String `tfsdk:"region"`
+	Status   types.String `tfsdk:"status"`
+	Secrets  types.Map    `tfsdk:"secrets"`
 
 	PublicRead           types.Bool   `tfsdk:"public_read"`
 	WebsiteEnabled       types.Bool   `tfsdk:"website_enabled"`
@@ -81,16 +79,6 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
-			},
-			"quota_max_size": schema.Int64Attribute{
-				Description: "Maximum total size in bytes; unset takes the platform default. It is a reservation against the organization's object-storage ceiling, so a size the ceiling cannot hold is refused — and so is 0, which is not a size. Mutable in place.",
-				Optional:    true,
-				Computed:    true,
-			},
-			"quota_max_objects": schema.Int64Attribute{
-				Description: "Maximum number of objects; unset takes the platform default. Reserved against the organization's object-count ceiling the same way as quota_max_size, and 0 is refused for the same reason. Mutable in place.",
-				Optional:    true,
-				Computed:    true,
 			},
 			"endpoint": schema.StringAttribute{
 				Description: "S3 endpoint URL for the bucket.",
@@ -195,14 +183,9 @@ func (r *BucketResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	// An unset quota is sent as absent rather than as zero: absent takes the
-	// platform default, and zero is not a size and is refused (ADR-129). Read
-	// off ValueInt64 the two were the same request.
 	bucket, err := r.client.CreateBucket(ctx, plan.Project.ValueString(), client.CreateBucketRequest{
-		Name:            plan.Name.ValueString(),
-		QuotaMaxSize:    optionalInt64(plan.QuotaMaxSize),
-		QuotaMaxObjects: optionalInt64(plan.QuotaMaxObjects),
-		PublicRead:      optionalBool(plan.PublicRead),
+		Name:       plan.Name.ValueString(),
+		PublicRead: optionalBool(plan.PublicRead),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating bucket", err.Error())
@@ -262,25 +245,11 @@ func (r *BucketResource) Update(ctx context.Context, req resource.UpdateRequest,
 		return
 	}
 
-	// Quotas, website serving, and the vanity slug are mutable in place
-	// (project/name force replacement).
-	//
-	// Unknown means "keep what the bucket has", the same rule the website and
-	// public-read attributes below follow. Reading it as ValueInt64's zero sent
-	// max_objects: 0 for a plan that only lowered the size, and a quota is a size
-	// above zero (ADR-129) — so every update that did not restate BOTH quotas in
-	// configuration was refused (fogpipe/cloud-workspace#923).
-	maxSize := plan.QuotaMaxSize.ValueInt64()
-	if plan.QuotaMaxSize.IsUnknown() || plan.QuotaMaxSize.IsNull() {
-		maxSize = state.QuotaMaxSize.ValueInt64()
-	}
-	maxObjects := plan.QuotaMaxObjects.ValueInt64()
-	if plan.QuotaMaxObjects.IsUnknown() || plan.QuotaMaxObjects.IsNull() {
-		maxObjects = state.QuotaMaxObjects.ValueInt64()
-	}
-	bucket, err := r.client.SetBucketQuota(ctx, state.ID.ValueString(), maxSize, maxObjects)
+	// Website serving and the vanity slug are mutable in place (project/name
+	// force replacement).
+	bucket, err := r.client.GetBucket(ctx, state.ID.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Error updating bucket quota", err.Error())
+		resp.Diagnostics.AddError("Error reading bucket", err.Error())
 		return
 	}
 
@@ -383,8 +352,6 @@ func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 		m.Project = types.StringValue(bucket.ProjectID)
 	}
 	m.Name = types.StringValue(bucket.Name)
-	m.QuotaMaxSize = types.Int64Value(bucket.QuotaMaxSize)
-	m.QuotaMaxObjects = types.Int64Value(bucket.QuotaMaxObjects)
 	m.Endpoint = types.StringValue(bucket.Endpoint)
 	m.Region = types.StringValue(bucket.Region)
 	m.Status = types.StringValue(bucket.Status)
@@ -401,9 +368,6 @@ func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 	m.Secrets, _ = types.MapValueFrom(context.Background(), types.StringType, orEmptyMap(bucket.Secrets))
 }
 
-// optionalInt64 is a nullable/unknown TF number as a pointer, so an attribute
-// the config left out reaches the API as absent rather than as zero. The two
-// mean different things on a bucket quota (ADR-128, ADR-129).
 // optionalBool sends a flag only when the config states one: an unset
 // optional+computed attribute is unknown, and sending false for it would take a
 // bucket private that nobody asked to change.
@@ -412,13 +376,5 @@ func optionalBool(v types.Bool) *bool {
 		return nil
 	}
 	out := v.ValueBool()
-	return &out
-}
-
-func optionalInt64(v types.Int64) *int64 {
-	if v.IsNull() || v.IsUnknown() {
-		return nil
-	}
-	out := v.ValueInt64()
 	return &out
 }

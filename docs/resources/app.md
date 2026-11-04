@@ -214,6 +214,7 @@ resource "fpcloud_iam_binding" "reporter_reads_stripe" {
 - `type` (String) Process type: 'web' (default) serves HTTP behind a Service, or 'worker' — a long-running process with no port, Service, ingress, URL or health checks. A worker is always-on only. Changing this replaces the app: it decides whether the app has an address at all.
 - `url_slug` (String) Optional vanity host override: sets the app's public host to '<url_slug>.app.<platform_domain>'. When empty, the host is derived from the app/project/org names. Globally unique, a DNS-1123 label. Set to an empty string to clear it back to the derived host.
 - `volume_mounts` (Attributes List) Mount a ConfigMap or Secret as read-only files, or an emptyDir as writable scratch, at a container path. Create-only — the API has no update path, so any change, including one made outside Terraform, forces the app to be replaced. (see [below for nested schema](#nestedatt--volume_mounts))
+- `wait_for_rollout` (Boolean) Wait for each deploy's rollout to end, and fail the apply if it fails. By default an apply ends once the deploy is accepted and any release command has passed, with the previous version serving until the rollout ends. Set it when something later in the same apply needs the new version running. A setting of this provider, never sent to the API.
 
 ### Read-Only
 

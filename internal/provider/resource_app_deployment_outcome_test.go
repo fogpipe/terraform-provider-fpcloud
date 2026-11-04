@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
@@ -40,6 +41,11 @@ func TestAwaitDeployment(t *testing.T) {
 			wantErr: "the deploy failed; `fpcloud app deployments app-1` has its record",
 		},
 		{
+			name:    "a rollout under way ends an apply that did not ask to wait for it",
+			app:     client.App{ID: "app-1", Status: "deploying"},
+			records: []client.Deployment{{ID: "dep-1", Status: "deploying"}},
+		},
+		{
 			name:    "an active record is an apply that succeeded",
 			app:     client.App{ID: "app-1", Status: "deploying"},
 			records: []client.Deployment{{ID: "dep-1", Status: "active"}},
@@ -68,7 +74,7 @@ func TestAwaitDeployment(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			err := awaitDeployment(context.Background(), client.New(srv.URL, "fp-test"), &tc.app)
+			err := awaitDeployment(context.Background(), client.New(srv.URL, "fp-test"), &tc.app, false)
 			switch {
 			case tc.wantErr == "" && err != nil:
 				t.Fatalf("awaitDeployment: %v", err)
@@ -76,5 +82,45 @@ func TestAwaitDeployment(t *testing.T) {
 				t.Fatalf("awaitDeployment = %v, want %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// Asked to wait, an apply follows the rollout to its verdict. Unasked, it still
+// follows a release command, whose failure means nothing rolled out.
+func TestAwaitDeployment_FollowsTheRecordAsFarAsAsked(t *testing.T) {
+	serve := func(t *testing.T, sequence ...client.Deployment) (*client.Client, *int) {
+		t.Helper()
+		reads := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			at := min(reads, len(sequence)-1)
+			reads++
+			_ = json.NewEncoder(w).Encode([]client.Deployment{sequence[at]})
+		}))
+		t.Cleanup(srv.Close)
+		return client.New(srv.URL, "fp-test"), &reads
+	}
+	app := &client.App{ID: "app-1", Status: "deploying"}
+
+	c, _ := serve(t, client.Deployment{Status: "deploying"}, client.Deployment{Status: "failed", Message: "timed out progressing"})
+	if err := awaitDeployment(context.Background(), c, app, true); err == nil || !strings.Contains(err.Error(), "timed out progressing") {
+		t.Fatalf("a rollout waited on and failed = %v", err)
+	}
+
+	c, _ = serve(t, client.Deployment{Status: "deploying"}, client.Deployment{Status: "active"})
+	if err := awaitDeployment(context.Background(), c, app, true); err != nil {
+		t.Fatalf("a rollout waited on and finished = %v", err)
+	}
+
+	c, _ = serve(t, client.Deployment{Status: "releasing"}, client.Deployment{Status: "failed", Message: "migration failed"})
+	if err := awaitDeployment(context.Background(), c, app, false); err == nil || !strings.Contains(err.Error(), "migration failed") {
+		t.Fatalf("a failed release command, unasked = %v", err)
+	}
+
+	c, reads := serve(t, client.Deployment{Status: "releasing"}, client.Deployment{Status: "deploying"}, client.Deployment{Status: "failed", Message: "must not be read"})
+	if err := awaitDeployment(context.Background(), c, app, false); err != nil {
+		t.Fatalf("a gate that passed, unasked = %v", err)
+	}
+	if *reads != 2 {
+		t.Fatalf("read the record %d times, want it to stop at the rollout", *reads)
 	}
 }

@@ -47,6 +47,7 @@ type AppResourceModel struct {
 	Command             types.List   `tfsdk:"command"`
 	Args                types.List   `tfsdk:"args"`
 	ReleaseCommand      types.List   `tfsdk:"release_command"`
+	WaitForRollout      types.Bool   `tfsdk:"wait_for_rollout"`
 	VolumeMounts        types.List   `tfsdk:"volume_mounts"`
 	SecurityContext     types.Object `tfsdk:"security_context"`
 	Port                types.Int64  `tfsdk:"port"`
@@ -208,6 +209,16 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					"drift.",
 				Optional:    true,
 				ElementType: types.StringType,
+			},
+			"wait_for_rollout": schema.BoolAttribute{
+				Description: "Wait for each deploy's rollout to end, and fail the apply if it fails. By " +
+					"default an apply ends once the deploy is accepted and any release command has " +
+					"passed, with the previous version serving until the rollout ends. Set it when " +
+					"something later in the same apply needs the new version running. A setting of " +
+					"this provider, never sent to the API.",
+				Optional: true,
+				Computed: true,
+				Default:  booldefault.StaticBool(false),
 			},
 			"volume_mounts": schema.ListNestedAttribute{
 				Description: "Mount a ConfigMap or Secret as read-only files, or an emptyDir as writable " +
@@ -572,7 +583,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		return
 	}
 
-	if err := awaitDeployment(ctx, r.client, app); err != nil {
+	if err := awaitDeployment(ctx, r.client, app, plan.WaitForRollout.ValueBool()); err != nil {
 		resp.Diagnostics.AddError("Error deploying app", err.Error())
 		return
 	}
@@ -603,17 +614,16 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-// awaitDeployment follows the app's newest deployment record to its terminal
-// status and fails the apply on a failed one, carrying the API's message. Every
-// create and deploy ends here, release command or not. The API answers both
-// with the app and records the outcome on the deployment: a release-gated call
-// returns while the release command still runs as a Job, so a
-// migration can outlive an HTTP timeout, and the record stays 'releasing'
-// until the gate and rollout finish; an ungated call whose rollout the cluster
-// refused returns with the record already failed. An apply that read neither
-// reported success while the previous version was still serving. The app the
+// awaitDeployment follows the app's newest deployment record and fails the apply
+// on a failed one, carrying the API's message. Every create and deploy ends here.
+// The API answers both with the app and records the outcome on the deployment: a
+// release-gated call returns while the release command still runs as a Job, so a
+// migration can outlive an HTTP timeout, and the record stays 'releasing' until the
+// gate passes; a call whose rollout the cluster refused returns with the record
+// already failed. Both are always followed. The record then says 'deploying' until
+// the rollout ends, which is followed only when waitForRollout asks. The app the
 // call returned is the fallback when no record was written.
-func awaitDeployment(ctx context.Context, c *client.Client, app *client.App) error {
+func awaitDeployment(ctx context.Context, c *client.Client, app *client.App, waitForRollout bool) error {
 	failed := fmt.Errorf("the deploy failed; `fpcloud app deployments %s` has its record", app.ID)
 	deadline := time.Now().Add(30 * time.Minute)
 	for {
@@ -628,7 +638,11 @@ func awaitDeployment(ctx context.Context, c *client.Client, app *client.App) err
 			return nil
 		}
 		switch deps[0].Status {
-		case "deploying", "releasing":
+		case "releasing":
+		case "deploying":
+			if !waitForRollout {
+				return nil
+			}
 		case "failed":
 			if msg := deps[0].Message; msg != "" {
 				return fmt.Errorf("the deploy failed: %s", msg)
@@ -713,7 +727,7 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			resp.Diagnostics.AddError("Error deploying app", err.Error())
 			return
 		}
-		if err := awaitDeployment(ctx, r.client, deployed); err != nil {
+		if err := awaitDeployment(ctx, r.client, deployed, plan.WaitForRollout.ValueBool()); err != nil {
 			resp.Diagnostics.AddError("Error deploying app", err.Error())
 			return
 		}
@@ -1149,6 +1163,10 @@ func routesFromModel(ctx context.Context, l types.List, diags *diag.Diagnostics)
 // setModelFromApp maps an API App response to the Terraform resource model.
 // It preserves the plan's env/secret maps since they are not returned by the API.
 func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, diags *diag.Diagnostics) {
+	// Not the API's to answer, so an imported app has nothing to read it from.
+	if model.WaitForRollout.IsNull() {
+		model.WaitForRollout = types.BoolValue(false)
+	}
 	setRoutesOnModel(model, app.Routes, diags)
 	setProbesOnModel(model, app.Probes, diags)
 	// Everything the API echoes is read back, so a change made outside this

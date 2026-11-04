@@ -71,8 +71,14 @@ func TestAppCreate_FailedReleaseGateIsStillRecorded(t *testing.T) {
 			}
 			created = true
 			creates++
+			// The API marks the app failed only when the gate it started failed;
+			// a create whose gate passes answers with the app still deploying.
+			answer := app
+			if creates > 1 {
+				answer.Status = "deploying"
+			}
 			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(app)
+			_ = json.NewEncoder(w).Encode(answer)
 		case r.URL.Path == "/api/v1/apps/app-1/deployments":
 			// The gate fails on the first create and passes on the retry.
 			status := "failed"
@@ -112,7 +118,7 @@ resource "fpcloud_app" "web" {
 		Steps: []resource.TestStep{
 			{
 				Config:      config,
-				ExpectError: regexp.MustCompile("release command failed"),
+				ExpectError: regexp.MustCompile("the deploy failed"),
 			},
 			{
 				// The retry replaces the failed app rather than colliding with it:

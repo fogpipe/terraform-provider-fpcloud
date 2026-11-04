@@ -480,7 +480,6 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	asked := plan
 
 	// env and secret_env ride the create request (ADR-112): an app created
 	// with a release command is gated on it before it serves, so config written
@@ -573,13 +572,9 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		return
 	}
 
-	// An app created with a release command is gated on it before it serves, so
-	// the apply waits for the same verdict a deploy does.
-	if len(asked.ReleaseCommand.Elements()) > 0 {
-		if err := awaitRelease(ctx, r.client, app.ID); err != nil {
-			resp.Diagnostics.AddError("Error running release command", err.Error())
-			return
-		}
+	if err := awaitDeployment(ctx, r.client, app); err != nil {
+		resp.Diagnostics.AddError("Error deploying app", err.Error())
+		return
 	}
 
 	r.setModelFromApp(&plan, app, &resp.Diagnostics)
@@ -608,29 +603,45 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-// awaitRelease blocks until the app's newest deployment leaves the release gate
-// (ADR-042), and fails the apply if the gate did. The gate runs in the
-// background so a migration can outlive an HTTP timeout, which means an apply
-// that did not wait would report success while the release command was still
-// running — or had already failed and left the previous version serving.
-func awaitRelease(ctx context.Context, c *client.Client, appID string) error {
+// awaitDeployment follows the app's newest deployment record to its terminal
+// status and fails the apply on a failed one, carrying the API's message. Every
+// create and deploy ends here, release command or not. The API answers both
+// with the app and records the outcome on the deployment: a release-gated call
+// returns while the release command still runs as a Job, so a
+// migration can outlive an HTTP timeout, and the record stays 'releasing'
+// until the gate and rollout finish; an ungated call whose rollout the cluster
+// refused returns with the record already failed. An apply that read neither
+// reported success while the previous version was still serving. The app the
+// call returned is the fallback when no record was written.
+func awaitDeployment(ctx context.Context, c *client.Client, app *client.App) error {
+	failed := fmt.Errorf("the deploy failed; `fpcloud app deployments %s` has its record", app.ID)
 	deadline := time.Now().Add(30 * time.Minute)
 	for {
-		deps, err := c.ListDeployments(ctx, appID)
+		deps, err := c.ListDeployments(ctx, app.ID)
 		if err != nil {
 			return err
 		}
-		if len(deps) > 0 {
-			switch deps[0].Status {
-			case "deploying", "releasing":
-			case "failed":
-				return fmt.Errorf("the release command failed; `fpcloud app deployments %s` has its output", appID)
-			default:
-				return nil
+		if len(deps) == 0 {
+			if app.Status == "failed" {
+				return failed
 			}
+			return nil
+		}
+		switch deps[0].Status {
+		case "deploying", "releasing":
+		case "failed":
+			if msg := deps[0].Message; msg != "" {
+				return fmt.Errorf("the deploy failed: %s", msg)
+			}
+			return failed
+		default:
+			if app.Status == "failed" {
+				return failed
+			}
+			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out waiting for the release command to finish; `fpcloud app deployments %s` has its state", appID)
+			return fmt.Errorf("timed out waiting for the rollout to finish; `fpcloud app deployments %s` has its state", app.ID)
 		}
 		select {
 		case <-ctx.Done():
@@ -697,16 +708,14 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			}
 			deployReq.ReleaseCommand = &v
 		}
-		_, err := r.client.DeployApp(ctx, appID, deployReq)
+		deployed, err := r.client.DeployApp(ctx, appID, deployReq)
 		if err != nil {
 			resp.Diagnostics.AddError("Error deploying app", err.Error())
 			return
 		}
-		if len(plan.ReleaseCommand.Elements()) > 0 {
-			if err := awaitRelease(ctx, r.client, appID); err != nil {
-				resp.Diagnostics.AddError("Error running release command", err.Error())
-				return
-			}
+		if err := awaitDeployment(ctx, r.client, deployed); err != nil {
+			resp.Diagnostics.AddError("Error deploying app", err.Error())
+			return
 		}
 	}
 

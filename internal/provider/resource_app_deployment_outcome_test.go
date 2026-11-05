@@ -46,6 +46,11 @@ func TestAwaitDeployment(t *testing.T) {
 			records: []client.Deployment{{ID: "dep-1", Status: "deploying"}},
 		},
 		{
+			name:    "a sleeping app's previous version coming up ends an apply that did not ask to wait",
+			app:     client.App{ID: "app-1", Status: "deploying"},
+			records: []client.Deployment{{ID: "dep-1", Status: "waking"}},
+		},
+		{
 			name:    "an active record is an apply that succeeded",
 			app:     client.App{ID: "app-1", Status: "deploying"},
 			records: []client.Deployment{{ID: "dep-1", Status: "active"}},
@@ -109,6 +114,11 @@ func TestAwaitDeployment_FollowsTheRecordAsFarAsAsked(t *testing.T) {
 	c, _ = serve(t, client.Deployment{Status: "deploying"}, client.Deployment{Status: "active"})
 	if err := awaitDeployment(context.Background(), c, app, true); err != nil {
 		t.Fatalf("a rollout waited on and finished = %v", err)
+	}
+
+	c, _ = serve(t, client.Deployment{Status: "waking"}, client.Deployment{Status: "failed", Message: "timed out progressing"})
+	if err := awaitDeployment(context.Background(), c, app, true); err == nil || !strings.Contains(err.Error(), "timed out progressing") {
+		t.Fatalf("a sleeping app's rollout waited on through its wake = %v", err)
 	}
 
 	c, _ = serve(t, client.Deployment{Status: "releasing"}, client.Deployment{Status: "failed", Message: "migration failed"})

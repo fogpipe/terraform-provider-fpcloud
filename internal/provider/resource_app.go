@@ -621,7 +621,8 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 // migration can outlive an HTTP timeout, and the record stays 'releasing' until the
 // gate passes; a call whose rollout the cluster refused returns with the record
 // already failed. Both are always followed. The record then says 'deploying' until
-// the rollout ends, which is followed only when waitForRollout asks. The app the
+// the rollout ends, and 'waking' before it while a sleeping app's previous version
+// comes up; both are followed only when waitForRollout asks. The app the
 // call returned is the fallback when no record was written.
 func awaitDeployment(ctx context.Context, c *client.Client, app *client.App, waitForRollout bool) error {
 	failed := fmt.Errorf("the deploy failed; `fpcloud app deployments %s` has its record", app.ID)
@@ -639,7 +640,7 @@ func awaitDeployment(ctx context.Context, c *client.Client, app *client.App, wai
 		}
 		switch deps[0].Status {
 		case "releasing":
-		case "deploying":
+		case "deploying", "waking":
 			if !waitForRollout {
 				return nil
 			}

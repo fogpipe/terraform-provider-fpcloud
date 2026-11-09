@@ -56,6 +56,10 @@ const accRootImageOptOut = `
 // app is always-on + ingress=all so custom domains are accepted (ADR-030).
 // Reference fpcloud_project.scaffold.id / fpcloud_app.scaffold.id from the
 // caller's config.
+//
+// The image is nginx-unprivileged rather than nginx: the stock image chowns
+// its cache at start, which the restricted profile refuses, so it crash-loops.
+// An apply waits for the rollout, so a test app has to actually serve.
 func testAccAppScaffold(projectName, appName string) string {
 	return fmt.Sprintf(`
 resource "fpcloud_project" "scaffold" {
@@ -65,10 +69,10 @@ resource "fpcloud_project" "scaffold" {
 resource "fpcloud_app" "scaffold" {
   project_id = fpcloud_project.scaffold.id
   name       = %[2]q
-  image      = "nginx:latest"
+  image      = "nginxinc/nginx-unprivileged:latest"
   ingress    = "all"
-%[3]s}
-`, projectName, appName, accRootImageOptOut)
+}
+`, projectName, appName)
 }
 
 // testAccClient builds an API client from the same environment variables the

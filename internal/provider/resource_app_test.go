@@ -30,20 +30,20 @@ resource "fpcloud_project" "test" {
 resource "fpcloud_app" "test" {
   project_id   = fpcloud_project.test.id
   name         = %[2]q
-  image        = "nginx:latest"
-  port         = 80
+  image        = "nginxinc/nginx-unprivileged:latest"
+  port         = 8080
   ingress      = "all"
   min_scale    = 1
   max_scale    = 5
   cpu_limit    = "250m"
   memory_limit = "256Mi"
-%[3]s}
-`, projName, appName, accRootImageOptOut),
+}
+`, projName, appName),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("fpcloud_app.test", "id"),
 					resource.TestCheckResourceAttr("fpcloud_app.test", "name", appName),
-					resource.TestCheckResourceAttr("fpcloud_app.test", "image", "nginx:latest"),
-					resource.TestCheckResourceAttr("fpcloud_app.test", "port", "80"),
+					resource.TestCheckResourceAttr("fpcloud_app.test", "image", "nginxinc/nginx-unprivileged:latest"),
+					resource.TestCheckResourceAttr("fpcloud_app.test", "port", "8080"),
 					resource.TestCheckResourceAttr("fpcloud_app.test", "min_scale", "1"),
 					resource.TestCheckResourceAttr("fpcloud_app.test", "max_scale", "5"),
 					resource.TestCheckResourceAttr("fpcloud_app.test", "cpu_limit", "250m"),

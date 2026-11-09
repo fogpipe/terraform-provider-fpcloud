@@ -41,12 +41,12 @@ func TestAwaitDeployment(t *testing.T) {
 			wantErr: "the deploy failed; `fpcloud app deployments app-1` has its record",
 		},
 		{
-			name:    "a rollout under way ends an apply that did not ask to wait for it",
+			name:    "a rollout under way ends an apply set not to wait for it",
 			app:     client.App{ID: "app-1", Status: "deploying"},
 			records: []client.Deployment{{ID: "dep-1", Status: "deploying"}},
 		},
 		{
-			name:    "a sleeping app's previous version coming up ends an apply that did not ask to wait",
+			name:    "a sleeping app's previous version coming up ends an apply set not to wait",
 			app:     client.App{ID: "app-1", Status: "deploying"},
 			records: []client.Deployment{{ID: "dep-1", Status: "waking"}},
 		},
@@ -90,7 +90,7 @@ func TestAwaitDeployment(t *testing.T) {
 	}
 }
 
-// Asked to wait, an apply follows the rollout to its verdict. Unasked, it still
+// By default an apply follows the rollout to its verdict. Set not to wait, it still
 // follows a release command, whose failure means nothing rolled out.
 func TestAwaitDeployment_FollowsTheRecordAsFarAsAsked(t *testing.T) {
 	serve := func(t *testing.T, sequence ...client.Deployment) (*client.Client, *int) {

@@ -211,14 +211,14 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				ElementType: types.StringType,
 			},
 			"wait_for_rollout": schema.BoolAttribute{
-				Description: "Wait for each deploy's rollout to end, and fail the apply if it fails. By " +
-					"default an apply ends once the deploy is accepted and any release command has " +
-					"passed, with the previous version serving until the rollout ends. Set it when " +
-					"something later in the same apply needs the new version running. A setting of " +
-					"this provider, never sent to the API.",
+				Description: "Wait for each deploy's rollout to end, and fail the apply if it fails. " +
+					"Defaults to true, so whatever the same apply does next runs against the new " +
+					"version. Set it to false to end the apply once the deploy is accepted and any " +
+					"release command has passed, with the previous version serving until the rollout " +
+					"ends. A setting of this provider, never sent to the API.",
 				Optional: true,
 				Computed: true,
-				Default:  booldefault.StaticBool(false),
+				Default:  booldefault.StaticBool(true),
 			},
 			"volume_mounts": schema.ListNestedAttribute{
 				Description: "Mount a ConfigMap or Secret as read-only files, or an emptyDir as writable " +
@@ -622,7 +622,7 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 // gate passes; a call whose rollout the cluster refused returns with the record
 // already failed. Both are always followed. The record then says 'deploying' until
 // the rollout ends, and 'waking' before it while a sleeping app's previous version
-// comes up; both are followed only when waitForRollout asks. The app the
+// comes up; both are followed unless waitForRollout is off. The app the
 // call returned is the fallback when no record was written.
 func awaitDeployment(ctx context.Context, c *client.Client, app *client.App, waitForRollout bool) error {
 	failed := fmt.Errorf("the deploy failed; `fpcloud app deployments %s` has its record", app.ID)
@@ -1166,7 +1166,7 @@ func routesFromModel(ctx context.Context, l types.List, diags *diag.Diagnostics)
 func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, diags *diag.Diagnostics) {
 	// Not the API's to answer, so an imported app has nothing to read it from.
 	if model.WaitForRollout.IsNull() {
-		model.WaitForRollout = types.BoolValue(false)
+		model.WaitForRollout = types.BoolValue(true)
 	}
 	setRoutesOnModel(model, app.Routes, diags)
 	setProbesOnModel(model, app.Probes, diags)

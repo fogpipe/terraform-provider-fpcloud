@@ -614,6 +614,22 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// withReleaseOutput adds what a failed deploy's release command printed to its
+// error: one log read, made only once the deploy has failed.
+func withReleaseOutput(ctx context.Context, c *client.Client, dep *client.Deployment, err error) error {
+	if len(dep.ReleaseCommand) == 0 {
+		return err
+	}
+	logs, readErr := c.GetReleaseLogs(ctx, dep)
+	switch {
+	case readErr != nil:
+		return fmt.Errorf("%w\n\nthe release command's output could not be read: %v", err, readErr)
+	case strings.TrimSpace(logs) != "":
+		return fmt.Errorf("%w\n\n--- release command output ---\n%s", err, strings.TrimSpace(logs))
+	}
+	return err
+}
+
 // awaitDeployment follows the app's newest deployment record and fails the apply
 // on a failed one, carrying the API's message. Every create and deploy ends here.
 // The API answers both with the app and records the outcome on the deployment: a
@@ -645,10 +661,11 @@ func awaitDeployment(ctx context.Context, c *client.Client, app *client.App, wai
 				return nil
 			}
 		case "failed":
+			err := failed
 			if msg := deps[0].Message; msg != "" {
-				return fmt.Errorf("the deploy failed: %s", msg)
+				err = fmt.Errorf("the deploy failed: %s", msg)
 			}
-			return failed
+			return withReleaseOutput(ctx, c, deps[0], err)
 		default:
 			if app.Status == "failed" {
 				return failed

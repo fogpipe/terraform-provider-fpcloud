@@ -103,6 +103,7 @@ ScanImage
 # read-only observability — not something you reference as TF resource state
 GetAppLogs
 GetWebsiteLogs
+GetReleaseLogs
 GetAppVersion
 # app events (#126) — warnings recorded against an app right now. They age out
 # on their own, so a data source over them returns a different set on every

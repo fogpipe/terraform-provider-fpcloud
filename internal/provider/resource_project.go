@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -157,13 +158,12 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 		Egress:      plan.Egress.ValueString(),
 	}
 
-	var project *client.Project
-	var err error
-	if org := plan.Org.ValueString(); org != "" {
-		project, err = r.client.CreateProjectInOrg(ctx, org, apiReq)
-	} else {
-		project, err = r.client.CreateProject(ctx, apiReq)
-	}
+	project, err := createWaitingForName(ctx, func(ctx context.Context) (*client.Project, error) {
+		if org := plan.Org.ValueString(); org != "" {
+			return r.client.CreateProjectInOrg(ctx, org, apiReq)
+		}
+		return r.client.CreateProject(ctx, apiReq)
+	})
 	if err != nil {
 		if isConflict(err) && plan.AdoptExisting.ValueBool() {
 			project, err = r.findProjectByName(ctx, plan.Org.ValueString(), plan.Name.ValueString())
@@ -182,6 +182,45 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 
 	r.apply(&plan, project)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// projectNameFreeWait bounds how long a create waits for the name of a deleted
+// project whose teardown is still running. A project holding a database takes
+// minutes to tear down, and the platform calls a teardown stuck only past 35
+// minutes, so this outlasts any teardown that is going to finish.
+const projectNameFreeWait = 40 * time.Minute
+
+// projectNameFreePoll is how often a create waiting for the name tries again.
+var projectNameFreePoll = 10 * time.Second
+
+// createWaitingForName runs create, and while the platform answers that a
+// deleted project of the same name is still being torn down, waits and runs it
+// again. A destroy returns as soon as the delete is accepted, so this is where a
+// replace under the same name waits for the old project's teardown: the one
+// operation that needs the name is the one that waits for it.
+func createWaitingForName(ctx context.Context, create func(context.Context) (*client.Project, error)) (*client.Project, error) {
+	deadline := time.Now().Add(projectNameFreeWait)
+	for {
+		project, err := create(ctx)
+		if !isProjectTearingDown(err) {
+			return project, err
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("%w (still waiting for the name after %s)", err, projectNameFreeWait)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(projectNameFreePoll):
+		}
+	}
+}
+
+// isProjectTearingDown reports a create refused because a deleted project of
+// the same name is still being torn down.
+func isProjectTearingDown(err error) bool {
+	var apiErr *client.APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict && apiErr.Code == "PROJECT_TEARING_DOWN"
 }
 
 // findProjectByName resolves a project by name, scoped to org when provided
@@ -221,6 +260,13 @@ func (r *ProjectResource) Read(ctx context.Context, req resource.ReadRequest, re
 			return
 		}
 		resp.Diagnostics.AddError("Error reading project", err.Error())
+		return
+	}
+	// A project whose delete has been accepted is gone too: it is out of every
+	// list and refuses writes, and nothing brings it back. A plan then creates
+	// it again, and that create waits for the name (createWaitingForName).
+	if project.Status == "deleting" {
+		resp.State.RemoveResource(ctx)
 		return
 	}
 
@@ -274,10 +320,6 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-// projectDeleteWait bounds how long a destroy waits for the platform's teardown
-// to finish before reporting the deletion as accepted and still running.
-const projectDeleteWait = 10 * time.Minute
-
 func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state ProjectResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -294,29 +336,11 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 		return
 	}
 
-	// The API accepts the deletion and tears the project down behind it. Terraform
-	// takes a returned Delete as "the resource is gone", so waiting here is what
-	// makes that true — otherwise the next apply recreates a project whose
-	// namespace and storage are still being reclaimed. The teardown continues
-	// server-side regardless of what this operation does (#865).
-	//
-	// Bounded, because the client's wait is not: it polls until the project is
-	// gone or the context ends, and the framework hands Delete a context with
-	// no deadline. A teardown the platform cannot finish (a store it cannot
-	// reach, a bucket already gone) keeps the project visible for as long as
-	// the platform keeps retrying it, and a destroy that waited on one once
-	// held an acceptance run's whole budget. A healthy teardown takes well
-	// under a minute.
-	waitCtx, cancel := context.WithTimeout(ctx, projectDeleteWait)
-	defer cancel()
-	if err := r.client.WaitProjectDeleted(waitCtx, state.ID.ValueString(), 5*time.Second); err != nil {
-		detail := err.Error()
-		if errors.Is(err, context.DeadlineExceeded) {
-			detail = fmt.Sprintf("not finished after %s; `fpcloud project get %s` has its state", projectDeleteWait, state.ID.ValueString())
-		}
-		resp.Diagnostics.AddError("Error waiting for project deletion",
-			"The deletion was accepted and is still running server-side: "+detail)
-	}
+	// The API accepts the deletion and tears the project down behind it, and
+	// from that moment the project is out of every list and refuses writes, so
+	// it is gone as far as this configuration can tell. The teardown still holds
+	// the name for a few minutes; a create under it waits for that
+	// (createWaitingForName), so a destroy does not have to.
 }
 
 // ImportState accepts a project id (UUID), a bare project name, or an

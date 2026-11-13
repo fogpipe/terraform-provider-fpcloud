@@ -26,6 +26,8 @@ github.com/emirpasic/gods v1.18.1/go.mod h1:8tpGGwCnJ5H4r6BWwaV6OrWmMoPhUl5jm/FM
 github.com/fatih/color v1.13.0/go.mod h1:kLAiJbzzSOZDVNGyDpeOxJ47H46qBXwg5ILebYFFOfk=
 github.com/fatih/color v1.18.0 h1:S8gINlzdQ840/4pfAwic/ZE0djQEH3wM94VfqLTZcOM=
 github.com/fatih/color v1.18.0/go.mod h1:4FelSpRwEGDpQ12mAdzqdOukCy4u8WUtOY6lkT/6HfU=
+github.com/fogpipe/cloud-cli v0.263.2-0.20261113134125-20facd7b9b33 h1:KabTETVreoDg+ZIqj83d23kyfSmmHHQLRHoGPRO0IPA=
+github.com/fogpipe/cloud-cli v0.263.2-0.20261113134125-20facd7b9b33/go.mod h1:44Aa73hOH7V83Ex9KelKexHH0nB7v15lTi2pR1bpq48=
 github.com/fogpipe/cloud-cli v0.264.3 h1:/ORo9aIzaRRFclnpwMtTd4f3l/8te5AprmPKspu8034=
 github.com/fogpipe/cloud-cli v0.264.3/go.mod h1:44Aa73hOH7V83Ex9KelKexHH0nB7v15lTi2pR1bpq48=
 github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 h1:+zs/tPmkDkHx3U66DAb0lQFJrpS6731Oaa12ikc+DiI=

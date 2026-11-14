@@ -87,6 +87,9 @@ GetBucketCredentials
 GetS3Credentials
 ListRegistryRepositories
 ListRegistryTags
+# a repository's images with each one's scan state and age: the same read as
+# the tags, one level richer, and it moves with every push and every scan
+ListRegistryImages
 DeleteRegistryTag
 # the CVEs behind a tag (fogpipe/cloud-workspace#321): a scan result, read, never declared
 ListRegistryCVEs

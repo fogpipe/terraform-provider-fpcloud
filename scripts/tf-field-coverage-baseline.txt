@@ -57,6 +57,10 @@ Runner.instances
 # reading one level finer: it changes with GitHub's queue rather than with
 # anything declared, so an attribute over it is drift on every plan.
 Runner.queue
+Runner.recent_failures
+# The runner's pods that ended abnormally in the last 30 days: a record of
+# what happened to jobs, which grows while nothing in the config changes.
+# `fpcloud runner show` is where it is read.
 # GitHub's view of the pool's demand (#146): assigned, running and waiting
 # jobs, read live from the listener. The same reading as instances, from the
 # other side of the queue.

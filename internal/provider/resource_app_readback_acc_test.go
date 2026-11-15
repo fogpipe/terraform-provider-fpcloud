@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
@@ -30,7 +31,7 @@ func TestAccAppResource_readsBackWhatTheAPIEchoes(t *testing.T) {
 	projName := accName("apprb")
 	appName := accName("rb")
 
-	config := func(args, command, release string, fsGroup string) string {
+	config := func(args, command, release string, fsGroup string, mounts string) string {
 		return fmt.Sprintf(`
 resource "fpcloud_project" "test" {
   name = %[1]q
@@ -45,9 +46,7 @@ resource "fpcloud_app" "test" {
   args            = [%[3]s]
   release_command = [%[5]s]
 
-  volume_mounts = [
-    { source = "emptydir", mount_path = "/scratch" },
-  ]
+  volume_mounts = [%[7]s]
 
   security_context = {
     run_as_user     = 1000
@@ -55,7 +54,7 @@ resource "fpcloud_app" "test" {
     %[6]s
   }
 }
-`, projName, appName, args, command, release, fsGroup)
+`, projName, appName, args, command, release, fsGroup, mounts)
 	}
 
 	var appID string
@@ -64,14 +63,13 @@ resource "fpcloud_app" "test" {
 		CheckDestroy:             testAccCheckAppDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: config(`"infinity"`, `"sleep"`, `"true"`, ""),
+				Config: config(`"infinity"`, `"sleep"`, `"true"`, "", `{ mount_path = "/scratch", empty_dir = {} }`),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("fpcloud_app.test", "command.0", "sleep"),
 					resource.TestCheckResourceAttr("fpcloud_app.test", "args.0", "infinity"),
 					resource.TestCheckResourceAttr("fpcloud_app.test", "release_command.0", "true"),
-					resource.TestCheckResourceAttr("fpcloud_app.test", "volume_mounts.0.source", "emptydir"),
 					resource.TestCheckResourceAttr("fpcloud_app.test", "volume_mounts.0.mount_path", "/scratch"),
-					resource.TestCheckNoResourceAttr("fpcloud_app.test", "volume_mounts.0.name"),
+					resource.TestCheckResourceAttr("fpcloud_app.test", "volume_mounts.0.empty_dir.%", "0"),
 					resource.TestCheckResourceAttr("fpcloud_app.test", "security_context.run_as_user", "1000"),
 					resource.TestCheckResourceAttr("fpcloud_app.test", "security_context.run_as_non_root", "false"),
 					resource.TestCheckNoResourceAttr("fpcloud_app.test", "security_context.fs_group"),
@@ -88,11 +86,26 @@ resource "fpcloud_app" "test" {
 				ImportStateVerifyIgnore: []string{"port", "status", "updated_at"},
 			},
 			{
-				Config: config(`"3600"`, `"sleep"`, `"sh", "-c", "true"`, "fs_group = 1000"),
+				// A second scratch directory is an update in place, never a
+				// replacement of the app.
+				Config: config(`"3600"`, `"sleep"`, `"sh", "-c", "true"`, "fs_group = 1000", `{ mount_path = "/scratch", empty_dir = {} }, { mount_path = "/cache", empty_dir = {} }`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("fpcloud_app.test", plancheck.ResourceActionUpdate),
+					},
+				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("fpcloud_app.test", "args.0", "3600"),
 					resource.TestCheckResourceAttr("fpcloud_app.test", "release_command.#", "3"),
 					resource.TestCheckResourceAttr("fpcloud_app.test", "security_context.fs_group", "1000"),
+					resource.TestCheckResourceAttr("fpcloud_app.test", "volume_mounts.#", "2"),
+					resource.TestCheckResourceAttr("fpcloud_app.test", "volume_mounts.1.mount_path", "/cache"),
+					func(s *terraform.State) error {
+						if got := s.RootModule().Resources["fpcloud_app.test"].Primary.ID; got != appID {
+							return fmt.Errorf("the app was replaced: %s became %s", appID, got)
+						}
+						return nil
+					},
 				),
 			},
 			{
@@ -108,13 +121,13 @@ resource "fpcloud_app" "test" {
 						t.Fatalf("out-of-band security context change: %v", err)
 					}
 				},
-				Config:             config(`"3600"`, `"sleep"`, `"sh", "-c", "true"`, "fs_group = 1000"),
+				Config:             config(`"3600"`, `"sleep"`, `"sh", "-c", "true"`, "fs_group = 1000", `{ mount_path = "/scratch", empty_dir = {} }, { mount_path = "/cache", empty_dir = {} }`),
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: true,
 			},
 			{
 				// And the next apply converges back to the configuration.
-				Config: config(`"3600"`, `"sleep"`, `"sh", "-c", "true"`, "fs_group = 1000"),
+				Config: config(`"3600"`, `"sleep"`, `"sh", "-c", "true"`, "fs_group = 1000", `{ mount_path = "/scratch", empty_dir = {} }, { mount_path = "/cache", empty_dir = {} }`),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("fpcloud_app.test", "args.0", "3600"),
 					resource.TestCheckResourceAttr("fpcloud_app.test", "security_context.run_as_user", "1000"),

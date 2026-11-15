@@ -213,7 +213,7 @@ resource "fpcloud_iam_binding" "reporter_reads_stripe" {
 - `security_context` (Attributes) Opt-in pod/container hardening. When set, the container is locked to the PSS-restricted baseline (drop ALL capabilities, no privilege escalation, RuntimeDefault seccomp) plus the run-as identity below. Updated in place: removing the block clears it, which is how an app that once needed root returns to the platform default. (see [below for nested schema](#nestedatt--security_context))
 - `type` (String) Process type: 'web' (default) serves HTTP behind a Service, or 'worker' — a long-running process with no port, Service, ingress, URL or health checks. A worker is always-on only. Changing this replaces the app: it decides whether the app has an address at all.
 - `url_slug` (String) Optional vanity host override: sets the app's public host to '<url_slug>.app.<platform_domain>'. When empty, the host is derived from the app/project/org names. Globally unique, a DNS-1123 label. Set to an empty string to clear it back to the derived host.
-- `volume_mounts` (Attributes List) Mount a ConfigMap or Secret as read-only files, or an emptyDir as writable scratch, at a container path. Create-only — the API has no update path, so any change, including one made outside Terraform, forces the app to be replaced. (see [below for nested schema](#nestedatt--volume_mounts))
+- `volume_mounts` (Attributes List) Writable scratch directories: each is empty when a pod starts, on the node's disk, at most 1 GiB (a pod that writes more is evicted and restarted). A read-only root filesystem needs one wherever the image writes. Changing the set rolls the app in place. A file the app reads is a `secret_env` entry with a `path`, not a mount. (see [below for nested schema](#nestedatt--volume_mounts))
 - `wait_for_rollout` (Boolean) Wait for each deploy's rollout to end, and fail the apply if it fails. Defaults to true, so whatever the same apply does next runs against the new version. Set it to false to end the apply once the deploy is accepted and any release command has passed, with the previous version serving until the rollout ends. A setting of this provider, never sent to the API.
 
 ### Read-Only
@@ -313,13 +313,11 @@ Optional:
 
 Required:
 
-- `mount_path` (String) Container path to mount at.
-- `source` (String) Volume source: 'configmap', 'secret', or 'emptydir'.
+- `empty_dir` (Attributes) Marks the mount as a scratch directory, the only kind. Written `empty_dir = {}`. (see [below for nested schema](#nestedatt--volume_mounts--empty_dir))
+- `mount_path` (String) Absolute container path. Not `/`, `/etc` or `/usr` themselves, nothing under `/dev`, `/proc`, `/sys` or a directory the platform mounts, and not a secret file's path.
 
-Optional:
-
-- `name` (String) ConfigMap or Secret name to mount (ignored for emptydir).
-- `sub_path` (String) Mount a single key from the source instead of the whole directory.
+<a id="nestedatt--volume_mounts--empty_dir"></a>
+### Nested Schema for `volume_mounts.empty_dir`
 
 ## Import
 

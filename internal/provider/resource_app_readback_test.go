@@ -57,8 +57,8 @@ func TestSetVolumeMountsOnModel(t *testing.T) {
 	}
 
 	setVolumeMountsOnModel(model, []client.VolumeMount{
-		{Source: "configmap", Name: "registry-config", MountPath: "/etc/zot"},
-		{Source: "emptydir", MountPath: "/tmp"},
+		{MountPath: "/tmp", EmptyDir: &client.EmptyDir{}},
+		{MountPath: "/var/cache", EmptyDir: &client.EmptyDir{}},
 	}, &diags)
 	if diags.HasError() {
 		t.Fatal(diags)
@@ -68,11 +68,11 @@ func TestSetVolumeMountsOnModel(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("want 2 mounts, got %d", len(got))
 	}
-	if got[0].Name.ValueString() != "registry-config" || !got[0].SubPath.IsNull() {
-		t.Fatalf("an omitted sub_path must read as null, got %+v", got[0])
+	if got[0].MountPath.ValueString() != "/tmp" || got[0].EmptyDir.IsNull() {
+		t.Fatalf("a scratch directory reads back with empty_dir set, matching `empty_dir = {}`, got %+v", got[0])
 	}
-	if !got[1].Name.IsNull() {
-		t.Fatalf("an emptydir's absent name must read as null, got %+v", got[1])
+	if mounts := volumeMountsFromModel(context.Background(), model.VolumeMounts, &diags); len(mounts) != 2 || mounts[1].EmptyDir == nil {
+		t.Fatalf("what is read back is what is sent, got %+v", mounts)
 	}
 }
 

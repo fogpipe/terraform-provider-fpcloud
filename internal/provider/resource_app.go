@@ -16,7 +16,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -80,12 +79,12 @@ type RouteModel struct {
 	Visibility types.String `tfsdk:"visibility"`
 }
 
-// VolumeMountModel describes a file/scratch volume mount in Terraform state.
+// VolumeMountModel describes a scratch directory in Terraform state. EmptyDir
+// is the only kind and carries no settings, so it is an object with no
+// attributes, written `empty_dir = {}`.
 type VolumeMountModel struct {
-	Source    types.String `tfsdk:"source"`
-	Name      types.String `tfsdk:"name"`
 	MountPath types.String `tfsdk:"mount_path"`
-	SubPath   types.String `tfsdk:"sub_path"`
+	EmptyDir  types.Object `tfsdk:"empty_dir"`
 }
 
 // ProbeOverridesModel describes the per-probe overrides block in state. A null
@@ -130,7 +129,7 @@ func (r *AppResource) Metadata(_ context.Context, req resource.MetadataRequest, 
 func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a Fogpipe application.",
-		Version:     1,
+		Version:     2,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "App ID.",
@@ -221,30 +220,22 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Default:  booldefault.StaticBool(true),
 			},
 			"volume_mounts": schema.ListNestedAttribute{
-				Description: "Mount a ConfigMap or Secret as read-only files, or an emptyDir as writable " +
-					"scratch, at a container path. Create-only — the API has no update path, so any " +
-					"change, including one made outside Terraform, forces the app to be replaced.",
+				Description: "Writable scratch directories: each is empty when a pod starts, on the node's disk, " +
+					"at most 1 GiB (a pod that writes more is evicted and restarted). A read-only root filesystem " +
+					"needs one wherever the image writes. Changing the set rolls the app in place. A file the app " +
+					"reads is a `secret_env` entry with a `path`, not a mount.",
 				Optional: true,
-				PlanModifiers: []planmodifier.List{
-					listplanmodifier.RequiresReplace(),
-				},
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
-						"source": schema.StringAttribute{
-							Description: "Volume source: 'configmap', 'secret', or 'emptydir'.",
-							Required:    true,
-						},
-						"name": schema.StringAttribute{
-							Description: "ConfigMap or Secret name to mount (ignored for emptydir).",
-							Optional:    true,
-						},
 						"mount_path": schema.StringAttribute{
-							Description: "Container path to mount at.",
-							Required:    true,
+							Description: "Absolute container path. Not `/`, `/etc` or `/usr` themselves, nothing under " +
+								"`/dev`, `/proc`, `/sys` or a directory the platform mounts, and not a secret file's path.",
+							Required: true,
 						},
-						"sub_path": schema.StringAttribute{
-							Description: "Mount a single key from the source instead of the whole directory.",
-							Optional:    true,
+						"empty_dir": schema.SingleNestedAttribute{
+							Description: "Marks the mount as a scratch directory, the only kind. Written `empty_dir = {}`.",
+							Required:    true,
+							Attributes:  map[string]schema.Attribute{},
 						},
 					},
 				},
@@ -787,6 +778,20 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
+	// Scratch directories change in place and roll the app. Removing the
+	// attribute removes them all. An unknown plan value is not a request to
+	// change anything.
+	if !plan.VolumeMounts.IsUnknown() && !plan.VolumeMounts.Equal(state.VolumeMounts) {
+		mounts := volumeMountsFromModel(ctx, plan.VolumeMounts, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if _, err := r.client.SetAppVolumeMounts(ctx, appID, mounts); err != nil {
+			resp.Diagnostics.AddError("Error updating app volume mounts", err.Error())
+			return
+		}
+	}
+
 	// An unknown plan value is not a request to change anything — sending it would
 	// serialize to no routes and silently clear the carve-outs the app already has.
 	if !plan.Routes.IsUnknown() && !plan.Routes.Equal(state.Routes) {
@@ -1249,10 +1254,8 @@ func stringListFromAPI(prior types.List, vals []string) types.List {
 
 func volumeMountAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
-		"source":     types.StringType,
-		"name":       types.StringType,
 		"mount_path": types.StringType,
-		"sub_path":   types.StringType,
+		"empty_dir":  types.ObjectType{AttrTypes: map[string]attr.Type{}},
 	}
 }
 
@@ -1265,11 +1268,13 @@ func setVolumeMountsOnModel(model *AppResourceModel, mounts []client.VolumeMount
 	}
 	elems := make([]attr.Value, len(mounts))
 	for i, m := range mounts {
+		emptyDir := types.ObjectNull(map[string]attr.Type{})
+		if m.EmptyDir != nil {
+			emptyDir = types.ObjectValueMust(map[string]attr.Type{}, map[string]attr.Value{})
+		}
 		obj, d := types.ObjectValue(volumeMountAttrTypes(), map[string]attr.Value{
-			"source":     types.StringValue(m.Source),
-			"name":       optionalString(m.Name),
 			"mount_path": types.StringValue(m.MountPath),
-			"sub_path":   optionalString(m.SubPath),
+			"empty_dir":  emptyDir,
 		})
 		diags.Append(d...)
 		elems[i] = obj
@@ -1327,11 +1332,9 @@ func volumeMountsFromModel(ctx context.Context, l types.List, diags *diag.Diagno
 	}
 	out := make([]client.VolumeMount, len(models))
 	for i, m := range models {
-		out[i] = client.VolumeMount{
-			Source:    m.Source.ValueString(),
-			Name:      m.Name.ValueString(),
-			MountPath: m.MountPath.ValueString(),
-			SubPath:   m.SubPath.ValueString(),
+		out[i] = client.VolumeMount{MountPath: m.MountPath.ValueString()}
+		if !m.EmptyDir.IsNull() {
+			out[i].EmptyDir = &client.EmptyDir{}
 		}
 	}
 	return out
@@ -1425,22 +1428,84 @@ func secretEnvFromModel(ctx context.Context, m types.Map, diags *diag.Diagnostic
 
 var _ resource.ResourceWithUpgradeState = &AppResource{}
 
-// UpgradeState moves a state written against schema version 0 forward. `mode`
-// and `traffic` left the schema when the serverless runtime was deleted, and
-// the framework refuses prior state carrying an attribute the schema no longer
-// has, so both keys are dropped from the raw state and nothing else moves.
+// UpgradeState moves a state written against an earlier schema version to the
+// current one. The framework does not chain upgraders: each one is handed the
+// state as its version wrote it and returns the current version's, so the
+// version 0 upgrader applies both steps.
 func (r *AppResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
 	return map[int64]resource.StateUpgrader{
-		0: {StateUpgrader: upgradeAppStateV0},
+		0: {StateUpgrader: upgradeAppStateFrom(upgradeAppStateV0, upgradeAppStateV1)},
+		1: {StateUpgrader: upgradeAppStateFrom(upgradeAppStateV1)},
 	}
 }
 
-func upgradeAppStateV0(_ context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(req.RawState.JSON, &raw); err != nil {
-		resp.Diagnostics.AddError("Error reading prior app state", err.Error())
-		return
+// upgradeAppStateFrom runs each step over the raw state in order.
+func upgradeAppStateFrom(steps ...func(map[string]json.RawMessage) error) func(context.Context, resource.UpgradeStateRequest, *resource.UpgradeStateResponse) {
+	return func(_ context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(req.RawState.JSON, &raw); err != nil {
+			resp.Diagnostics.AddError("Error reading prior app state", err.Error())
+			return
+		}
+		for _, step := range steps {
+			if err := step(raw); err != nil {
+				resp.Diagnostics.AddError("Error upgrading prior app state", err.Error())
+				return
+			}
+		}
+		out, err := json.Marshal(raw)
+		if err != nil {
+			resp.Diagnostics.AddError("Error writing upgraded app state", err.Error())
+			return
+		}
+		resp.DynamicValue = &tfprotov6.DynamicValue{JSON: out}
 	}
+}
+
+// upgradeAppStateV1 rewrites version 1's mounts, {source, name, mount_path,
+// sub_path}, as scratch directories. An emptydir becomes {mount_path,
+// empty_dir: {}}; a ConfigMap or Secret mount is dropped, as the API dropped
+// it, since only an app's own config and database CA could be mounted and the
+// platform delivers both itself. No mount left reads as null, as the API's
+// readback of an app without mounts does.
+func upgradeAppStateV1(raw map[string]json.RawMessage) error {
+	prior, ok := raw["volume_mounts"]
+	if !ok || string(prior) == "null" {
+		return nil
+	}
+	var mounts []struct {
+		Source    string `json:"source"`
+		MountPath string `json:"mount_path"`
+	}
+	if err := json.Unmarshal(prior, &mounts); err != nil {
+		return fmt.Errorf("volume_mounts: %w", err)
+	}
+	type scratch struct {
+		MountPath string   `json:"mount_path"`
+		EmptyDir  struct{} `json:"empty_dir"`
+	}
+	var kept []scratch
+	for _, m := range mounts {
+		if m.Source == "emptydir" {
+			kept = append(kept, scratch{MountPath: m.MountPath})
+		}
+	}
+	if len(kept) == 0 {
+		raw["volume_mounts"] = json.RawMessage("null")
+		return nil
+	}
+	out, err := json.Marshal(kept)
+	if err != nil {
+		return err
+	}
+	raw["volume_mounts"] = out
+	return nil
+}
+
+// upgradeAppStateV0 drops `mode` and `traffic`, which left the schema when the
+// serverless runtime was deleted; the framework refuses prior state carrying
+// an attribute the schema no longer has.
+func upgradeAppStateV0(raw map[string]json.RawMessage) error {
 	delete(raw, "mode")
 	delete(raw, "traffic")
 	// `replicas` was a fixed size beside bounds nothing read; both bounds now
@@ -1457,12 +1522,7 @@ func upgradeAppStateV0(_ context.Context, req resource.UpgradeStateRequest, resp
 	raw["min_scale"] = count
 	raw["max_scale"] = count
 	delete(raw, "replicas")
-	out, err := json.Marshal(raw)
-	if err != nil {
-		resp.Diagnostics.AddError("Error writing upgraded app state", err.Error())
-		return
-	}
-	resp.DynamicValue = &tfprotov6.DynamicValue{JSON: out}
+	return nil
 }
 
 // releaseFollowsImage keeps a derived release name stable across plans and

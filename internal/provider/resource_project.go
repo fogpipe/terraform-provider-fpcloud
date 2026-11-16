@@ -158,7 +158,7 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 		Egress:      plan.Egress.ValueString(),
 	}
 
-	project, err := createWaitingForName(ctx, func(ctx context.Context) (*client.Project, error) {
+	project, err := createWaitingForName(ctx, "PROJECT_TEARING_DOWN", func(ctx context.Context) (*client.Project, error) {
 		if org := plan.Org.ValueString(); org != "" {
 			return r.client.CreateProjectInOrg(ctx, org, apiReq)
 		}
@@ -184,43 +184,45 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-// projectNameFreeWait bounds how long a create waits for the name of a deleted
-// project whose teardown is still running. A project holding a database takes
-// minutes to tear down, and the platform calls a teardown stuck only past 35
-// minutes, so this outlasts any teardown that is going to finish.
-const projectNameFreeWait = 40 * time.Minute
+// nameFreeWait bounds how long a create waits for the name of a deleted
+// project or database whose teardown is still running. A teardown waits for
+// every database instance to stop, which takes minutes, and the platform calls
+// a teardown stuck only past 35 minutes, so this outlasts any teardown that is
+// going to finish.
+const nameFreeWait = 40 * time.Minute
 
-// projectNameFreePoll is how often a create waiting for the name tries again.
-var projectNameFreePoll = 10 * time.Second
+// nameFreePoll is how often a create waiting for the name tries again.
+var nameFreePoll = 10 * time.Second
 
-// createWaitingForName runs create, and while the platform answers that a
-// deleted project of the same name is still being torn down, waits and runs it
-// again. A destroy returns as soon as the delete is accepted, so this is where a
-// replace under the same name waits for the old project's teardown: the one
-// operation that needs the name is the one that waits for it.
-func createWaitingForName(ctx context.Context, create func(context.Context) (*client.Project, error)) (*client.Project, error) {
-	deadline := time.Now().Add(projectNameFreeWait)
+// createWaitingForName runs create, and while the platform answers with code
+// that a deleted resource of the same name is still being torn down, waits and
+// runs it again. A destroy returns as soon as the delete is accepted, so this
+// is where a replace under the same name waits for the old resource's
+// teardown: the one operation that needs the name is the one that waits for
+// it.
+func createWaitingForName[T any](ctx context.Context, code string, create func(context.Context) (*T, error)) (*T, error) {
+	deadline := time.Now().Add(nameFreeWait)
 	for {
-		project, err := create(ctx)
-		if !isProjectTearingDown(err) {
-			return project, err
+		created, err := create(ctx)
+		if !isTearingDown(err, code) {
+			return created, err
 		}
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("%w (still waiting for the name after %s)", err, projectNameFreeWait)
+			return nil, fmt.Errorf("%w (still waiting for the name after %s)", err, nameFreeWait)
 		}
 		select {
 		case <-ctx.Done():
 			return nil, err
-		case <-time.After(projectNameFreePoll):
+		case <-time.After(nameFreePoll):
 		}
 	}
 }
 
-// isProjectTearingDown reports a create refused because a deleted project of
-// the same name is still being torn down.
-func isProjectTearingDown(err error) bool {
+// isTearingDown reports a create refused with code, which the platform answers
+// while a deleted resource of the same name is still being torn down.
+func isTearingDown(err error, code string) bool {
 	var apiErr *client.APIError
-	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict && apiErr.Code == "PROJECT_TEARING_DOWN"
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict && apiErr.Code == code
 }
 
 // findProjectByName resolves a project by name, scoped to org when provided

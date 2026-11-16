@@ -82,7 +82,7 @@ var tearingDown = map[string]string{
 // does not wait for a teardown nobody needs finished.
 func TestProject_CreateWaitsForANameStillBeingTornDown(t *testing.T) {
 	terraformBinary(t)
-	provider.SetProjectNameFreePoll(t, 10*time.Millisecond)
+	provider.SetNameFreePoll(t, 10*time.Millisecond)
 	stub := newProjectStub(t, tearingDown, tearingDown)
 
 	resource.UnitTest(t, resource.TestCase{
@@ -110,7 +110,7 @@ func TestProject_CreateWaitsForANameStillBeingTornDown(t *testing.T) {
 // is a conflict nothing will resolve, and it fails the create at once.
 func TestProject_CreateDoesNotWaitOnAnOrdinaryConflict(t *testing.T) {
 	terraformBinary(t)
-	provider.SetProjectNameFreePoll(t, 10*time.Millisecond)
+	provider.SetNameFreePoll(t, 10*time.Millisecond)
 	stub := newProjectStub(t, map[string]string{"code": "CONFLICT", "message": "project already exists"})
 
 	resource.UnitTest(t, resource.TestCase{

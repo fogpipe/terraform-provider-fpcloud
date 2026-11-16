@@ -274,7 +274,7 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 
 	// cpu/memory/storage/pooler are accepted by CreateDatabase; the server applies
 	// its defaults for any left unset. The legacy `plan` attribute is ignored.
-	db, err := r.client.CreateDatabase(ctx, plan.ProjectID.ValueString(), client.CreateDatabaseRequest{
+	apiReq := client.CreateDatabaseRequest{
 		Name:        plan.Name.ValueString(),
 		DisplayName: plan.DisplayName.ValueString(),
 		Engine:      plan.Engine.ValueString(),
@@ -284,6 +284,9 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 		Storage:     plan.Storage.ValueString(),
 		Pooler:      plan.Pooler.ValueBool(),
 		Extensions:  extensionNames(plan.Extensions),
+	}
+	db, err := createWaitingForName(ctx, "DATABASE_TEARING_DOWN", func(ctx context.Context) (*client.Database, error) {
+		return r.client.CreateDatabase(ctx, plan.ProjectID.ValueString(), apiReq)
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating database", err.Error())
@@ -330,6 +333,14 @@ func (r *DatabaseResource) Read(ctx context.Context, req resource.ReadRequest, r
 			return
 		}
 		resp.Diagnostics.AddError("Error reading database", err.Error())
+		return
+	}
+	// A database whose delete has been accepted is gone too: it is out of
+	// every list and refuses writes, and nothing brings it back. A plan then
+	// creates it again, and that create waits for the name
+	// (createWaitingForName).
+	if db.Status == "deleting" {
+		resp.State.RemoveResource(ctx)
 		return
 	}
 
@@ -438,14 +449,20 @@ func (r *DatabaseResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	err := r.client.DeleteDatabase(ctx, state.ID.ValueString())
-	if err != nil {
+	if _, err := r.client.DeleteDatabase(ctx, state.ID.ValueString()); err != nil {
 		// Ignore 404 — already deleted.
 		if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
 			return
 		}
 		resp.Diagnostics.AddError("Error deleting database", err.Error())
+		return
 	}
+
+	// The API accepts the deletion and tears the database down behind it, and
+	// from that moment the database is out of every list and refuses writes,
+	// so it is gone as far as this configuration can tell. The teardown still
+	// holds the name until every instance has stopped; a create under it waits
+	// for that (createWaitingForName), so a destroy does not have to.
 }
 
 // databaseUpdateReq builds the full PATCH body from the planned model. The API
@@ -554,6 +571,8 @@ func awaitDatabaseRunning(ctx context.Context, c *client.Client, id string) (*cl
 		case "provisioning", "":
 		case "failed":
 			return nil, fmt.Errorf("the database failed to provision; `fpcloud db get %s` has its state", id)
+		case "deleting":
+			return nil, fmt.Errorf("the database was deleted while it was being created; `fpcloud db get %s` has its state", id)
 		default:
 			return db, nil
 		}

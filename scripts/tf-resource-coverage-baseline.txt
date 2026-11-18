@@ -78,6 +78,15 @@ VerifyBucketDomain
 PublishWebsiteVersion
 ClearBucketLifecycleRules
 
+# a firewall's stored revisions are a record of what it held, written by every
+# edit and never declared; rolling back to one is an action on that record,
+# and in a configuration the way back is the rules as they were, applied.
+ListFirewallRevisions
+RollbackFirewall
+# what a firewall does with one address: an answer to a question the caller
+# supplies. It creates nothing, changes nothing and has no id.
+TestFirewall
+
 # data-plane object operations — deliberately imperative, matches the
 # aws_s3_bucket / aws s3 sync split already established for buckets (#389)
 DeleteBucketObject

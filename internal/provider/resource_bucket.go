@@ -43,6 +43,8 @@ type BucketResourceModel struct {
 	TLSReason            types.String `tfsdk:"tls_reason"`
 	TLSNextAttempt       types.String `tfsdk:"tls_next_attempt"`
 	GlobalAlias          types.String `tfsdk:"global_alias"`
+	Firewall             types.String `tfsdk:"firewall"`
+	FirewallAllowLockout types.Bool   `tfsdk:"firewall_allow_lockout"`
 }
 
 // NewBucketResource returns a new bucket resource.
@@ -150,6 +152,20 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Description: "When the next issuance attempt is, RFC 3339, while one is pending after a failure.",
 				Computed:    true,
 			},
+			"firewall": schema.StringAttribute{
+				Description: "ID of the fpcloud_firewall attached to the bucket's website, from the same " +
+					"project. It applies to every host the edge serves the website on, custom domains " +
+					"included, and not to the S3 endpoint. Needs website_enabled. Setting, changing or " +
+					"removing it waits until the edge enforces the result. Leave it out for no firewall.",
+				Optional: true,
+			},
+			"firewall_allow_lockout": schema.BoolAttribute{
+				Description: "Admit attaching a firewall that denies the address this apply runs from. " +
+					"Without it such an attach is refused. Set it when the machine running the apply is not " +
+					"meant to reach the website, a CI runner for instance. Defaults to false. A setting of " +
+					"the request, never stored by the API.",
+				Optional: true,
+			},
 			"global_alias": schema.StringAttribute{
 				Description: "The bucket's name in the object store's global namespace — the value S3 " +
 					"itself uses, and the website host label. Derived as <name>-<project>-<org>, but " +
@@ -212,8 +228,49 @@ func (r *BucketResource) Create(ctx context.Context, req resource.CreateRequest,
 		}
 	}
 
+	if firewall := plan.Firewall.ValueString(); firewall != "" {
+		// The bucket exists whatever the attach reports: record it first, so
+		// a refused firewall leaves a bucket Terraform knows it made.
+		r.apply(&plan, bucket)
+		plan.Firewall = types.StringValue(firewall)
+		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if bucket, err = r.setFirewall(ctx, bucket.ID, bucket.Name, firewall, plan.FirewallAllowLockout.ValueBool()); err != nil {
+			resp.Diagnostics.AddError("Error attaching firewall", err.Error())
+			return
+		}
+	}
+
 	r.apply(&plan, bucket)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// setFirewall attaches firewall want to the bucket's website, or takes the
+// website's firewall off when want is empty, waits until the edge enforces
+// the result and returns the bucket as it then reads.
+func (r *BucketResource) setFirewall(ctx context.Context, bucketID, name, want string, allowLockout bool) (*client.Bucket, error) {
+	if want == "" {
+		if err := r.client.DetachWebsiteFirewall(ctx, bucketID); err != nil {
+			return nil, err
+		}
+	} else if _, err := r.client.AttachWebsiteFirewall(ctx, bucketID, client.AttachFirewallRequest{
+		Firewall:     want,
+		AllowLockout: allowLockout,
+	}); err != nil {
+		return nil, err
+	}
+	var bucket *client.Bucket
+	err := awaitAttachedFirewall(ctx, "the website of bucket "+name, want, func(ctx context.Context) (*client.FirewallRef, error) {
+		b, err := r.client.GetBucket(ctx, bucketID)
+		if err != nil {
+			return nil, err
+		}
+		bucket = b
+		return b.Firewall, nil
+	})
+	return bucket, err
 }
 
 func (r *BucketResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -251,6 +308,17 @@ func (r *BucketResource) Update(ctx context.Context, req resource.UpdateRequest,
 	if err != nil {
 		resp.Diagnostics.AddError("Error reading bucket", err.Error())
 		return
+	}
+
+	// A firewall that is being removed goes first, while the website it is on
+	// is still there to take it off; one being attached goes last, once the
+	// website it needs is.
+	firewallChanged := !plan.Firewall.IsUnknown() && plan.Firewall.ValueString() != state.Firewall.ValueString()
+	if firewallChanged && plan.Firewall.ValueString() == "" {
+		if bucket, err = r.setFirewall(ctx, state.ID.ValueString(), state.Name.ValueString(), "", false); err != nil {
+			resp.Diagnostics.AddError("Error detaching firewall", err.Error())
+			return
+		}
 	}
 
 	// Public reads before the conventions: turning the website on sets it
@@ -304,6 +372,20 @@ func (r *BucketResource) Update(ctx context.Context, req resource.UpdateRequest,
 			resp.Diagnostics.AddError("Error updating bucket url slug", err.Error())
 			return
 		}
+	}
+
+	if firewallChanged && plan.Firewall.ValueString() != "" {
+		if bucket, err = r.setFirewall(ctx, state.ID.ValueString(), state.Name.ValueString(), plan.Firewall.ValueString(), plan.FirewallAllowLockout.ValueBool()); err != nil {
+			resp.Diagnostics.AddError("Error attaching firewall", err.Error())
+			return
+		}
+	}
+
+	// Read the settled bucket and write that, not whichever call above ran
+	// last: only a single read is sure to carry the firewall.
+	if bucket, err = r.client.GetBucket(ctx, state.ID.ValueString()); err != nil {
+		resp.Diagnostics.AddError("Error reading bucket", err.Error())
+		return
 	}
 
 	r.apply(&plan, bucket)
@@ -365,6 +447,7 @@ func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 	m.TLSReason = types.StringValue(bucket.TLSReason)
 	m.TLSNextAttempt = types.StringValue(rfc3339OrEmpty(bucket.TLSNextAttempt))
 	m.GlobalAlias = types.StringValue(bucket.GlobalAlias)
+	m.Firewall = attachedFirewallID(bucket.Firewall)
 	m.Secrets, _ = types.MapValueFrom(context.Background(), types.StringType, orEmptyMap(bucket.Secrets))
 }
 

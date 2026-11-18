@@ -42,6 +42,11 @@ ServiceAccount.bindings
 # resource.
 IAMBinding.held_on
 
+# What a firewall is attached to is the `firewall` attribute of each app and
+# bucket; read back onto the firewall it would be one attachment in two
+# resources' state, and its status is the edge's, below.
+Firewall.targets
+
 # --- deploy-time state, not configuration -------------------------------
 # What is running right now is the outcome of a deploy, which Terraform does
 # not perform — declaring it would make every push show as drift.
@@ -85,6 +90,19 @@ Bucket.used_bytes
 # show` and the console are where a staleness reading belongs.
 Database.replication_lag_seconds
 
+# `firewall` on an app and on a bucket is a reference, the firewall's id. The
+# rest of what the API reports beside it is how far the edge has come in
+# enforcing that firewall: it moves after every edit to the firewall's rules
+# with nothing on the app or the bucket changed. An apply waits on it and
+# fails with `message`; it is not a value a configuration can state. The
+# firewall's own `revision` is on fpcloud_firewall.
+App.firewall.applied_revision
+App.firewall.message
+App.firewall.revision
+Bucket.firewall.applied_revision
+Bucket.firewall.message
+Bucket.firewall.revision
+
 # --- the same state, spelled declaratively somewhere else ---------------
 # `backup.enabled` is where a database says whether it is backed up. This is
 # the server echoing that decision back inverted, so an attribute for it
@@ -100,6 +118,7 @@ Project.namespace
 # The parent is already the resource's own reference, so the id it echoes
 # adds nothing to configure.
 Bucket.project_id
+Firewall.project_id
 Job.project_id
 Runner.project_id
 

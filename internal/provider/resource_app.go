@@ -341,7 +341,7 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"min_scale": schema.Int64Attribute{
-				Description: "Fewest instances the app runs. Defaults to 1. Equal to max_scale is a fixed size; below it, the app grows on CPU load between the two. 0 lets a web app with public ingress sleep after 15 minutes without a request and wake on the next one, in about two seconds.",
+				Description: "Fewest instances the app runs. Defaults to 1. Equal to max_scale is a fixed size; below it, the app grows on CPU load between the two. 0 lets a web app with public ingress sleep 15 minutes after its last request, or a few minutes after a deploy nobody calls, and wake on the next request in about two seconds.",
 				Optional:    true,
 				Computed:    true,
 				Default:     int64default.StaticInt64(1),

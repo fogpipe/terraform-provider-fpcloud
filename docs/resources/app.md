@@ -196,6 +196,8 @@ resource "fpcloud_iam_binding" "reporter_reads_stripe" {
 - `cpu_limit` (String) CPU limit (e.g. 500m). Defaults to 500m.
 - `display_name` (String) Human-readable display name (mutable cosmetic label). Defaults to the name.
 - `env` (Map of String) Environment variables (plaintext). Set as part of the create, so a release command on a new app reads them on its first run.
+- `firewall` (String) ID of the fpcloud_firewall attached to the app, from the same project. It applies to every host the edge serves for the app, custom domains included, and to nothing that does not cross the edge: calls from other apps inside the platform are not filtered. Setting, changing or removing it waits until the edge enforces the result. Leave it out for no firewall.
+- `firewall_allow_lockout` (Boolean) Admit attaching a firewall that denies the address this apply runs from. Without it such an attach is refused. Set it when the machine running the apply is not meant to reach the app, a CI runner for instance. Defaults to false. A setting of the request, never stored by the API.
 - `health_check_interval` (Number) Health check interval in seconds. Defaults to 10.
 - `health_check_path` (String) HTTP path for health checks. Defaults to '/' on a web app; not valid on a worker. Set a custom path (e.g. '/healthz') to enable startup probes.
 - `health_check_retries` (Number) Health check failure threshold. Defaults to 3.

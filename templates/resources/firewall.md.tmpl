@@ -41,6 +41,21 @@ attached to. Removing `firewall` from the app or the bucket in the same
 configuration is enough when it refers to the firewall by `fpcloud_firewall.<name>.id`,
 since the detach is then applied first.
 
+## A change that denies the machine running the apply
+
+A firewall filters requests to the apps and websites it is attached to, and
+never the API this provider talks to. A change or an attach that denies the
+address the apply runs from is therefore made like any other, and the apply
+shows a warning saying so. From a CI runner, which is rarely in an allowlist,
+that warning is expected. Nothing has to be set to allow it, and the firewall
+can always be changed again from the same machine.
+
+## Edits made outside the configuration
+
+The rules in the configuration are the whole list. An apply writes them over
+whatever the firewall holds, including a rule somebody added with the CLI or
+in the console since the last apply: the plan shows that rule being removed.
+
 ## Rule order and spelling
 
 Rules may be written in any order: `priority` decides the order they are

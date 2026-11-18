@@ -40,10 +40,6 @@ resource "fpcloud_firewall" "office" {
       }
     },
   ]
-
-  # The machine running this apply is outside both ranges, a CI runner for
-  # instance. Without this the change is refused as one that locks its caller out.
-  allow_lockout = true
 }
 
 # The firewall does nothing until something names it. It then applies to every
@@ -54,8 +50,7 @@ resource "fpcloud_app" "admin" {
   image      = "ghcr.io/myorg/admin:latest"
   ingress    = "all"
 
-  firewall               = fpcloud_firewall.office.id
-  firewall_allow_lockout = true
+  firewall = fpcloud_firewall.office.id
 }
 
 # A blocklist is the other way round: everyone is let in but the listed ranges.
@@ -110,6 +105,21 @@ attached to. Removing `firewall` from the app or the bucket in the same
 configuration is enough when it refers to the firewall by `fpcloud_firewall.<name>.id`,
 since the detach is then applied first.
 
+## A change that denies the machine running the apply
+
+A firewall filters requests to the apps and websites it is attached to, and
+never the API this provider talks to. A change or an attach that denies the
+address the apply runs from is therefore made like any other, and the apply
+shows a warning saying so. From a CI runner, which is rarely in an allowlist,
+that warning is expected. Nothing has to be set to allow it, and the firewall
+can always be changed again from the same machine.
+
+## Edits made outside the configuration
+
+The rules in the configuration are the whole list. An apply writes them over
+whatever the firewall holds, including a rule somebody added with the CLI or
+in the console since the last apply: the plan shows that rule being removed.
+
 ## Rule order and spelling
 
 Rules may be written in any order: `priority` decides the order they are
@@ -128,7 +138,6 @@ read the way the API spells it.
 
 ### Optional
 
-- `allow_lockout` (Boolean) Admit a change that denies the address this apply runs from. Without it, a change to an attached firewall that would shut out the caller is refused, which is what stops a typo from closing a site to its owner. Set it when the machine running the apply is not meant to reach the target, a CI runner for instance. Defaults to false. A setting of the request, never stored by the API.
 - `default_action` (String) What happens to a request no enabled rule matches: `allow` or `deny`. Defaults to `allow`, so a firewall with no rules changes nothing. `deny` makes the rules an allowlist.
 - `description` (String) What the firewall is for.
 - `rules` (Attributes List) The access rules, all of them. A rule is identified by its priority, and rules are evaluated in priority order whatever order they are written in. At most 50 rules and 500 sources across them. (see [below for nested schema](#nestedatt--rules))
@@ -136,7 +145,7 @@ read the way the API spells it.
 ### Read-Only
 
 - `created_at` (String) When the firewall was created, RFC 3339.
-- `findings` (Attributes List) Warnings about a firewall that is valid and enforced as written: a rule no request can reach, a default of deny with no IPv6 source. Also shown as warnings when an apply writes the firewall. (see [below for nested schema](#nestedatt--findings))
+- `findings` (Attributes List) Warnings about a firewall that is valid and enforced as written: a rule no request can reach, a default of deny with no IPv6 source. Also shown as warnings when an apply writes the firewall. The warning that a change denies the address the apply ran from is shown on that apply only and is not kept here, since it is about the machine and not about the firewall. (see [below for nested schema](#nestedatt--findings))
 - `id` (String) Firewall ID. What an app's or a bucket's `firewall` attribute takes.
 - `revision` (Number) Counts the firewall's content: every change to the default action or the rules stores the next one. An apply returns once every target enforces it.
 - `updated_at` (String) When the firewall last changed, RFC 3339.
@@ -170,7 +179,7 @@ Required:
 Read-Only:
 
 - `code` (String) What kind of warning it is.
-- `field` (String) What it is about, as `rules[2]` or `default_action`.
+- `field` (String) What it is about, as `rules[2]` or `default_action`; empty when it is about the firewall as a whole.
 - `message` (String) The warning.
 
 ## Import

@@ -25,10 +25,6 @@ resource "fpcloud_firewall" "office" {
       }
     },
   ]
-
-  # The machine running this apply is outside both ranges, a CI runner for
-  # instance. Without this the change is refused as one that locks its caller out.
-  allow_lockout = true
 }
 
 # The firewall does nothing until something names it. It then applies to every
@@ -39,8 +35,7 @@ resource "fpcloud_app" "admin" {
   image      = "ghcr.io/myorg/admin:latest"
   ingress    = "all"
 
-  firewall               = fpcloud_firewall.office.id
-  firewall_allow_lockout = true
+  firewall = fpcloud_firewall.office.id
 }
 
 # A blocklist is the other way round: everyone is let in but the listed ranges.

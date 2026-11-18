@@ -36,43 +36,42 @@ type AppResource struct {
 
 // AppResourceModel describes the resource data model.
 type AppResourceModel struct {
-	ID                   types.String `tfsdk:"id"`
-	ProjectID            types.String `tfsdk:"project_id"`
-	Name                 types.String `tfsdk:"name"`
-	DisplayName          types.String `tfsdk:"display_name"`
-	URLSlug              types.String `tfsdk:"url_slug"`
-	Image                types.String `tfsdk:"image"`
-	Release              types.String `tfsdk:"release"`
-	Command              types.List   `tfsdk:"command"`
-	Args                 types.List   `tfsdk:"args"`
-	ReleaseCommand       types.List   `tfsdk:"release_command"`
-	WaitForRollout       types.Bool   `tfsdk:"wait_for_rollout"`
-	VolumeMounts         types.List   `tfsdk:"volume_mounts"`
-	SecurityContext      types.Object `tfsdk:"security_context"`
-	Port                 types.Int64  `tfsdk:"port"`
-	Ingress              types.String `tfsdk:"ingress"`
-	Type                 types.String `tfsdk:"type"`
-	ServiceAccount       types.String `tfsdk:"service_account"`
-	IdentityTokenFile    types.String `tfsdk:"identity_token_file"`
-	Env                  types.Map    `tfsdk:"env"`
-	SecretEnv            types.Map    `tfsdk:"secret_env"`
-	MinScale             types.Int64  `tfsdk:"min_scale"`
-	MaxScale             types.Int64  `tfsdk:"max_scale"`
-	CPULimit             types.String `tfsdk:"cpu_limit"`
-	MemoryLimit          types.String `tfsdk:"memory_limit"`
-	HealthCheckPath      types.String `tfsdk:"health_check_path"`
-	HealthCheckTimeout   types.Int64  `tfsdk:"health_check_timeout"`
-	HealthCheckInterval  types.Int64  `tfsdk:"health_check_interval"`
-	HealthCheckRetries   types.Int64  `tfsdk:"health_check_retries"`
-	Probes               types.Object `tfsdk:"probes"`
-	AdoptExisting        types.Bool   `tfsdk:"adopt_existing"`
-	Routes               types.List   `tfsdk:"routes"`
-	Firewall             types.String `tfsdk:"firewall"`
-	FirewallAllowLockout types.Bool   `tfsdk:"firewall_allow_lockout"`
-	Status               types.String `tfsdk:"status"`
-	URL                  types.String `tfsdk:"url"`
-	CreatedAt            types.String `tfsdk:"created_at"`
-	UpdatedAt            types.String `tfsdk:"updated_at"`
+	ID                  types.String `tfsdk:"id"`
+	ProjectID           types.String `tfsdk:"project_id"`
+	Name                types.String `tfsdk:"name"`
+	DisplayName         types.String `tfsdk:"display_name"`
+	URLSlug             types.String `tfsdk:"url_slug"`
+	Image               types.String `tfsdk:"image"`
+	Release             types.String `tfsdk:"release"`
+	Command             types.List   `tfsdk:"command"`
+	Args                types.List   `tfsdk:"args"`
+	ReleaseCommand      types.List   `tfsdk:"release_command"`
+	WaitForRollout      types.Bool   `tfsdk:"wait_for_rollout"`
+	VolumeMounts        types.List   `tfsdk:"volume_mounts"`
+	SecurityContext     types.Object `tfsdk:"security_context"`
+	Port                types.Int64  `tfsdk:"port"`
+	Ingress             types.String `tfsdk:"ingress"`
+	Type                types.String `tfsdk:"type"`
+	ServiceAccount      types.String `tfsdk:"service_account"`
+	IdentityTokenFile   types.String `tfsdk:"identity_token_file"`
+	Env                 types.Map    `tfsdk:"env"`
+	SecretEnv           types.Map    `tfsdk:"secret_env"`
+	MinScale            types.Int64  `tfsdk:"min_scale"`
+	MaxScale            types.Int64  `tfsdk:"max_scale"`
+	CPULimit            types.String `tfsdk:"cpu_limit"`
+	MemoryLimit         types.String `tfsdk:"memory_limit"`
+	HealthCheckPath     types.String `tfsdk:"health_check_path"`
+	HealthCheckTimeout  types.Int64  `tfsdk:"health_check_timeout"`
+	HealthCheckInterval types.Int64  `tfsdk:"health_check_interval"`
+	HealthCheckRetries  types.Int64  `tfsdk:"health_check_retries"`
+	Probes              types.Object `tfsdk:"probes"`
+	AdoptExisting       types.Bool   `tfsdk:"adopt_existing"`
+	Routes              types.List   `tfsdk:"routes"`
+	Firewall            types.String `tfsdk:"firewall"`
+	Status              types.String `tfsdk:"status"`
+	URL                 types.String `tfsdk:"url"`
+	CreatedAt           types.String `tfsdk:"created_at"`
+	UpdatedAt           types.String `tfsdk:"updated_at"`
 }
 
 // RouteModel describes a per-path visibility carve-out in Terraform state.
@@ -451,13 +450,6 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					"for no firewall.",
 				Optional: true,
 			},
-			"firewall_allow_lockout": schema.BoolAttribute{
-				Description: "Admit attaching a firewall that denies the address this apply runs from. " +
-					"Without it such an attach is refused. Set it when the machine running the apply is not " +
-					"meant to reach the app, a CI runner for instance. Defaults to false. A setting of the " +
-					"request, never stored by the API.",
-				Optional: true,
-			},
 			"status": schema.StringAttribute{
 				Description: "Current status of the app.",
 				Computed:    true,
@@ -598,13 +590,12 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	// not served open for as long as a release command takes; whether the edge
 	// enforces it is read once the rollout has given it routes to enforce it on.
 	if firewall != "" {
-		if _, err := r.client.AttachAppFirewall(ctx, app.ID, client.AttachFirewallRequest{
-			Firewall:     firewall,
-			AllowLockout: plan.FirewallAllowLockout.ValueBool(),
-		}); err != nil {
+		ref, err := r.client.AttachAppFirewall(ctx, app.ID, client.AttachFirewallRequest{Firewall: firewall})
+		if err != nil {
 			resp.Diagnostics.AddError("Error attaching firewall", err.Error())
 			return
 		}
+		warnFindings(path.Root("firewall"), ref.Name, ref.Findings, &resp.Diagnostics)
 	}
 
 	if err := awaitDeployment(ctx, r.client, app, plan.WaitForRollout.ValueBool()); err != nil {
@@ -751,12 +742,13 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 				resp.Diagnostics.AddError("Error detaching firewall", err.Error())
 				return
 			}
-		} else if _, err := r.client.AttachAppFirewall(ctx, appID, client.AttachFirewallRequest{
-			Firewall:     want,
-			AllowLockout: plan.FirewallAllowLockout.ValueBool(),
-		}); err != nil {
-			resp.Diagnostics.AddError("Error attaching firewall", err.Error())
-			return
+		} else {
+			ref, err := r.client.AttachAppFirewall(ctx, appID, client.AttachFirewallRequest{Firewall: want})
+			if err != nil {
+				resp.Diagnostics.AddError("Error attaching firewall", err.Error())
+				return
+			}
+			warnFindings(path.Root("firewall"), ref.Name, ref.Findings, &resp.Diagnostics)
 		}
 		if err := r.awaitFirewall(ctx, appID, state.Name.ValueString(), want); err != nil {
 			resp.Diagnostics.AddError("Error applying firewall", err.Error())

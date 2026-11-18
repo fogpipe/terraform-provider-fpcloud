@@ -103,6 +103,12 @@ Bucket.firewall.applied_revision
 Bucket.firewall.message
 Bucket.firewall.revision
 
+# What an attach warns its caller about, on the answer to the attach alone: no
+# read of the app or the bucket carries it, so there is nothing for state to
+# hold. The apply that attaches shows each one as a warning on `firewall`.
+App.firewall.findings
+Bucket.firewall.findings
+
 # --- the same state, spelled declaratively somewhere else ---------------
 # `backup.enabled` is where a database says whether it is backed up. This is
 # the server echoing that decision back inverted, so an attribute for it

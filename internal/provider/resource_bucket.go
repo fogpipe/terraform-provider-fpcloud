@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -44,7 +45,6 @@ type BucketResourceModel struct {
 	TLSNextAttempt       types.String `tfsdk:"tls_next_attempt"`
 	GlobalAlias          types.String `tfsdk:"global_alias"`
 	Firewall             types.String `tfsdk:"firewall"`
-	FirewallAllowLockout types.Bool   `tfsdk:"firewall_allow_lockout"`
 }
 
 // NewBucketResource returns a new bucket resource.
@@ -159,13 +159,6 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					"removing it waits until the edge enforces the result. Leave it out for no firewall.",
 				Optional: true,
 			},
-			"firewall_allow_lockout": schema.BoolAttribute{
-				Description: "Admit attaching a firewall that denies the address this apply runs from. " +
-					"Without it such an attach is refused. Set it when the machine running the apply is not " +
-					"meant to reach the website, a CI runner for instance. Defaults to false. A setting of " +
-					"the request, never stored by the API.",
-				Optional: true,
-			},
 			"global_alias": schema.StringAttribute{
 				Description: "The bucket's name in the object store's global namespace — the value S3 " +
 					"itself uses, and the website host label. Derived as <name>-<project>-<org>, but " +
@@ -237,7 +230,7 @@ func (r *BucketResource) Create(ctx context.Context, req resource.CreateRequest,
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		if bucket, err = r.setFirewall(ctx, bucket.ID, bucket.Name, firewall, plan.FirewallAllowLockout.ValueBool()); err != nil {
+		if bucket, err = r.setFirewall(ctx, bucket.ID, bucket.Name, firewall, &resp.Diagnostics); err != nil {
 			resp.Diagnostics.AddError("Error attaching firewall", err.Error())
 			return
 		}
@@ -249,17 +242,19 @@ func (r *BucketResource) Create(ctx context.Context, req resource.CreateRequest,
 
 // setFirewall attaches firewall want to the bucket's website, or takes the
 // website's firewall off when want is empty, waits until the edge enforces
-// the result and returns the bucket as it then reads.
-func (r *BucketResource) setFirewall(ctx context.Context, bucketID, name, want string, allowLockout bool) (*client.Bucket, error) {
+// the result and returns the bucket as it then reads. What the attach warns
+// about is added to diags.
+func (r *BucketResource) setFirewall(ctx context.Context, bucketID, name, want string, diags *diag.Diagnostics) (*client.Bucket, error) {
 	if want == "" {
 		if err := r.client.DetachWebsiteFirewall(ctx, bucketID); err != nil {
 			return nil, err
 		}
-	} else if _, err := r.client.AttachWebsiteFirewall(ctx, bucketID, client.AttachFirewallRequest{
-		Firewall:     want,
-		AllowLockout: allowLockout,
-	}); err != nil {
-		return nil, err
+	} else {
+		ref, err := r.client.AttachWebsiteFirewall(ctx, bucketID, client.AttachFirewallRequest{Firewall: want})
+		if err != nil {
+			return nil, err
+		}
+		warnFindings(path.Root("firewall"), ref.Name, ref.Findings, diags)
 	}
 	var bucket *client.Bucket
 	err := awaitAttachedFirewall(ctx, "the website of bucket "+name, want, func(ctx context.Context) (*client.FirewallRef, error) {
@@ -315,7 +310,7 @@ func (r *BucketResource) Update(ctx context.Context, req resource.UpdateRequest,
 	// website it needs is.
 	firewallChanged := !plan.Firewall.IsUnknown() && plan.Firewall.ValueString() != state.Firewall.ValueString()
 	if firewallChanged && plan.Firewall.ValueString() == "" {
-		if bucket, err = r.setFirewall(ctx, state.ID.ValueString(), state.Name.ValueString(), "", false); err != nil {
+		if bucket, err = r.setFirewall(ctx, state.ID.ValueString(), state.Name.ValueString(), "", &resp.Diagnostics); err != nil {
 			resp.Diagnostics.AddError("Error detaching firewall", err.Error())
 			return
 		}
@@ -375,7 +370,7 @@ func (r *BucketResource) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 
 	if firewallChanged && plan.Firewall.ValueString() != "" {
-		if bucket, err = r.setFirewall(ctx, state.ID.ValueString(), state.Name.ValueString(), plan.Firewall.ValueString(), plan.FirewallAllowLockout.ValueBool()); err != nil {
+		if bucket, err = r.setFirewall(ctx, state.ID.ValueString(), state.Name.ValueString(), plan.Firewall.ValueString(), &resp.Diagnostics); err != nil {
 			resp.Diagnostics.AddError("Error attaching firewall", err.Error())
 			return
 		}

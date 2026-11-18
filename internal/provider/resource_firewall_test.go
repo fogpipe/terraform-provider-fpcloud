@@ -103,9 +103,6 @@ func TestFirewallSchema(t *testing.T) {
 			t.Errorf("%s: want computed only", name)
 		}
 	}
-	if a := sch.Attributes["allow_lockout"]; !a.IsOptional() || a.IsComputed() {
-		t.Errorf("allow_lockout: want optional and never read back")
-	}
 
 	rules, ok := sch.Attributes["rules"].(schema.ListNestedAttribute)
 	if !ok {
@@ -217,9 +214,14 @@ func TestFirewallConfigIsValidatedAtPlan(t *testing.T) {
 type fakeFirewallAPI struct {
 	mu sync.Mutex
 
-	fw       *client.Firewall
-	puts     int
-	lockouts int
+	fw   *client.Firewall
+	puts int
+	// conditional counts the updates that named a revision to be written on
+	// condition of, which a configuration never does.
+	conditional int
+	// deniesCaller makes every write that changes what an attached firewall
+	// enforces, and every attach, answer that it denies its caller.
+	deniesCaller bool
 
 	// edgeLag is how many reads a change stays pending for; edgeFails makes
 	// the edge refuse the next change with this message.
@@ -346,21 +348,29 @@ func (f *fakeFirewallAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var req client.UpdateFirewallRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		f.puts++
-		if req.AllowLockout {
-			f.lockouts++
+		if req.IfRevision != 0 {
+			f.conditional++
 		}
 		rules := f.canonical(req.Rules)
 		before, _ := json.Marshal([]any{f.fw.DefaultAction, f.fw.Rules})
 		after, _ := json.Marshal([]any{req.DefaultAction, rules})
 		f.fw.Description = req.Description
+		answer := func() client.Firewall { return f.firewall() }
 		if string(before) != string(after) {
 			f.fw.DefaultAction, f.fw.Rules = req.DefaultAction, rules
 			f.fw.Revision++
 			if f.attached {
 				f.changed()
+				if f.deniesCaller {
+					answer = func() client.Firewall {
+						fw := f.firewall()
+						fw.Findings = append(fw.Findings, fakeDeniesCaller("stored"))
+						return fw
+					}
+				}
 			}
 		}
-		_ = json.NewEncoder(w).Encode(f.firewall())
+		_ = json.NewEncoder(w).Encode(answer())
 	case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/firewalls/fw-1":
 		if f.attached {
 			refuse(http.StatusConflict, "FIREWALL_ATTACHED", "firewall office is attached to app web; detach it first")
@@ -386,12 +396,13 @@ func (f *fakeFirewallAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			missing()
 			return
 		}
-		if req.AllowLockout {
-			f.lockouts++
-		}
 		f.attached = true
 		f.changed()
-		_ = json.NewEncoder(w).Encode(client.FirewallRef{ID: f.fw.ID, Name: f.fw.Name, Revision: f.fw.Revision, Status: "pending"})
+		ref := client.FirewallRef{ID: f.fw.ID, Name: f.fw.Name, Revision: f.fw.Revision, Status: "pending"}
+		if f.deniesCaller {
+			ref.Findings = []client.FirewallFinding{fakeDeniesCaller("attached")}
+		}
+		_ = json.NewEncoder(w).Encode(ref)
 	case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/apps/app-1/firewall":
 		f.attached = false
 		f.changed()
@@ -638,11 +649,12 @@ func TestFirewall_AttachmentWaitsForTheEdge(t *testing.T) {
 	api := startFakeFirewallAPI(t)
 	api.edgeLag = 3
 
-	firewall := func(source string, allowLockout bool) string {
-		lockout := ""
-		if allowLockout {
-			lockout = "allow_lockout = true"
-		}
+	// The machine running the apply is in none of the ranges below, as a CI
+	// runner would be: every attach and every edit is answered with the
+	// warning that it denies its caller, and is made all the same.
+	api.deniesCaller = true
+
+	firewall := func(source string) string {
 		return fmt.Sprintf(`
 resource "fpcloud_firewall" "office" {
   project        = "proj-1"
@@ -651,10 +663,9 @@ resource "fpcloud_firewall" "office" {
   rules = [
     { priority = 100, action = "allow", match = { sources = [%q] } },
   ]
-  %s
-}`, source, lockout)
+}`, source)
 	}
-	attached := fmt.Sprintf(fakeFirewallApp, "firewall = fpcloud_firewall.office.id\n  firewall_allow_lockout = true")
+	attached := fmt.Sprintf(fakeFirewallApp, "firewall = fpcloud_firewall.office.id")
 	// Not through a reference, so Terraform orders nothing between the two
 	// and the firewall's own delete is what meets the attachment.
 	attachedByLiteral := fmt.Sprintf(fakeFirewallApp, `firewall = "fw-1"`)
@@ -681,31 +692,26 @@ resource "fpcloud_firewall" "office" {
 		Steps: []resource.TestStep{
 			{
 				// Created together: the app is attached in its own create.
-				Config: firewall("192.0.2.0/24", false) + attached,
+				Config: firewall("192.0.2.0/24") + attached,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("fpcloud_app.web", "firewall", "fw-1"),
 					seen(3, true, 1),
-					func(*terraform.State) error {
-						api.mu.Lock()
-						defer api.mu.Unlock()
-						if api.lockouts != 1 {
-							return fmt.Errorf("the attach carried allow_lockout %d times, want 1", api.lockouts)
-						}
-						return nil
-					},
 				),
 			},
 			{
 				// An edit to an attached firewall waits for its target.
-				Config: firewall("198.51.100.0/24", true) + attached,
+				Config: firewall("198.51.100.0/24") + attached,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("fpcloud_firewall.office", "revision", "2"),
 					seen(3, true, 2),
+					// The warning about the caller is the apply's, and is not
+					// kept: the read that follows would not repeat it.
+					resource.TestCheckResourceAttr("fpcloud_firewall.office", "findings.#", "0"),
 					func(*terraform.State) error {
 						api.mu.Lock()
 						defer api.mu.Unlock()
-						if api.lockouts != 2 {
-							return fmt.Errorf("the edit did not carry allow_lockout")
+						if api.puts == 0 || api.conditional != 0 {
+							return fmt.Errorf("%d of %d updates were conditional on a revision; a configuration is written on none", api.conditional, api.puts)
 						}
 						return nil
 					},
@@ -719,7 +725,7 @@ resource "fpcloud_firewall" "office" {
 					defer api.mu.Unlock()
 					api.edgeFails = "route web-host: the policy was not accepted"
 				},
-				Config:      firewall("203.0.113.0/24", true) + attached,
+				Config:      firewall("203.0.113.0/24") + attached,
 				ExpectError: regexp.MustCompile(`(?s)did not apply revision 3 of firewall office to app web:.*policy was not accepted`),
 			},
 			{
@@ -730,7 +736,7 @@ resource "fpcloud_firewall" "office" {
 					defer api.mu.Unlock()
 					api.failed, api.pendingReads, api.pendingSeen = "", 0, 0
 				},
-				Config:   firewall("203.0.113.0/24", true) + attached,
+				Config:   firewall("203.0.113.0/24") + attached,
 				PlanOnly: true,
 			},
 			{
@@ -739,7 +745,7 @@ resource "fpcloud_firewall" "office" {
 			},
 			{
 				// Detaching waits until the edge has let go.
-				Config: firewall("203.0.113.0/24", true) + detached,
+				Config: firewall("203.0.113.0/24") + detached,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckNoResourceAttr("fpcloud_app.web", "firewall"),
 					seen(3, false, 0),
@@ -747,7 +753,7 @@ resource "fpcloud_firewall" "office" {
 			},
 			{
 				// Attached to an app that already exists.
-				Config: firewall("203.0.113.0/24", true) + attached,
+				Config: firewall("203.0.113.0/24") + attached,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("fpcloud_app.web", "firewall", "fw-1"),
 					seen(3, true, 3),
@@ -756,9 +762,13 @@ resource "fpcloud_firewall" "office" {
 			{
 				// And taken off again, so the destroy that ends the test
 				// meets a firewall attached to nothing.
-				Config: firewall("203.0.113.0/24", true) + detached,
+				Config: firewall("203.0.113.0/24") + detached,
 				Check:  seen(3, false, 0),
 			},
 		},
 	})
+}
+
+func fakeDeniesCaller(state string) client.FirewallFinding {
+	return client.FirewallFinding{Code: "denies_caller", Message: "192.0.2.50, the address you are connecting from, is denied by this firewall as it is now " + state + " (by its default action)."}
 }

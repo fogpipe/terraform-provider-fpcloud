@@ -47,7 +47,6 @@ type FirewallResourceModel struct {
 	Description   types.String `tfsdk:"description"`
 	DefaultAction types.String `tfsdk:"default_action"`
 	Rules         types.List   `tfsdk:"rules"`
-	AllowLockout  types.Bool   `tfsdk:"allow_lockout"`
 	Revision      types.Int64  `tfsdk:"revision"`
 	Findings      types.List   `tfsdk:"findings"`
 	CreatedAt     types.String `tfsdk:"created_at"`
@@ -163,14 +162,6 @@ func (r *FirewallResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					},
 				},
 			},
-			"allow_lockout": schema.BoolAttribute{
-				Description: "Admit a change that denies the address this apply runs from. Without it, a change " +
-					"to an attached firewall that would shut out the caller is refused, which is what stops a " +
-					"typo from closing a site to its owner. Set it when the machine running the apply is not " +
-					"meant to reach the target, a CI runner for instance. Defaults to false. A setting of the " +
-					"request, never stored by the API.",
-				Optional: true,
-			},
 			"revision": schema.Int64Attribute{
 				Description: "Counts the firewall's content: every change to the default action or the rules " +
 					"stores the next one. An apply returns once every target enforces it.",
@@ -179,7 +170,9 @@ func (r *FirewallResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			"findings": schema.ListNestedAttribute{
 				Description: "Warnings about a firewall that is valid and enforced as written: a rule no request " +
 					"can reach, a default of deny with no IPv6 source. Also shown as warnings when an apply " +
-					"writes the firewall.",
+					"writes the firewall. The warning that a change denies the address the apply ran from is " +
+					"shown on that apply only and is not kept here, since it is about the machine and not " +
+					"about the firewall.",
 				Computed: true,
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
@@ -188,7 +181,7 @@ func (r *FirewallResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 							Computed:    true,
 						},
 						"field": schema.StringAttribute{
-							Description: "What it is about, as `rules[2]` or `default_action`.",
+							Description: "What it is about, as `rules[2]` or `default_action`; empty when it is about the firewall as a whole.",
 							Computed:    true,
 						},
 						"message": schema.StringAttribute{
@@ -378,11 +371,13 @@ func (r *FirewallResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 	id := state.ID.ValueString()
+	// On no condition of the revision last read: the configuration is the
+	// whole of the firewall, and an apply is meant to win over an edit made
+	// elsewhere.
 	fw, err := r.client.UpdateFirewall(ctx, id, client.UpdateFirewallRequest{
 		Description:   plan.Description.ValueString(),
 		DefaultAction: plan.DefaultAction.ValueString(),
 		Rules:         rules,
-		AllowLockout:  plan.AllowLockout.ValueBool(),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating firewall", err.Error())
@@ -459,12 +454,28 @@ func (r *FirewallResource) ImportState(ctx context.Context, req resource.ImportS
 		fmt.Sprintf("firewall %q in project %q is %s", name, project, errNotAccessible))
 }
 
+// findingDeniesCaller is the finding a write carries when the firewall it
+// stored or attached denies the address the request came from. It is about
+// the machine running the apply, so it is a warning on that apply and never
+// part of the firewall's state.
+const findingDeniesCaller = "denies_caller"
+
 // warnFirewallFindings shows the API's warnings about the firewall it just
 // stored. The firewall is valid and enforced as written; a finding says it
 // may not do what its author meant.
 func warnFirewallFindings(fw *client.Firewall, diags *diag.Diagnostics) {
-	for _, f := range fw.Findings {
-		diags.AddAttributeWarning(path.Root("rules"), "Firewall "+fw.Name+": "+f.Field, f.Message)
+	warnFindings(path.Root("rules"), fw.Name, fw.Findings, diags)
+}
+
+// warnFindings raises each finding as a warning on the attribute that caused
+// it, titled with the firewall and the field the finding is about.
+func warnFindings(attribute path.Path, firewall string, findings []client.FirewallFinding, diags *diag.Diagnostics) {
+	for _, f := range findings {
+		title := "Firewall " + firewall
+		if f.Field != "" {
+			title += ": " + f.Field
+		}
+		diags.AddAttributeWarning(attribute, title, f.Message)
 	}
 }
 
@@ -599,8 +610,7 @@ func firewallRulesToList(prior types.List, rules []client.FirewallRule, diags *d
 	return list
 }
 
-// setModelFromFirewall copies what the API reports. allow_lockout is a setting
-// of the request and is never read back, so it stays what the model holds.
+// setModelFromFirewall copies what the API reports.
 func setModelFromFirewall(m *FirewallResourceModel, fw *client.Firewall, diags *diag.Diagnostics) {
 	m.ID = types.StringValue(fw.ID)
 	// Keep the configured project when the API does not echo one, so a
@@ -617,6 +627,11 @@ func setModelFromFirewall(m *FirewallResourceModel, fw *client.Firewall, diags *
 	findingType := types.ObjectType{AttrTypes: firewallFindingAttrTypes()}
 	findings := make([]attr.Value, 0, len(fw.Findings))
 	for _, f := range fw.Findings {
+		// Only the answer to a write carries it, so keeping it would have
+		// the next read plan a change nobody made.
+		if f.Code == findingDeniesCaller {
+			continue
+		}
 		obj, d := types.ObjectValue(firewallFindingAttrTypes(), map[string]attr.Value{
 			"code":    types.StringValue(f.Code),
 			"field":   types.StringValue(f.Field),

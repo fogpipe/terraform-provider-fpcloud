@@ -88,7 +88,8 @@ address is in a header the firewall does not read. Two things follow.
 - An allowlist of office addresses lets nobody in, because no request arrives
   from the office.
 - An allowlist of the CDN's published ranges does work, and is the usual use:
-  it closes the app to anyone who goes around the CDN to the platform host.
+  it keeps out requests sent straight to the platform host. It does not keep
+  out the CDN's other customers, whose requests arrive from the same ranges.
   Filtering by visitor is then the CDN's job.
 
 ## What an apply waits for
@@ -99,6 +100,11 @@ website it is attached to enforces the new revision, and one that sets, changes
 or removes `firewall` on an app or a bucket returns once the edge enforces the
 result. It waits five minutes at most and fails with the edge's own reason if
 the edge refuses the change.
+
+An app or a bucket created with `firewall` set is created with the firewall
+attached, in the same request, so it is never served without it. Adding
+`firewall` to one that already exists leaves it open until the edge has taken
+the firewall, a few seconds.
 
 A firewall that is still attached is not deleted: the API names what it is
 attached to. Removing `firewall` from the app or the bucket in the same

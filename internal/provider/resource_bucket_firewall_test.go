@@ -16,8 +16,9 @@ import (
 	"github.com/fogpipe/terraform-provider-fpcloud/internal/provider"
 )
 
-// A website's firewall is attached after the website it needs exists and
-// taken off before that website goes, each waiting for the edge, and a change
+// A website's firewall is attached in the create of its bucket, before the
+// website is enabled and anything is served, and taken off before that
+// website goes, each waiting for the edge, and a change
 // to another setting keeps it: only a single read of the bucket is sure to
 // carry the firewall, so a write's own answer is never what reaches state.
 func TestBucket_WebsiteFirewallFollowsTheWebsite(t *testing.T) {
@@ -56,7 +57,15 @@ func TestBucket_WebsiteFirewallFollowsTheWebsite(t *testing.T) {
 		}
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/proj-1/buckets":
+			var req client.CreateBucketRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
 			exists = true
+			// A firewall named on the create is the website's before the
+			// bucket serves anything.
+			if req.Firewall != "" {
+				attached, pending = true, 2
+				calls[len(calls)-1] += " firewall=" + req.Firewall
+			}
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(bucket)
 		case !exists:
@@ -137,7 +146,7 @@ resource "fpcloud_bucket" "site" {
   firewall        = "fw-1"`),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("fpcloud_bucket.site", "firewall", "fw-1"),
-					step(2, "POST /api/v1/projects/proj-1/buckets", "PUT /api/v1/buckets/bkt-1/website", "PUT /api/v1/buckets/bkt-1/website/firewall"),
+					step(2, "POST /api/v1/projects/proj-1/buckets firewall=fw-1", "PUT /api/v1/buckets/bkt-1/website"),
 				),
 			},
 			{

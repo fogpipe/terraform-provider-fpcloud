@@ -228,13 +228,16 @@ type fakeFirewallAPI struct {
 	edgeLag   int
 	edgeFails string
 
-	appExists    bool
-	attached     bool // the app asks for fw
-	appliedRev   int  // what the edge enforces on the app
-	enforced     bool // the edge enforces a firewall on the app at all
-	pendingReads int
-	failed       string
-	pendingSeen  int
+	appExists bool
+	attached  bool // the app asks for fw
+	// createdWithFirewall counts app creates that carried a firewall, and
+	// attaches the attach requests made after a create.
+	createdWithFirewall, attaches int
+	appliedRev                    int  // what the edge enforces on the app
+	enforced                      bool // the edge enforces a firewall on the app at all
+	pendingReads                  int
+	failed                        string
+	pendingSeen                   int
 }
 
 func (f *fakeFirewallAPI) canonical(in []client.FirewallRuleRequest) []client.FirewallRule {
@@ -380,9 +383,28 @@ func (f *fakeFirewallAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 
 	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/proj-1/apps":
+		var req client.CreateAppRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
 		f.appExists = true
+		created := f.app()
+		// A firewall named on the create is attached by it, and the create's
+		// answer is where its warning about the caller is.
+		if req.Firewall != "" {
+			if f.fw == nil || req.Firewall != f.fw.ID {
+				f.appExists = false
+				missing()
+				return
+			}
+			f.attached = true
+			f.createdWithFirewall++
+			f.changed()
+			created = f.app()
+			if f.deniesCaller && created.Firewall != nil {
+				created.Firewall.Findings = []client.FirewallFinding{fakeDeniesCaller("attached")}
+			}
+		}
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(f.app())
+		_ = json.NewEncoder(w).Encode(created)
 	case strings.HasPrefix(r.URL.Path, "/api/v1/apps/app-1") && !f.appExists:
 		missing()
 	case r.URL.Path == "/api/v1/apps/app-1/deployments":
@@ -397,6 +419,7 @@ func (f *fakeFirewallAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.attached = true
+		f.attaches++
 		f.changed()
 		ref := client.FirewallRef{ID: f.fw.ID, Name: f.fw.Name, Revision: f.fw.Revision, Status: "pending"}
 		if f.deniesCaller {
@@ -691,11 +714,20 @@ resource "fpcloud_firewall" "office" {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				// Created together: the app is attached in its own create.
+				// Created together: the firewall rides on the app's create, so
+				// the app is never served without it, and no attach follows.
 				Config: firewall("192.0.2.0/24") + attached,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("fpcloud_app.web", "firewall", "fw-1"),
 					seen(3, true, 1),
+					func(*terraform.State) error {
+						api.mu.Lock()
+						defer api.mu.Unlock()
+						if api.createdWithFirewall != 1 || api.attaches != 0 {
+							return fmt.Errorf("the create carried the firewall %d time(s) and %d attach(es) followed; want 1 and 0", api.createdWithFirewall, api.attaches)
+						}
+						return nil
+					},
 				),
 			},
 			{
@@ -770,5 +802,5 @@ resource "fpcloud_firewall" "office" {
 }
 
 func fakeDeniesCaller(state string) client.FirewallFinding {
-	return client.FirewallFinding{Code: "denies_caller", Message: "192.0.2.50, the address you are connecting from, is denied by this firewall as it is now " + state + " (by its default action)."}
+	return client.FirewallFinding{Code: "denies_caller", Message: "192.0.2.50, the address this request came from, is denied by this firewall as it is now " + state + " (by its default action)."}
 }

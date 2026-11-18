@@ -446,8 +446,10 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Description: "ID of the fpcloud_firewall attached to the app, from the same project. It applies " +
 					"to every host the edge serves for the app, custom domains included, and to nothing that " +
 					"does not cross the edge: calls from other apps inside the platform are not filtered. " +
-					"Setting, changing or removing it waits until the edge enforces the result. Leave it out " +
-					"for no firewall.",
+					"Setting, changing or removing it waits until the edge enforces the result. An app created " +
+					"with it set is created with the firewall attached, so it is never served without it; " +
+					"added to an app that exists, the app stays open until the edge has taken it. Leave it " +
+					"out for no firewall.",
 				Optional: true,
 			},
 			"status": schema.StringAttribute{
@@ -542,6 +544,9 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 		Probes:              probes,
 		EnvVars:             envMap,
 		SecretEnv:           secretEnv,
+		// Attached in the create itself: an attach sent after it leaves the
+		// app served without its firewall until the edge has taken it.
+		Firewall: plan.Firewall.ValueString(),
 	}
 	minScale, maxScale := int32(plan.MinScale.ValueInt64()), int32(plan.MaxScale.ValueInt64())
 	createReq.MinScale, createReq.MaxScale = &minScale, &maxScale
@@ -577,25 +582,20 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	// (fogpipe/cloud-workspace#224). The framework hands back the plan when
 	// Create returns early, and the plan's id is unknown, which is saved as
 	// null: a record that names nothing to destroy.
-	// Read what the plan asks for first: the app as created has no firewall,
-	// and recording it overwrites the attribute.
+	// Read what the plan asks for first: recording the app overwrites the
+	// attribute with what the create answered.
 	firewall := plan.Firewall.ValueString()
+	// The firewall rode on the create, so the app is never served without
+	// it. What that warned about is on the create's answer alone; whether the
+	// edge enforces the firewall is read once the rollout has given it routes
+	// to enforce it on.
+	if app.Firewall != nil {
+		warnFindings(path.Root("firewall"), app.Firewall.Name, app.Firewall.Findings, &resp.Diagnostics)
+	}
 	r.setModelFromApp(&plan, app, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
-	}
-
-	// The firewall is asked for before the rollout is waited on, so the app is
-	// not served open for as long as a release command takes; whether the edge
-	// enforces it is read once the rollout has given it routes to enforce it on.
-	if firewall != "" {
-		ref, err := r.client.AttachAppFirewall(ctx, app.ID, client.AttachFirewallRequest{Firewall: firewall})
-		if err != nil {
-			resp.Diagnostics.AddError("Error attaching firewall", err.Error())
-			return
-		}
-		warnFindings(path.Root("firewall"), ref.Name, ref.Findings, &resp.Diagnostics)
 	}
 
 	if err := awaitDeployment(ctx, r.client, app, plan.WaitForRollout.ValueBool()); err != nil {

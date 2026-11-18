@@ -14,7 +14,7 @@ import (
 func TestFirewallFindingsAreWarnings(t *testing.T) {
 	fw := &client.Firewall{Name: "office", Findings: []client.FirewallFinding{
 		{Code: "shadowed", Field: "rules[1]", Message: "rule 200 never matches"},
-		{Code: findingDeniesCaller, Message: "192.0.2.50, the address you are connecting from, is denied by this firewall as it is now stored (by its default action)."},
+		{Code: findingDeniesCaller, Message: "192.0.2.50, the address this request came from, is denied by this firewall as it is now stored (by its default action)."},
 	}}
 	var diags diag.Diagnostics
 	warnFirewallFindings(fw, &diags)
@@ -27,7 +27,7 @@ func TestFirewallFindingsAreWarnings(t *testing.T) {
 	if got := diags[1].Summary(); got != "Firewall office" {
 		t.Errorf("a finding with no field is titled %q", got)
 	}
-	if !strings.Contains(diags[1].Detail(), "the address you are connecting from") {
+	if !strings.Contains(diags[1].Detail(), "the address this request came from") {
 		t.Errorf("detail = %q", diags[1].Detail())
 	}
 

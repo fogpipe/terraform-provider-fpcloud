@@ -58,7 +58,7 @@ resource "fpcloud_app" "uploader" {
 
 ### Optional
 
-- `firewall` (String) ID of the fpcloud_firewall attached to the bucket's website, from the same project. It applies to every host the edge serves the website on, custom domains included, and not to the S3 endpoint. Needs website_enabled. Setting, changing or removing it waits until the edge enforces the result. Leave it out for no firewall.
+- `firewall` (String) ID of the fpcloud_firewall attached to the bucket's website, from the same project. It applies to every host the edge serves the website on, custom domains included, and not to the S3 endpoint. Needs website_enabled. Setting, changing or removing it waits until the edge enforces the result. A bucket created with it set is created with the firewall attached, so its website is never served without it. Leave it out for no firewall.
 - `public_read` (Boolean) Serve the bucket's objects to anyone with the URL, without a signature. This is the property a website needs and can be had without one: an asset origin is public_read and nothing else, with no index document and no versioned publishing. Setting website_enabled sets this; clearing this clears website_enabled, because a site nobody can read is not a site. Mutable in place.
 - `url_slug` (String) Vanity website host label: the site moves to <url_slug>.web.<platform domain>. Globally unique; empty reverts to the derived host. Mutable in place.
 - `website_enabled` (Boolean) Add the static-website serving conventions to a public bucket: an index document for a directory request, an error document for a miss, and eligibility for SPA fallback and versioned publishing. Implies public_read. Mutable in place.

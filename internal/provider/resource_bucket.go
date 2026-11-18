@@ -156,7 +156,9 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Description: "ID of the fpcloud_firewall attached to the bucket's website, from the same " +
 					"project. It applies to every host the edge serves the website on, custom domains " +
 					"included, and not to the S3 endpoint. Needs website_enabled. Setting, changing or " +
-					"removing it waits until the edge enforces the result. Leave it out for no firewall.",
+					"removing it waits until the edge enforces the result. A bucket created with it set is " +
+					"created with the firewall attached, so its website is never served without it. Leave it " +
+					"out for no firewall.",
 				Optional: true,
 			},
 			"global_alias": schema.StringAttribute{
@@ -192,13 +194,22 @@ func (r *BucketResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
+	// The firewall rides on the create, before anything of the bucket is
+	// served: attached after the website is enabled, the site is open until
+	// the edge has taken the attach.
+	firewall := plan.Firewall.ValueString()
 	bucket, err := r.client.CreateBucket(ctx, plan.Project.ValueString(), client.CreateBucketRequest{
 		Name:       plan.Name.ValueString(),
 		PublicRead: optionalBool(plan.PublicRead),
+		Firewall:   firewall,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating bucket", err.Error())
 		return
+	}
+	// What the attach warned about is on the create's answer alone.
+	if bucket.Firewall != nil {
+		warnFindings(path.Root("firewall"), bucket.Firewall.Name, bucket.Firewall.Findings, &resp.Diagnostics)
 	}
 
 	// Website serving + vanity slug are separate API calls layered on the bucket.
@@ -221,16 +232,17 @@ func (r *BucketResource) Create(ctx context.Context, req resource.CreateRequest,
 		}
 	}
 
-	if firewall := plan.Firewall.ValueString(); firewall != "" {
-		// The bucket exists whatever the attach reports: record it first, so
-		// a refused firewall leaves a bucket Terraform knows it made.
+	if firewall != "" {
+		// The bucket exists whatever the edge reports: record it first, so a
+		// firewall the edge could not take leaves a bucket Terraform knows it
+		// made.
 		r.apply(&plan, bucket)
 		plan.Firewall = types.StringValue(firewall)
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		if bucket, err = r.setFirewall(ctx, bucket.ID, bucket.Name, firewall, &resp.Diagnostics); err != nil {
+		if bucket, err = r.awaitFirewall(ctx, bucket.ID, bucket.Name, firewall); err != nil {
 			resp.Diagnostics.AddError("Error attaching firewall", err.Error())
 			return
 		}
@@ -256,6 +268,13 @@ func (r *BucketResource) setFirewall(ctx context.Context, bucketID, name, want s
 		}
 		warnFindings(path.Root("firewall"), ref.Name, ref.Findings, diags)
 	}
+	return r.awaitFirewall(ctx, bucketID, name, want)
+}
+
+// awaitFirewall waits until the edge enforces firewall want on the bucket's
+// website, or no firewall when want is empty, and returns the bucket as it
+// then reads.
+func (r *BucketResource) awaitFirewall(ctx context.Context, bucketID, name, want string) (*client.Bucket, error) {
 	var bucket *client.Bucket
 	err := awaitAttachedFirewall(ctx, "the website of bucket "+name, want, func(ctx context.Context) (*client.FirewallRef, error) {
 		b, err := r.client.GetBucket(ctx, bucketID)

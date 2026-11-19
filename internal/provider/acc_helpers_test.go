@@ -85,12 +85,6 @@ func testAccClient() *client.Client {
 	return client.New(apiURL, os.Getenv("FPCLOUD_API_KEY"))
 }
 
-// isNotFoundErr reports whether err is a 404 from the API.
-func isNotFoundErr(err error) bool {
-	apiErr, ok := err.(*client.APIError)
-	return ok && apiErr.StatusCode == 404
-}
-
 // isGoneErr reports whether a resource is effectively gone. A test tears down the
 // resource and its parent project together; once the project is deleted its
 // scoped resources are no longer authorizable, so the API answers 403 rather than

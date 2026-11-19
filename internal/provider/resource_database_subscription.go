@@ -80,18 +80,8 @@ var subscriptionSourceTypes = map[string]attr.Type{
 	"password": types.StringType,
 }
 
-// subscriptionHealthModel is what the SUBSCRIBER reports, which is the only
+// subscriptionHealthTypes is what the SUBSCRIBER reports, which is the only
 // place the answer exists.
-type subscriptionHealthModel struct {
-	State         types.String `tfsdk:"state"`
-	Reason        types.String `tfsdk:"reason"`
-	Unreadable    types.String `tfsdk:"unreadable"`
-	ApplyLagBytes types.Int64  `tfsdk:"apply_lag_bytes"`
-	LastMessageAt types.String `tfsdk:"last_message_at"`
-	ApplyErrors   types.Int64  `tfsdk:"apply_errors"`
-	SyncErrors    types.Int64  `tfsdk:"sync_errors"`
-}
-
 var subscriptionHealthTypes = map[string]attr.Type{
 	"state":           types.StringType,
 	"reason":          types.StringType,

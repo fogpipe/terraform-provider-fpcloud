@@ -12,6 +12,10 @@
 ListOrgServiceAccounts
 ListServiceAccounts
 GetMe
+# A pod's identity token traded for a short-lived key: the client does it for
+# itself when it is built from a pod identity, so it is how the provider signs
+# in, never something it declares.
+ExchangeToken
 # The role catalogue is the platform's, read by people (`fpcloud iam roles`,
 # the console's grant drawer) to see what a role carries; a binding's `role`
 # is a string the API validates against it on apply, so Terraform declares

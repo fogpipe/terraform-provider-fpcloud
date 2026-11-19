@@ -28,7 +28,11 @@
 // Usage:
 //   deno run --allow-read --allow-run --allow-env scripts/tf-resource-coverage.ts
 
-import { clientModule, pinnedClientDir } from "./client-module.ts";
+import {
+  clientModule,
+  clientPackageSource,
+  pinnedClientDir,
+} from "./client-module.ts";
 
 // The baseline is not written from here (fogpipe/cloud-workspace#888). Refuse
 // the flag that used to do it rather than ignoring it: an unknown argument runs
@@ -49,15 +53,15 @@ if (Deno.args.includes("--update-baseline")) {
 const root = new URL("../", import.meta.url).pathname;
 const baselinePath = root + "scripts/tf-resource-coverage-baseline.txt";
 
-// --- client.go: every exported *Client method that reaches an API call ---
+// --- pkg/client: every exported *Client method that reaches an API call ---
 // A method reaches one when its own body calls newRequest(), or calls another
 // *Client method that does: a shared helper is where the request moved to, not
 // a surface of its own, and an unexported one is nothing the provider could
 // call. Read per body alone, a method that delegates to such a helper drops
 // out of the set and the helper takes its place — a gap nobody can close and a
 // baseline entry reported as covered.
-function clientMethods(clientGoPath: string): Set<string> {
-  const lines = Deno.readTextFileSync(clientGoPath).split("\n");
+function clientMethods(source: string): Set<string> {
+  const lines = source.split("\n");
   const direct = new Set<string>();
   const calls = new Map<string, Set<string>>();
   let current: string | null = null;
@@ -66,6 +70,12 @@ function clientMethods(clientGoPath: string): Set<string> {
     if (fn) {
       current = fn[1];
       calls.set(current, new Set());
+      continue;
+    }
+    // Any other top-level func ends the method before it, so its calls are
+    // never counted as that method's.
+    if (/^func /.test(line)) {
+      current = null;
       continue;
     }
     if (!current) continue;
@@ -104,7 +114,7 @@ function calledMethods(providerDir: string): Set<string> {
 }
 
 const client = pinnedClientDir();
-const available = clientMethods(`${client.dir}/pkg/client/client.go`);
+const available = clientMethods(clientPackageSource(client.dir));
 const called = calledMethods(`${root}internal/provider`);
 
 const uncovered = [...available].filter((m) => !called.has(m)).sort();
@@ -148,4 +158,4 @@ if (stale.length) {
   for (const m of stale) console.log(`  · ${m}`);
 }
 
-Deno.exit(newGaps.length ? 1 : 0);
+Deno.exit(newGaps.length || stale.length ? 1 : 0);

@@ -76,3 +76,18 @@ export const pinnedClientDir = () => {
   }
   return { version, dir: again };
 };
+
+// Every non-test Go file of the client package, in name order. A method or a
+// type is the package's wherever it is declared, so a gate reading one file of
+// it reports what it never read as covered.
+export const clientPackageSource = (moduleDir: string): string => {
+  const dir = `${moduleDir}/pkg/client`;
+  const files = [...Deno.readDirSync(dir)]
+    .filter((e) =>
+      e.isFile && e.name.endsWith(".go") && !e.name.endsWith("_test.go")
+    )
+    .map((e) => e.name)
+    .sort();
+  if (files.length === 0) throw new Error(`no Go source in ${dir}`);
+  return files.map((f) => Deno.readTextFileSync(`${dir}/${f}`)).join("\n");
+};

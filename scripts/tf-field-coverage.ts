@@ -37,7 +37,11 @@
 // Usage:
 //   deno run --allow-read --allow-run --allow-env scripts/tf-field-coverage.ts
 
-import { clientModule, pinnedClientDir } from "./client-module.ts";
+import {
+  clientModule,
+  clientPackageSource,
+  pinnedClientDir,
+} from "./client-module.ts";
 
 // The baseline is not written from here (fogpipe/cloud-workspace#888). Refuse
 // the flag that used to do it rather than ignoring it: an unknown argument runs
@@ -115,9 +119,7 @@ function attrNames(src: string): Set<string> {
 }
 
 const client = pinnedClientDir();
-const clientTypes = goStructs(
-  Deno.readTextFileSync(`${client.dir}/pkg/client/types.go`),
-);
+const clientTypes = goStructs(clientPackageSource(client.dir));
 const models = providerModels(`${root}internal/provider`);
 
 const gaps: string[] = [];
@@ -181,4 +183,4 @@ if (stale.length) {
   for (const g of stale) console.log(`  · ${g}`);
 }
 
-Deno.exit(newGaps.length ? 1 : 0);
+Deno.exit(newGaps.length || stale.length ? 1 : 0);

@@ -2,7 +2,13 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +24,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 )
 
 var (
@@ -26,6 +33,7 @@ var (
 	_ resource.ResourceWithImportState    = &FirewallResource{}
 	_ resource.ResourceWithValidateConfig = &FirewallResource{}
 	_ resource.ResourceWithModifyPlan     = &FirewallResource{}
+	_ resource.ResourceWithUpgradeState   = &FirewallResource{}
 )
 
 // NewFirewallResource returns a new firewall resource.
@@ -48,16 +56,15 @@ type FirewallResourceModel struct {
 	Name          types.String `tfsdk:"name"`
 	Description   types.String `tfsdk:"description"`
 	DefaultAction types.String `tfsdk:"default_action"`
-	Rules         types.List   `tfsdk:"rules"`
+	Rules         types.Map    `tfsdk:"rules"`
 	Revision      types.Int64  `tfsdk:"revision"`
 	Findings      types.List   `tfsdk:"findings"`
 	CreatedAt     types.String `tfsdk:"created_at"`
 	UpdatedAt     types.String `tfsdk:"updated_at"`
 }
 
-// FirewallRuleModel is one rule in state.
+// FirewallRuleModel is one rule in state. Its priority is its key in `rules`.
 type FirewallRuleModel struct {
-	Priority    types.Int64  `tfsdk:"priority"`
 	Action      types.String `tfsdk:"action"`
 	Description types.String `tfsdk:"description"`
 	Enabled     types.Bool   `tfsdk:"enabled"`
@@ -75,6 +82,9 @@ func (r *FirewallResource) Metadata(_ context.Context, req resource.MetadataRequ
 
 func (r *FirewallResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		// Version 1 keys `rules` by priority; version 0 held them as a list
+		// with the priority inside each rule (UpgradeState).
+		Version: 1,
 		Description: "Manages a firewall: a project's ordered access list on client addresses, enforced at the " +
 			"platform's edge. Rules are evaluated in priority order, lowest first, the first match decides, " +
 			"and a request no rule matches gets `default_action`. A firewall does nothing until it is attached: " +
@@ -82,8 +92,10 @@ func (r *FirewallResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			"host the edge serves for that target, custom domains included. It covers requests arriving through " +
 			"the edge and nothing else: not calls between apps inside the platform, and not outbound traffic. " +
 			"The rules declared here are the whole list: a rule added outside this configuration is removed by " +
-			"the next apply. A rule matches the address the edge sees the connection come from, so behind a CDN " +
-			"or a proxy of your own the rules see that CDN's addresses, never the visitor's.",
+			"the next apply. An apply writes the firewall only if it is still at the revision its plan read, so " +
+			"a change made elsewhere after the plan fails the apply rather than being overwritten unseen. " +
+			"A rule matches the address the edge sees the connection come from, so behind a CDN or a proxy " +
+			"of your own the rules see that CDN's addresses, never the visitor's.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Firewall ID. An app's or a bucket's `firewall` attribute takes it, or the firewall's name.",
@@ -126,18 +138,15 @@ func (r *FirewallResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Computed: true,
 				Default:  stringdefault.StaticString("allow"),
 			},
-			"rules": schema.ListNestedAttribute{
-				Description: "The access rules, all of them. A rule is identified by its priority, and rules are " +
-					"evaluated in priority order whatever order they are written in. At most 50 rules and 500 " +
-					"sources across them.",
+			"rules": schema.MapNestedAttribute{
+				Description: "The access rules, all of them, keyed by priority: `rules = { 100 = { ... } }`. " +
+					"The key is the rule's identifier and its evaluation order, lowest first: a whole number " +
+					"from 1 to 65535, written without a sign or leading zeros. Rules are evaluated in priority " +
+					"order whatever order they are written in. Leave gaps so a rule can be added between two " +
+					"others later; adding one plans that rule alone. At most 50 rules and 500 sources across them.",
 				Optional: true,
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
-						"priority": schema.Int64Attribute{
-							Description: "Evaluation order, lowest first, between 1 and 65535. Unique within the " +
-								"firewall. Leave gaps so a rule can be added between two others later.",
-							Required: true,
-						},
 						"action": schema.StringAttribute{
 							Description: "`allow` or `deny`.",
 							Required:    true,
@@ -189,8 +198,9 @@ func (r *FirewallResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 							Computed:    true,
 						},
 						"field": schema.StringAttribute{
-							Description: "What it is about, as `rules[2]` or `default_action`; empty when it is about the firewall as a whole.",
-							Computed:    true,
+							Description: "What it is about, as the API names it: `rules[2]` is the third rule in priority " +
+								"order, or `default_action`; empty when it is about the firewall as a whole.",
+							Computed: true,
 						},
 						"message": schema.StringAttribute{
 							Description: "The warning.",
@@ -230,10 +240,10 @@ func (r *FirewallResource) Configure(_ context.Context, req resource.ConfigureRe
 }
 
 // ValidateConfig refuses at plan what the API refuses at apply: an action that
-// is neither allow nor deny, a priority two rules share, a source that is not
-// an address range, and one range listed twice in a rule under two spellings.
-// The last one matters most here: the API answers with one entry where the
-// configuration wrote two, which no state could be consistent with.
+// is neither allow nor deny, a key that is not a priority, a source that is
+// not an address range, and one range listed twice in a rule under two
+// spellings. The last one matters most here: the API answers with one entry
+// where the configuration wrote two, which no state could be consistent with.
 func (r *FirewallResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var cfg FirewallResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
@@ -247,26 +257,22 @@ func (r *FirewallResource) ValidateConfig(ctx context.Context, req resource.Vali
 	if cfg.Rules.IsNull() || cfg.Rules.IsUnknown() {
 		return
 	}
-	priorities := map[int64]int{}
-	for i, elem := range cfg.Rules.Elements() {
-		obj, ok := elem.(types.Object)
+	elems := cfg.Rules.Elements()
+	keys := make([]string, 0, len(elems))
+	for key := range elems {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		at := path.Root("rules").AtMapKey(key)
+		if _, err := parseRulePriority(key); err != nil {
+			resp.Diagnostics.AddAttributeError(at, "Invalid rule priority", err.Error())
+		}
+		obj, ok := elems[key].(types.Object)
 		if !ok || obj.IsNull() || obj.IsUnknown() {
 			continue
 		}
-		at := path.Root("rules").AtListIndex(i)
 		attrs := obj.Attributes()
-		if p, ok := attrs["priority"].(types.Int64); ok && !p.IsNull() && !p.IsUnknown() {
-			if p.ValueInt64() < 1 || p.ValueInt64() > 65535 {
-				resp.Diagnostics.AddAttributeError(at.AtName("priority"), "Invalid rule priority",
-					fmt.Sprintf("priority is %d; it must be between 1 and 65535.", p.ValueInt64()))
-			}
-			if first, taken := priorities[p.ValueInt64()]; taken {
-				resp.Diagnostics.AddAttributeError(at.AtName("priority"), "Duplicate rule priority",
-					fmt.Sprintf("priority %d is already taken by rules[%d]; a priority identifies one rule.", p.ValueInt64(), first))
-			} else {
-				priorities[p.ValueInt64()] = i
-			}
-		}
 		if a, ok := attrs["action"].(types.String); ok && !a.IsNull() && !a.IsUnknown() && !isFirewallAction(a.ValueString()) {
 			resp.Diagnostics.AddAttributeError(at.AtName("action"), "Invalid rule action",
 				fmt.Sprintf("action is %q; it must be \"allow\" or \"deny\".", a.ValueString()))
@@ -303,6 +309,29 @@ func (r *FirewallResource) ValidateConfig(ctx context.Context, req resource.Vali
 			seen[canonical] = written
 		}
 	}
+}
+
+// canonicalPriority is a priority as a key is written: a decimal number with
+// no sign, space or leading zero. One spelling per priority is what makes two
+// keys two rules: `100` and `0100` would otherwise both name rule 100, and
+// nothing could say which of the two the API holds.
+var canonicalPriority = regexp.MustCompile(`^[1-9][0-9]*$`)
+
+// parseRulePriority reads a key of `rules` as the priority it names, refusing
+// any spelling but the canonical one and any number outside 1 to 65535.
+func parseRulePriority(key string) (int, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(key))
+	switch {
+	case errors.Is(err, strconv.ErrRange), err == nil && (n < 1 || n > 65535):
+		return 0, fmt.Errorf("the rule keyed %q is out of range: a priority is between 1 and 65535", key)
+	case err != nil:
+		return 0, fmt.Errorf("the rule keyed %q has no priority: a rule's key is its priority, a whole number from 1 to "+
+			"65535 written with no sign, space or leading zero, as 100", key)
+	case !canonicalPriority.MatchString(key):
+		return 0, fmt.Errorf("the rule keyed %q is priority %d: write its key as %d, with no sign, space or leading zero, "+
+			"so that one priority has one spelling", key, n, n)
+	}
+	return n, nil
 }
 
 func isFirewallAction(s string) bool { return s == "allow" || s == "deny" }
@@ -417,15 +446,25 @@ func (r *FirewallResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// On no condition of the revision last read: the configuration is the
-	// whole of the firewall, and an apply is meant to win over an edit made
-	// elsewhere.
+	// The configuration is the whole of the firewall and the apply wins over
+	// an edit made elsewhere, but only over one its plan showed: the write is
+	// conditional on the revision the plan read, so a change made after it is
+	// refused rather than reverted without ever appearing in a plan.
 	fw, err := r.client.UpdateFirewall(ctx, id, client.UpdateFirewallRequest{
 		Description:   plan.Description.ValueString(),
 		DefaultAction: plan.DefaultAction.ValueString(),
 		Rules:         rules,
+		IfRevision:    int(state.Revision.ValueInt64()),
 	})
 	if err != nil {
+		if isFirewallRevisionConflict(err) {
+			resp.Diagnostics.AddError("Firewall changed since the plan",
+				fmt.Sprintf("Firewall %s was changed outside this configuration after this plan read it at revision %d, "+
+					"so the plan does not show what this apply would overwrite. Nothing was written. Run a new plan to "+
+					"see the change, then apply that. The API said: %s",
+					state.Name.ValueString(), state.Revision.ValueInt64(), err))
+			return
+		}
 		resp.Diagnostics.AddError("Error updating firewall", err.Error())
 		return
 	}
@@ -508,11 +547,36 @@ func (r *FirewallResource) ImportState(ctx context.Context, req resource.ImportS
 // part of the firewall's state.
 const findingDeniesCaller = "denies_caller"
 
+// isFirewallRevisionConflict reports a conditional write refused because the
+// firewall had moved past the revision it was made to.
+func isFirewallRevisionConflict(err error) bool {
+	var apiErr *client.APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict && apiErr.Code == "FIREWALL_REVISION_CONFLICT"
+}
+
+// findingRule is how a finding's field names one rule: its index among the
+// firewall's rules in priority order, as the API answers them.
+var findingRule = regexp.MustCompile(`^rules\[(\d+)\]$`)
+
 // warnFirewallFindings shows the API's warnings about the firewall it just
 // stored. The firewall is valid and enforced as written; a finding says it
-// may not do what its author meant.
+// may not do what its author meant. One about a single rule is raised on that
+// rule's key, since `rules[1]` would read as the rule keyed 1.
 func warnFirewallFindings(fw *client.Firewall, diags *diag.Diagnostics) {
-	warnFindings(path.Root("rules"), fw.Name, fw.Findings, diags)
+	for _, f := range fw.Findings {
+		at, about := path.Root("rules"), f.Field
+		if m := findingRule.FindStringSubmatch(f.Field); m != nil {
+			if i, err := strconv.Atoi(m[1]); err == nil && i < len(fw.Rules) {
+				key := strconv.Itoa(fw.Rules[i].Priority)
+				at, about = at.AtMapKey(key), "rule "+key
+			}
+		}
+		title := "Firewall " + fw.Name
+		if about != "" {
+			title += ": " + about
+		}
+		diags.AddAttributeWarning(at, title, f.Message)
+	}
 }
 
 // warnFindings raises each finding as a warning on the attribute that caused
@@ -535,7 +599,6 @@ func firewallMatchAttrTypes() map[string]attr.Type {
 
 func firewallRuleAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
-		"priority":    types.Int64Type,
 		"action":      types.StringType,
 		"description": types.StringType,
 		"enabled":     types.BoolType,
@@ -551,21 +614,26 @@ func firewallFindingAttrTypes() map[string]attr.Type {
 	}
 }
 
-// firewallRulesFromModel reads the rules as the configuration wrote them. The
-// API canonicalises the sources and orders the rules; nothing is rewritten on
+// firewallRulesFromModel reads the rules as the configuration wrote them, in
+// priority order. The API canonicalises the sources; nothing is rewritten on
 // the way out. No rules is an empty list, which is what replaces a firewall's
 // rules with none.
-func firewallRulesFromModel(ctx context.Context, l types.List, diags *diag.Diagnostics) []client.FirewallRuleRequest {
+func firewallRulesFromModel(ctx context.Context, m types.Map, diags *diag.Diagnostics) []client.FirewallRuleRequest {
 	out := []client.FirewallRuleRequest{}
-	if l.IsNull() || l.IsUnknown() {
+	if m.IsNull() || m.IsUnknown() {
 		return out
 	}
-	var rules []FirewallRuleModel
-	diags.Append(l.ElementsAs(ctx, &rules, false)...)
+	var rules map[string]FirewallRuleModel
+	diags.Append(m.ElementsAs(ctx, &rules, false)...)
 	if diags.HasError() {
 		return out
 	}
-	for _, rule := range rules {
+	for key, rule := range rules {
+		priority, err := parseRulePriority(key)
+		if err != nil {
+			diags.AddAttributeError(path.Root("rules").AtMapKey(key), "Invalid rule priority", err.Error())
+			return out
+		}
 		var match FirewallMatchModel
 		diags.Append(rule.Match.As(ctx, &match, basetypes.ObjectAsOptions{})...)
 		if diags.HasError() {
@@ -579,62 +647,32 @@ func firewallRulesFromModel(ctx context.Context, l types.List, diags *diag.Diagn
 		}
 		enabled := rule.Enabled.ValueBool()
 		out = append(out, client.FirewallRuleRequest{
-			Priority:    int(rule.Priority.ValueInt64()),
+			Priority:    priority,
 			Action:      rule.Action.ValueString(),
 			Description: rule.Description.ValueString(),
 			Enabled:     &enabled,
 			Match:       client.FirewallMatch{Sources: sources},
 		})
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Priority < out[j].Priority })
 	return out
 }
 
-// firewallRulesToList writes the API's rules in the order the model already
-// holds them. The API answers in priority order and the configuration may be
-// written in any order, so a rule keeps the position its priority had; one the
-// model has never seen follows, in priority order. Sources are written the way
-// the API spells them: cidrType keeps the configuration's spelling of the same
-// range.
-func firewallRulesToList(prior types.List, rules []client.FirewallRule, diags *diag.Diagnostics) types.List {
+// firewallRulesToMap writes the API's rules keyed by priority. Sources are
+// written the way the API spells them: cidrType keeps the configuration's
+// spelling of the same range.
+func firewallRulesToMap(prior types.Map, rules []client.FirewallRule, diags *diag.Diagnostics) types.Map {
 	ruleType := types.ObjectType{AttrTypes: firewallRuleAttrTypes()}
 	if len(rules) == 0 {
-		// No rules is written by leaving the attribute out or as `[]`; the one
+		// No rules is written by leaving the attribute out or as `{}`; the one
 		// the configuration chose is kept.
 		if !prior.IsNull() && !prior.IsUnknown() && len(prior.Elements()) == 0 {
 			return prior
 		}
-		return types.ListNull(ruleType)
+		return types.MapNull(ruleType)
 	}
-
-	byPriority := make(map[int64]client.FirewallRule, len(rules))
+	elems := make(map[string]attr.Value, len(rules))
 	for _, rule := range rules {
-		byPriority[int64(rule.Priority)] = rule
-	}
-	ordered := make([]client.FirewallRule, 0, len(rules))
-	if !prior.IsNull() && !prior.IsUnknown() {
-		for _, elem := range prior.Elements() {
-			obj, ok := elem.(types.Object)
-			if !ok {
-				continue
-			}
-			p, ok := obj.Attributes()["priority"].(types.Int64)
-			if !ok || p.IsNull() || p.IsUnknown() {
-				continue
-			}
-			if rule, found := byPriority[p.ValueInt64()]; found {
-				ordered = append(ordered, rule)
-				delete(byPriority, p.ValueInt64())
-			}
-		}
-	}
-	for _, rule := range rules {
-		if _, left := byPriority[int64(rule.Priority)]; left {
-			ordered = append(ordered, rule)
-		}
-	}
-
-	elems := make([]attr.Value, 0, len(ordered))
-	for _, rule := range ordered {
 		sources := make([]attr.Value, 0, len(rule.Match.Sources))
 		for _, s := range rule.Match.Sources {
 			sources = append(sources, newCIDRValue(s))
@@ -644,18 +682,83 @@ func firewallRulesToList(prior types.List, rules []client.FirewallRule, diags *d
 		match, d := types.ObjectValue(firewallMatchAttrTypes(), map[string]attr.Value{"sources": set})
 		diags.Append(d...)
 		obj, d := types.ObjectValue(firewallRuleAttrTypes(), map[string]attr.Value{
-			"priority":    types.Int64Value(int64(rule.Priority)),
 			"action":      types.StringValue(rule.Action),
 			"description": types.StringValue(rule.Description),
 			"enabled":     types.BoolValue(rule.Enabled),
 			"match":       match,
 		})
 		diags.Append(d...)
-		elems = append(elems, obj)
+		elems[strconv.Itoa(rule.Priority)] = obj
 	}
-	list, d := types.ListValue(ruleType, elems)
+	m, d := types.MapValue(ruleType, elems)
 	diags.Append(d...)
-	return list
+	return m
+}
+
+// UpgradeState moves a state written against schema version 0, where `rules`
+// was a list with each rule's priority inside it, to the map keyed by
+// priority. It is mechanical and reads nothing from the API: the refresh that
+// follows does that.
+func (r *FirewallResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
+	return map[int64]resource.StateUpgrader{
+		0: {StateUpgrader: upgradeFirewallStateV0},
+	}
+}
+
+func upgradeFirewallStateV0(_ context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(req.RawState.JSON, &raw); err != nil {
+		resp.Diagnostics.AddError("Error reading prior firewall state", err.Error())
+		return
+	}
+	if err := upgradeFirewallRulesV0(raw); err != nil {
+		resp.Diagnostics.AddError("Error upgrading prior firewall state", err.Error())
+		return
+	}
+	out, err := json.Marshal(raw)
+	if err != nil {
+		resp.Diagnostics.AddError("Error writing upgraded firewall state", err.Error())
+		return
+	}
+	resp.DynamicValue = &tfprotov6.DynamicValue{JSON: out}
+}
+
+// upgradeFirewallRulesV0 rewrites version 0's `rules`, a list of rules each
+// carrying `priority`, as a map from that priority to the rule without it.
+// Null stays null and an empty list becomes an empty map, which is how the
+// configuration that wrote `[]` now spells it.
+func upgradeFirewallRulesV0(raw map[string]json.RawMessage) error {
+	prior, ok := raw["rules"]
+	if !ok || string(prior) == "null" {
+		return nil
+	}
+	var rules []map[string]json.RawMessage
+	if err := json.Unmarshal(prior, &rules); err != nil {
+		return fmt.Errorf("rules: %w", err)
+	}
+	keyed := make(map[string]map[string]json.RawMessage, len(rules))
+	for i, rule := range rules {
+		var priority json.Number
+		if err := json.Unmarshal(rule["priority"], &priority); err != nil {
+			return fmt.Errorf("rules[%d].priority: %w", i, err)
+		}
+		n, err := strconv.Atoi(priority.String())
+		if err != nil {
+			return fmt.Errorf("rules[%d].priority is %s, not a whole number", i, priority)
+		}
+		key := strconv.Itoa(n)
+		if _, taken := keyed[key]; taken {
+			return fmt.Errorf("rules[%d]: priority %d is held by another rule", i, n)
+		}
+		delete(rule, "priority")
+		keyed[key] = rule
+	}
+	out, err := json.Marshal(keyed)
+	if err != nil {
+		return err
+	}
+	raw["rules"] = out
+	return nil
 }
 
 // setModelFromFirewall copies what the API reports.
@@ -665,7 +768,7 @@ func setModelFromFirewall(m *FirewallResourceModel, fw *client.Firewall, diags *
 	m.Name = types.StringValue(fw.Name)
 	m.Description = types.StringValue(fw.Description)
 	m.DefaultAction = types.StringValue(fw.DefaultAction)
-	m.Rules = firewallRulesToList(m.Rules, fw.Rules, diags)
+	m.Rules = firewallRulesToMap(m.Rules, fw.Rules, diags)
 	m.Revision = types.Int64Value(int64(fw.Revision))
 
 	findingType := types.ObjectType{AttrTypes: firewallFindingAttrTypes()}

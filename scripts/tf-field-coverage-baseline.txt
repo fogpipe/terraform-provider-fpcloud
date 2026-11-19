@@ -17,6 +17,11 @@ IAMBinding.member_type
 # resource in the scope, not the API's type-and-id pair.
 IAMBinding.resource_id
 IAMBinding.resource_type
+# A firewall rule's priority is its key in `rules = { 100 = {...} }`, not an
+# attribute inside it: the key is what a plan pairs rules by, so an insert
+# plans one rule rather than every rule after it, and a second place to write
+# the priority could disagree with the key.
+Firewall.rules.priority
 
 # --- belongs to another resource ----------------------------------------
 # A domain is `fpcloud_domain`, and a domain attached to a bucket is that

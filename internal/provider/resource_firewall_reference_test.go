@@ -33,9 +33,9 @@ func TestFirewall_ProjectByName(t *testing.T) {
 resource "fpcloud_firewall" "office" {
   project = %q
   name    = "office"
-  rules = [
-    { priority = 100, action = "deny", match = { sources = ["192.0.2.0/24"] } },
-  ]
+  rules = {
+    100 = { action = "deny", match = { sources = ["192.0.2.0/24"] } }
+  }
 }`, project)
 	}
 	name := "fpcloud_firewall.office"

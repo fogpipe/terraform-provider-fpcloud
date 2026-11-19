@@ -62,13 +62,61 @@ The rules in the configuration are the whole list. An apply writes them over
 whatever the firewall holds, including a rule somebody added with the CLI or
 in the console since the last apply: the plan shows that rule being removed.
 
+An apply only writes over what its plan showed. Every apply writes the whole
+firewall in one request, on condition that it is still at the `revision` the
+plan read. When somebody changes it between the plan and the apply, the apply
+fails with "Firewall changed since the plan" and nothing is written; a new plan
+shows their change, and applying that plan is what replaces it.
+
+## Rules are keyed by priority
+
+`rules` is a map from a rule's priority to the rule. The key is the rule's
+identifier and its place in the evaluation order, so a plan names each rule by
+it:
+
+- adding a rule between two others, such as `150` between `100` and `200`,
+  plans that one rule being added and touches no other;
+- changing a rule plans a change under its key alone;
+- moving a rule to another priority plans the old key removed and the new one
+  added, and both happen in the same write, so the rule is never absent.
+
+A key is written as a plain number from 1 to 65535, with no sign, space or
+leading zero: `0100` and `+100` are refused, so one priority has one spelling.
+Leave gaps between priorities so a rule can be added between two others later.
+
 ## Rule order and spelling
 
-Rules may be written in any order: `priority` decides the order they are
-evaluated in. The API keeps every source as a masked CIDR, so `10.0.0.5` is
-stored as `10.0.0.5/32` and `10.1.2.3/8` as `10.0.0.0/8`. Either spelling in the
-configuration is the same source and plans no change. An imported firewall is
-read the way the API spells it.
+Rules may be written in any order: the key decides the order they are
+evaluated in, and reordering them in the configuration plans no change. The API
+keeps every source as a masked CIDR, so `10.0.0.5` is stored as `10.0.0.5/32`
+and `10.1.2.3/8` as `10.0.0.0/8`. Either spelling in the configuration is the
+same source and plans no change. An imported firewall is read the way the API
+spells it, and plans no change against a configuration that holds the same
+rules in any order.
+
+## Upgrading from a list of rules
+
+Earlier versions of this provider took `rules` as a list, with `priority`
+inside each rule. Rewrite each rule under its priority and drop the
+`priority` attribute:
+
+```terraform
+# Before
+rules = [
+  { priority = 100, action = "allow", match = { sources = ["198.51.100.0/24"] } },
+  { priority = 200, action = "deny", match = { sources = ["192.0.2.0/24"] } },
+]
+
+# After
+rules = {
+  100 = { action = "allow", match = { sources = ["198.51.100.0/24"] } }
+  200 = { action = "deny", match = { sources = ["192.0.2.0/24"] } }
+}
+```
+
+State written by an earlier version is converted on the first plan, with no
+request to the API beyond the usual refresh, and the rewritten configuration
+plans no change against it.
 
 {{ .SchemaMarkdown | trimspace }}
 

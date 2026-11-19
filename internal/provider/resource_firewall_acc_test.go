@@ -63,28 +63,25 @@ func TestAccFirewallResource(t *testing.T) {
 				Config: testAccFirewallConfig(proj, name, `
   description    = "acceptance"
   default_action = "deny"
-  rules = [
-    {
-      priority = 200
-      action   = "allow"
-      match    = { sources = ["2001:DB8::/32", "192.0.2.77/24", "198.51.100.5"] }
-    },
-    {
-      priority    = 100
+  rules = {
+    200 = {
+      action = "allow"
+      match  = { sources = ["2001:DB8::/32", "192.0.2.77/24", "198.51.100.5"] }
+    }
+    100 = {
       action      = "deny"
       description = "one address inside the range"
       match       = { sources = ["192.0.2.13"] }
-    },
-  ]`),
+    }
+  }`),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("fpcloud_firewall.test", "id"),
 					resource.TestCheckResourceAttr("fpcloud_firewall.test", "revision", "1"),
 					resource.TestCheckResourceAttr("fpcloud_firewall.test", "default_action", "deny"),
-					resource.TestCheckResourceAttr("fpcloud_firewall.test", "rules.#", "2"),
-					resource.TestCheckResourceAttr("fpcloud_firewall.test", "rules.0.priority", "200"),
-					resource.TestCheckResourceAttr("fpcloud_firewall.test", "rules.0.enabled", "true"),
-					resource.TestCheckTypeSetElemAttr("fpcloud_firewall.test", "rules.0.match.sources.*", "198.51.100.5"),
-					resource.TestCheckResourceAttr("fpcloud_firewall.test", "rules.1.priority", "100"),
+					resource.TestCheckResourceAttr("fpcloud_firewall.test", "rules.%", "2"),
+					resource.TestCheckResourceAttr("fpcloud_firewall.test", "rules.200.enabled", "true"),
+					resource.TestCheckTypeSetElemAttr("fpcloud_firewall.test", "rules.200.match.sources.*", "198.51.100.5"),
+					resource.TestCheckResourceAttr("fpcloud_firewall.test", "rules.100.action", "deny"),
 				),
 			},
 			{
@@ -93,25 +90,22 @@ func TestAccFirewallResource(t *testing.T) {
 				Config: testAccFirewallConfig(proj, name, `
   description    = "acceptance, edited"
   default_action = "deny"
-  rules = [
-    {
-      priority = 100
-      action   = "allow"
-      match    = { sources = ["192.0.2.0/24", "2001:db8::/32"] }
-    },
-    {
-      priority = 300
-      action   = "allow"
-      enabled  = false
-      match    = { sources = ["203.0.113.0/24"] }
-    },
-  ]`),
+  rules = {
+    100 = {
+      action = "allow"
+      match  = { sources = ["192.0.2.0/24", "2001:db8::/32"] }
+    }
+    300 = {
+      action  = "allow"
+      enabled = false
+      match   = { sources = ["203.0.113.0/24"] }
+    }
+  }`),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("fpcloud_firewall.test", "revision", "2"),
 					resource.TestCheckResourceAttr("fpcloud_firewall.test", "description", "acceptance, edited"),
-					resource.TestCheckResourceAttr("fpcloud_firewall.test", "rules.#", "2"),
-					resource.TestCheckResourceAttr("fpcloud_firewall.test", "rules.1.priority", "300"),
-					resource.TestCheckResourceAttr("fpcloud_firewall.test", "rules.1.enabled", "false"),
+					resource.TestCheckResourceAttr("fpcloud_firewall.test", "rules.%", "2"),
+					resource.TestCheckResourceAttr("fpcloud_firewall.test", "rules.300.enabled", "false"),
 				),
 			},
 			{
@@ -150,9 +144,9 @@ resource "fpcloud_project" "scaffold" {
 resource "fpcloud_firewall" "test" {
   project = fpcloud_project.scaffold.id
   name    = %[3]q
-  rules = [
-    { priority = 100, action = "deny", match = { sources = [%[4]q] } },
-  ]
+  rules = {
+    100 = { action = "deny", match = { sources = [%[4]q] } }
+  }
 }
 
 resource "fpcloud_app" "scaffold" {

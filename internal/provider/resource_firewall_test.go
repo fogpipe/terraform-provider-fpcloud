@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -19,6 +23,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 
 	"github.com/fogpipe/terraform-provider-fpcloud/internal/provider"
@@ -83,13 +88,16 @@ func firewallSchema(t *testing.T) schema.Schema {
 	return resp.Schema
 }
 
-// The shape the documentation promises: rules are a list written inline,
-// identified by priority, with sources a set, the name replaces the firewall,
-// and the project is a reference whose id decides whether it is replaced.
+// The shape the documentation promises: rules are a map written inline, keyed
+// by priority, with sources a set, the name replaces the firewall, and the
+// project is a reference whose id decides whether it is replaced.
 func TestFirewallSchema(t *testing.T) {
 	sch := firewallSchema(t)
 	if diags := sch.ValidateImplementation(context.Background()); diags.HasError() {
 		t.Fatalf("schema is invalid: %v", diags)
+	}
+	if sch.Version != 1 {
+		t.Errorf("schema version is %d; the map of rules is version 1, upgraded from the list of version 0", sch.Version)
 	}
 
 	if a := sch.Attributes["name"].(schema.StringAttribute); !a.Required || len(a.PlanModifiers) == 0 {
@@ -104,15 +112,18 @@ func TestFirewallSchema(t *testing.T) {
 		}
 	}
 
-	rules, ok := sch.Attributes["rules"].(schema.ListNestedAttribute)
+	rules, ok := sch.Attributes["rules"].(schema.MapNestedAttribute)
 	if !ok {
-		t.Fatalf("rules is %T, want a nested list", sch.Attributes["rules"])
+		t.Fatalf("rules is %T, want a nested map keyed by priority", sch.Attributes["rules"])
 	}
 	if !rules.Optional || rules.Computed {
-		t.Errorf("rules: want optional and not computed, so the configuration's list is the whole list")
+		t.Errorf("rules: want optional and not computed, so the configuration's rules are all the rules")
 	}
 	nested := rules.NestedObject.Attributes
-	for _, name := range []string{"priority", "action", "match"} {
+	if _, ok := nested["priority"]; ok {
+		t.Errorf("rules.priority: the priority is the key, and a second place to write it could disagree with it")
+	}
+	for _, name := range []string{"action", "match"} {
 		if !nested[name].IsRequired() {
 			t.Errorf("rules.%s: want required", name)
 		}
@@ -139,30 +150,29 @@ func TestFirewallConfigIsValidatedAtPlan(t *testing.T) {
 	ctx := context.Background()
 	sch := firewallSchema(t)
 	typ := sch.Type().TerraformType(ctx).(tftypes.Object)
-	ruleType := typ.AttributeTypes["rules"].(tftypes.List).ElementType.(tftypes.Object)
+	ruleType := typ.AttributeTypes["rules"].(tftypes.Map).ElementType.(tftypes.Object)
 	matchType := ruleType.AttributeTypes["match"].(tftypes.Object)
 
 	type rule struct {
-		priority int
-		action   string
-		sources  []string
+		key     string
+		action  string
+		sources []string
 	}
 	validate := func(defaultAction string, rules ...rule) []string {
-		elems := []tftypes.Value{}
+		elems := map[string]tftypes.Value{}
 		for _, r := range rules {
 			sources := []tftypes.Value{}
 			for _, s := range r.sources {
 				sources = append(sources, tftypes.NewValue(tftypes.String, s))
 			}
-			elems = append(elems, tftypes.NewValue(ruleType, map[string]tftypes.Value{
-				"priority":    tftypes.NewValue(tftypes.Number, r.priority),
+			elems[r.key] = tftypes.NewValue(ruleType, map[string]tftypes.Value{
 				"action":      tftypes.NewValue(tftypes.String, r.action),
 				"description": tftypes.NewValue(tftypes.String, nil),
 				"enabled":     tftypes.NewValue(tftypes.Bool, nil),
 				"match": tftypes.NewValue(matchType, map[string]tftypes.Value{
 					"sources": tftypes.NewValue(matchType.AttributeTypes["sources"], sources),
 				}),
-			}))
+			})
 		}
 		attrs := map[string]tftypes.Value{}
 		for name, at := range typ.AttributeTypes {
@@ -190,14 +200,24 @@ func TestFirewallConfigIsValidatedAtPlan(t *testing.T) {
 		rules         []rule
 		want          []string
 	}{
-		{"an allowlist", "deny", []rule{{100, "allow", []string{"10.0.0.5", "2001:db8::/32"}}, {200, "allow", []string{"192.0.2.0/24"}}}, nil},
+		{"an allowlist", "deny", []rule{{"100", "allow", []string{"10.0.0.5", "2001:db8::/32"}}, {"200", "allow", []string{"192.0.2.0/24"}}}, nil},
+		{"the lowest and the highest priority", "allow", []rule{{"1", "deny", []string{"10.0.0.5"}}, {"65535", "deny", []string{"10.0.0.6"}}}, nil},
 		{"a default action that is not one", "drop", nil, []string{"Invalid default action"}},
-		{"an action that is not one", "allow", []rule{{100, "block", []string{"10.0.0.5"}}}, []string{"Invalid rule action"}},
-		{"a priority out of range", "allow", []rule{{0, "deny", []string{"10.0.0.5"}}}, []string{"Invalid rule priority"}},
-		{"a priority taken twice", "allow", []rule{{100, "deny", []string{"10.0.0.5"}}, {100, "deny", []string{"10.0.0.6"}}}, []string{"Duplicate rule priority"}},
-		{"a source that is no range", "allow", []rule{{100, "deny", []string{"office.example.com"}}}, []string{"Invalid source"}},
-		{"one range under two spellings", "allow", []rule{{100, "deny", []string{"10.0.0.5", "10.0.0.5/32"}}}, []string{"Duplicate source"}},
-		{"a rule with no source", "allow", []rule{{100, "deny", nil}}, []string{"A rule names at least one source"}},
+		{"an action that is not one", "allow", []rule{{"100", "block", []string{"10.0.0.5"}}}, []string{"Invalid rule action"}},
+		{"a source that is no range", "allow", []rule{{"100", "deny", []string{"office.example.com"}}}, []string{"Invalid source"}},
+		{"one range under two spellings", "allow", []rule{{"100", "deny", []string{"10.0.0.5", "10.0.0.5/32"}}}, []string{"Duplicate source"}},
+		{"a rule with no source", "allow", []rule{{"100", "deny", nil}}, []string{"A rule names at least one source"}},
+	}
+	// A key is a priority in its one spelling: anything else is refused,
+	// whether or not it could be read as a number, since two spellings of one
+	// priority would be two keys for one rule.
+	for _, key := range []string{"0100", "+100", "-100", " 100", "100 ", "1e2", "100.0", "1.5", "office", "", "0", "65536", "99999999999999999999"} {
+		cases = append(cases, struct {
+			name          string
+			defaultAction string
+			rules         []rule
+			want          []string
+		}{fmt.Sprintf("the key %q", key), "allow", []rule{{key, "deny", []string{"10.0.0.5"}}}, []string{"Invalid rule priority"}})
 	}
 	for _, tc := range cases {
 		got := validate(tc.defaultAction, tc.rules...)
@@ -217,8 +237,11 @@ type fakeFirewallAPI struct {
 	fw   *client.Firewall
 	puts int
 	// conditional counts the updates that named a revision to be written on
-	// condition of, which a configuration never does.
-	conditional int
+	// condition of, and ifRevision is the revision the last one named.
+	conditional, ifRevision int
+	// changedBeforePut is an edit someone else makes after the plan and before
+	// its apply's write arrives: the next update finds it already stored.
+	changedBeforePut func(fw *client.Firewall)
 	// deniesCaller makes every write that changes what an attached firewall
 	// enforces, and every attach, answer that it denies its caller.
 	deniesCaller bool
@@ -368,8 +391,21 @@ func (f *fakeFirewallAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var req client.UpdateFirewallRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		f.puts++
+		if f.changedBeforePut != nil {
+			f.changedBeforePut(f.fw)
+			f.fw.Revision++
+			f.changedBeforePut = nil
+		}
 		if req.IfRevision != 0 {
 			f.conditional++
+			f.ifRevision = req.IfRevision
+			if req.IfRevision != f.fw.Revision {
+				refuse(http.StatusConflict, "FIREWALL_REVISION_CONFLICT", fmt.Sprintf(
+					"firewall %q has changed since it was read: it is at revision %d, and this change was made to revision %d. "+
+						"Nothing was stored. Look at the firewall as it is now and make the change again",
+					f.fw.Name, f.fw.Revision, req.IfRevision))
+				return
+			}
 		}
 		rules := f.canonical(req.Rules)
 		before, _ := json.Marshal([]any{f.fw.DefaultAction, f.fw.Rules})
@@ -504,19 +540,17 @@ resource "fpcloud_firewall" "office" {
   project        = "proj-1"
   name           = "office"
   default_action = "deny"
-  rules = [
-    {
-      priority = 200
-      action   = "allow"
-      match    = { sources = ["2001:DB8::/32", "192.0.2.77/24", "10.0.0.5"] }
-    },
-    {
-      priority    = 100
+  rules = {
+    200 = {
+      action = "allow"
+      match  = { sources = ["2001:DB8::/32", "192.0.2.77/24", "10.0.0.5"] }
+    }
+    100 = {
       action      = "deny"
       description = "one address inside the office range"
       match       = { sources = ["192.0.2.13"] }
-    },
-  ]
+    }
+  }
 }`
 	// The same two rules, the first one widened, with one added between them.
 	edited := `
@@ -525,38 +559,34 @@ resource "fpcloud_firewall" "office" {
   name           = "office"
   description    = "the office and the VPN"
   default_action = "deny"
-  rules = [
-    {
-      priority = 200
-      action   = "allow"
-      match    = { sources = ["2001:DB8::/32", "192.0.2.77/24", "10.0.0.5", "198.51.100.9"] }
-    },
-    {
-      priority = 150
-      action   = "allow"
-      enabled  = false
-      match    = { sources = ["203.0.113.0/24"] }
-    },
-    {
-      priority    = 100
+  rules = {
+    200 = {
+      action = "allow"
+      match  = { sources = ["2001:DB8::/32", "192.0.2.77/24", "10.0.0.5", "198.51.100.9"] }
+    }
+    150 = {
+      action  = "allow"
+      enabled = false
+      match   = { sources = ["203.0.113.0/24"] }
+    }
+    100 = {
       action      = "deny"
       description = "one address inside the office range"
       match       = { sources = ["192.0.2.13"] }
-    },
-  ]
+    }
+  }
 }`
 	canonical := `
 resource "fpcloud_firewall" "office" {
   project        = "proj-1"
   name           = "office"
   default_action = "deny"
-  rules = [
-    {
-      priority = 100
-      action   = "allow"
-      match    = { sources = ["10.0.0.5/32"] }
-    },
-  ]
+  rules = {
+    100 = {
+      action = "allow"
+      match  = { sources = ["10.0.0.5/32"] }
+    }
+  }
 }`
 	empty := `
 resource "fpcloud_firewall" "office" {
@@ -574,17 +604,16 @@ resource "fpcloud_firewall" "office" {
 					resource.TestCheckResourceAttr(name, "id", "fw-1"),
 					resource.TestCheckResourceAttr(name, "revision", "1"),
 					resource.TestCheckResourceAttr(name, "description", ""),
-					// The configuration's order and its spellings are what state holds.
-					resource.TestCheckResourceAttr(name, "rules.#", "2"),
-					resource.TestCheckResourceAttr(name, "rules.0.priority", "200"),
-					resource.TestCheckResourceAttr(name, "rules.0.enabled", "true"),
-					resource.TestCheckResourceAttr(name, "rules.0.description", ""),
-					resource.TestCheckResourceAttr(name, "rules.0.match.sources.#", "3"),
-					resource.TestCheckTypeSetElemAttr(name, "rules.0.match.sources.*", "10.0.0.5"),
-					resource.TestCheckTypeSetElemAttr(name, "rules.0.match.sources.*", "192.0.2.77/24"),
-					resource.TestCheckTypeSetElemAttr(name, "rules.0.match.sources.*", "2001:DB8::/32"),
-					resource.TestCheckResourceAttr(name, "rules.1.priority", "100"),
-					resource.TestCheckTypeSetElemAttr(name, "rules.1.match.sources.*", "192.0.2.13"),
+					// The configuration's spellings are what state holds.
+					resource.TestCheckResourceAttr(name, "rules.%", "2"),
+					resource.TestCheckResourceAttr(name, "rules.200.enabled", "true"),
+					resource.TestCheckResourceAttr(name, "rules.200.description", ""),
+					resource.TestCheckResourceAttr(name, "rules.200.match.sources.#", "3"),
+					resource.TestCheckTypeSetElemAttr(name, "rules.200.match.sources.*", "10.0.0.5"),
+					resource.TestCheckTypeSetElemAttr(name, "rules.200.match.sources.*", "192.0.2.77/24"),
+					resource.TestCheckTypeSetElemAttr(name, "rules.200.match.sources.*", "2001:DB8::/32"),
+					resource.TestCheckResourceAttr(name, "rules.100.action", "deny"),
+					resource.TestCheckTypeSetElemAttr(name, "rules.100.match.sources.*", "192.0.2.13"),
 					// The API holds the canonical form, in priority order.
 					func(*terraform.State) error {
 						api.mu.Lock()
@@ -604,19 +633,18 @@ resource "fpcloud_firewall" "office" {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(name, "revision", "2"),
 					resource.TestCheckResourceAttr(name, "description", "the office and the VPN"),
-					resource.TestCheckResourceAttr(name, "rules.#", "3"),
-					resource.TestCheckResourceAttr(name, "rules.1.priority", "150"),
-					resource.TestCheckResourceAttr(name, "rules.1.enabled", "false"),
-					resource.TestCheckResourceAttr(name, "rules.0.match.sources.#", "4"),
-					resource.TestCheckTypeSetElemAttr(name, "rules.0.match.sources.*", "10.0.0.5"),
-					resource.TestCheckTypeSetElemAttr(name, "rules.0.match.sources.*", "198.51.100.9"),
+					resource.TestCheckResourceAttr(name, "rules.%", "3"),
+					resource.TestCheckResourceAttr(name, "rules.150.enabled", "false"),
+					resource.TestCheckResourceAttr(name, "rules.200.match.sources.#", "4"),
+					resource.TestCheckTypeSetElemAttr(name, "rules.200.match.sources.*", "10.0.0.5"),
+					resource.TestCheckTypeSetElemAttr(name, "rules.200.match.sources.*", "198.51.100.9"),
 				),
 			},
 			{
 				Config: canonical,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(name, "revision", "3"),
-					resource.TestCheckResourceAttr(name, "rules.#", "1"),
+					resource.TestCheckResourceAttr(name, "rules.%", "1"),
 				),
 			},
 			{
@@ -633,12 +661,12 @@ resource "fpcloud_firewall" "office" {
 				ImportStateVerify: true,
 			},
 			{
-				// Leaving the rules out is no rules: the list is the
+				// Leaving the rules out is no rules: the rules are the
 				// configuration's, never whatever the API still held.
 				Config: empty,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(name, "default_action", "allow"),
-					resource.TestCheckNoResourceAttr(name, "rules.#"),
+					resource.TestCheckNoResourceAttr(name, "rules.%"),
 					func(*terraform.State) error {
 						api.mu.Lock()
 						defer api.mu.Unlock()
@@ -653,18 +681,381 @@ resource "fpcloud_firewall" "office" {
 	})
 }
 
+// ruleChanges is what a plan does to the rules of one resource, read from
+// before and after the way the plan renderer pairs them: a map by key and a
+// list by position. It is written for both shapes so that the same assertion
+// can be run against the list `rules` once was, which is the positive control
+// for the map.
+type ruleChanges struct{ added, removed, changed []string }
+
+func planRuleChanges(before, after any) ruleChanges {
+	elems := func(v any) map[string]any {
+		out := map[string]any{}
+		switch rules := v.(type) {
+		case map[string]any:
+			for k, r := range rules {
+				out[k] = r
+			}
+		case []any:
+			for i, r := range rules {
+				out[fmt.Sprint(i)] = r
+			}
+		}
+		return out
+	}
+	b, a := elems(before), elems(after)
+	var c ruleChanges
+	for k, r := range a {
+		prior, ok := b[k]
+		switch {
+		case !ok:
+			c.added = append(c.added, k)
+		case !reflect.DeepEqual(prior, r):
+			c.changed = append(c.changed, k)
+		}
+	}
+	for k := range b {
+		if _, ok := a[k]; !ok {
+			c.removed = append(c.removed, k)
+		}
+	}
+	sort.Strings(c.added)
+	sort.Strings(c.removed)
+	sort.Strings(c.changed)
+	return c
+}
+
+// expectRuleChanges asserts that the plan updates the resource in place and
+// that its rules change in exactly the keys named and no other.
+type expectRuleChanges struct {
+	resource string
+	want     ruleChanges
+}
+
+func (e expectRuleChanges) CheckPlan(_ context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
+	for _, rc := range req.Plan.ResourceChanges {
+		if rc.Address != e.resource {
+			continue
+		}
+		if !rc.Change.Actions.Update() {
+			resp.Error = fmt.Errorf("%s: planned %v, want an update in place", e.resource, rc.Change.Actions)
+			return
+		}
+		before, _ := rc.Change.Before.(map[string]any)
+		after, _ := rc.Change.After.(map[string]any)
+		got := planRuleChanges(before["rules"], after["rules"])
+		if fmt.Sprint(got) != fmt.Sprint(e.want) {
+			resp.Error = fmt.Errorf("%s: the plan changes rules as added %v, removed %v, changed %v; want added %v, removed %v, changed %v",
+				e.resource, got.added, got.removed, got.changed, e.want.added, e.want.removed, e.want.changed)
+		}
+		return
+	}
+	resp.Error = fmt.Errorf("%s is not in the plan", e.resource)
+}
+
+// putsSince counts the whole-firewall writes an apply made: one, whatever
+// the plan changed in the rules, so every apply is one revision and no rule
+// is ever absent between two of them.
+func putsSince(api *fakeFirewallAPI, before *int, want int) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		api.mu.Lock()
+		defer api.mu.Unlock()
+		if got := api.puts - *before; got != want {
+			return fmt.Errorf("the apply made %d update(s), want %d", got, want)
+		}
+		*before = api.puts
+		return nil
+	}
+}
+
+// A rule is identified by its priority, and so is its place in a plan:
+// inserting one between two others plans that rule and nothing else, editing
+// one plans that rule in place, and neither the order the configuration is
+// written in nor an import touches anything. Each apply is one write.
+func TestFirewall_RulesArePlannedByPriority(t *testing.T) {
+	api := startFakeFirewallAPI(t)
+	name := "fpcloud_firewall.office"
+
+	rule := map[string]string{
+		"100": `{ action = "allow", description = "office", match = { sources = ["198.51.100.0/24"] } }`,
+		"150": `{ action = "allow", description = "partner", match = { sources = ["192.0.2.0/24"] } }`,
+		"200": `{ action = "deny", description = "abuser", match = { sources = ["203.0.113.0/24"] } }`,
+		"300": `{ action = "allow", description = "vpn", match = { sources = ["203.0.113.7/32"] } }`,
+		// 200 with a source added.
+		"200+": `{ action = "deny", description = "abuser", match = { sources = ["203.0.113.0/24", "198.18.0.0/15"] } }`,
+	}
+	// config writes the rules named, in the order named, each under its
+	// priority: "200+" is written as 200.
+	config := func(rules ...string) string {
+		var b strings.Builder
+		for _, r := range rules {
+			fmt.Fprintf(&b, "    %s = %s\n", strings.TrimSuffix(r, "+"), rule[r])
+		}
+		return fmt.Sprintf(`
+resource "fpcloud_firewall" "office" {
+  project        = "proj-1"
+  name           = "office"
+  default_action = "deny"
+  rules = {
+%s  }
+}`, b.String())
+	}
+
+	puts := 0
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config("100", "200", "300"),
+				Check:  putsSince(api, &puts, 0),
+			},
+			{
+				// 150 between 100 and 200: one key added, the rules after it
+				// untouched, and one write with every rule in it.
+				Config: config("100", "150", "200", "300"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{expectRuleChanges{name, ruleChanges{added: []string{"150"}}}},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					putsSince(api, &puts, 1),
+					resource.TestCheckResourceAttr(name, "revision", "2"),
+					resource.TestCheckResourceAttr(name, "rules.%", "4"),
+					resource.TestCheckResourceAttr(name, "rules.150.description", "partner"),
+					func(*terraform.State) error {
+						api.mu.Lock()
+						defer api.mu.Unlock()
+						var got []int
+						for _, r := range api.fw.Rules {
+							got = append(got, r.Priority)
+						}
+						if fmt.Sprint(got) != "[100 150 200 300]" {
+							return fmt.Errorf("the API holds rules %v", got)
+						}
+						// Written on condition of the revision the plan read.
+						if api.ifRevision != 1 {
+							return fmt.Errorf("the update was made to revision %d, want 1", api.ifRevision)
+						}
+						return nil
+					},
+				),
+			},
+			{
+				// A source added to 200 is a change to 200 alone.
+				Config: config("100", "150", "200+", "300"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{expectRuleChanges{name, ruleChanges{changed: []string{"200"}}}},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					putsSince(api, &puts, 1),
+					resource.TestCheckResourceAttr(name, "rules.200.match.sources.#", "2"),
+				),
+			},
+			{
+				// The same rules written in another order are the same rules.
+				Config: config("300", "150", "100", "200+"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+				Check: putsSince(api, &puts, 0),
+			},
+			{
+				// Imported through an import block against that configuration,
+				// which is not in the order the API answers in: a no-op.
+				ResourceName:    name,
+				ImportState:     true,
+				ImportStateKind: resource.ImportBlockWithID,
+				ImportStateId:   "proj-1/office",
+				Config:          config("300", "150", "100", "200+"),
+			},
+		},
+	})
+}
+
+// A change made elsewhere after the plan read the firewall is not written
+// over: the apply fails saying so and stores nothing. The next plan shows the
+// change, and applying that plan is what overwrites it.
+func TestFirewall_ChangeAfterThePlanFailsTheApply(t *testing.T) {
+	api := startFakeFirewallAPI(t)
+	name := "fpcloud_firewall.office"
+	config := func(sources string) string {
+		return fmt.Sprintf(`
+resource "fpcloud_firewall" "office" {
+  project = "proj-1"
+  name    = "office"
+  rules = {
+    100 = { action = "deny", match = { sources = [%s] } }
+  }
+}`, sources)
+	}
+	outside := client.FirewallRule{Priority: 50, Action: "allow", Enabled: true,
+		Match: client.FirewallMatch{Sources: []string{"0.0.0.0/0"}}}
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config(`"192.0.2.0/24"`)},
+			{
+				PreConfig: func() {
+					api.mu.Lock()
+					defer api.mu.Unlock()
+					api.changedBeforePut = func(fw *client.Firewall) {
+						fw.Rules = append([]client.FirewallRule{outside}, fw.Rules...)
+					}
+				},
+				Config: config(`"192.0.2.0/24", "198.51.100.0/24"`),
+				ExpectError: regexp.MustCompile(`Firewall changed since the plan(?s:.*)office was changed outside this\s+configuration` +
+					`(?s:.*)at\s+revision\s+1(?s:.*)Nothing\s+was\s+written(?s:.*)Run\s+a\s+new\s+plan` +
+					`(?s:.*)at\s+revision\s+2,\s+and\s+this\s+change\s+was\s+made\s+to\s+revision\s+1`),
+			},
+			{
+				// Nothing of the refused apply was stored, and the change made
+				// elsewhere is still there.
+				PreConfig: func() {
+					api.mu.Lock()
+					defer api.mu.Unlock()
+					if len(api.fw.Rules) != 2 || api.fw.Rules[0].Priority != 50 || len(api.fw.Rules[1].Match.Sources) != 1 {
+						t.Errorf("after the refused apply the API holds %+v", api.fw.Rules)
+					}
+				},
+				// The next plan shows that change being removed, and its apply,
+				// made to the revision it read, is taken.
+				Config: config(`"192.0.2.0/24", "198.51.100.0/24"`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{expectRuleChanges{name, ruleChanges{removed: []string{"50"}, changed: []string{"100"}}}},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(name, "revision", "3"),
+					resource.TestCheckResourceAttr(name, "rules.%", "1"),
+					func(*terraform.State) error {
+						api.mu.Lock()
+						defer api.mu.Unlock()
+						if api.ifRevision != 2 || len(api.fw.Rules) != 1 {
+							return fmt.Errorf("the update was made to revision %d and left %+v", api.ifRevision, api.fw.Rules)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+// A state written by the list `rules` of schema version 0 is upgraded to the
+// map with nothing read from the API but the refresh, and the configuration
+// rewritten as a map plans no change against it.
+func TestFirewall_ListStateUpgradesToMap(t *testing.T) {
+	api := startFakeFirewallAPI(t)
+	dir := t.TempDir()
+	config := `
+resource "fpcloud_firewall" "office" {
+  project        = "proj-1"
+  name           = "office"
+  default_action = "deny"
+  rules = {
+    200 = { action = "allow", match = { sources = ["10.0.0.5", "2001:DB8::/32"] } }
+    100 = { action = "deny", description = "one address", enabled = false, match = { sources = ["192.0.2.13"] } }
+  }
+}`
+	puts := 0
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		WorkingDir:               dir,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				// Write the state back as version 0 held it: a list, the
+				// configuration's order, the priority inside each rule.
+				PreConfig: func() { rewriteFirewallStateAsV0(t, dir) },
+				Config:    config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					putsSince(api, &puts, 0),
+					resource.TestCheckResourceAttr("fpcloud_firewall.office", "rules.100.enabled", "false"),
+					resource.TestCheckTypeSetElemAttr("fpcloud_firewall.office", "rules.200.match.sources.*", "2001:DB8::/32"),
+				),
+			},
+		},
+	})
+}
+
+// rewriteFirewallStateAsV0 turns the firewall in the state file under dir
+// back into what schema version 0 wrote.
+func rewriteFirewallStateAsV0(t *testing.T, dir string) {
+	t.Helper()
+	var file string
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && d.Name() == "terraform.tfstate" {
+			file = p
+		}
+		return nil
+	})
+	if file == "" {
+		t.Fatalf("no state file under %s", dir)
+	}
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state map[string]any
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatal(err)
+	}
+	rewritten := false
+	for _, res := range state["resources"].([]any) {
+		res := res.(map[string]any)
+		if res["type"] != "fpcloud_firewall" {
+			continue
+		}
+		for _, inst := range res["instances"].([]any) {
+			inst := inst.(map[string]any)
+			attrs := inst["attributes"].(map[string]any)
+			rules := attrs["rules"].(map[string]any)
+			keys := make([]string, 0, len(rules))
+			for k := range rules {
+				keys = append(keys, k)
+			}
+			// Highest first, so the list is not in the order a map reads in.
+			sort.Sort(sort.Reverse(sort.StringSlice(keys)))
+			list := []any{}
+			for _, k := range keys {
+				rule := rules[k].(map[string]any)
+				var priority int
+				_, _ = fmt.Sscan(k, &priority)
+				rule["priority"] = priority
+				list = append(list, rule)
+			}
+			attrs["rules"] = list
+			inst["schema_version"] = 0
+			rewritten = true
+		}
+	}
+	if !rewritten {
+		t.Fatal("no firewall in the state file")
+	}
+	state["serial"] = state["serial"].(float64) + 1
+	out, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A rule added outside the configuration is drift the next plan removes, and a
-// rule the configuration holds keeps its place and its spelling through it.
+// rule the configuration holds keeps its spelling through it.
 func TestFirewall_RuleAddedOutsideIsRemoved(t *testing.T) {
 	api := startFakeFirewallAPI(t)
 	config := `
 resource "fpcloud_firewall" "office" {
   project = "proj-1"
   name    = "office"
-  rules = [
-    { priority = 300, action = "deny", match = { sources = ["203.0.113.7"] } },
-    { priority = 200, action = "deny", match = { sources = ["198.51.100.0/24"] } },
-  ]
+  rules = {
+    300 = { action = "deny", match = { sources = ["203.0.113.7"] } }
+    200 = { action = "deny", match = { sources = ["198.51.100.0/24"] } }
+  }
 }`
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
@@ -680,9 +1071,8 @@ resource "fpcloud_firewall" "office" {
 				},
 				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("fpcloud_firewall.office", "rules.#", "2"),
-					resource.TestCheckResourceAttr("fpcloud_firewall.office", "rules.0.priority", "300"),
-					resource.TestCheckTypeSetElemAttr("fpcloud_firewall.office", "rules.0.match.sources.*", "203.0.113.7"),
+					resource.TestCheckResourceAttr("fpcloud_firewall.office", "rules.%", "2"),
+					resource.TestCheckTypeSetElemAttr("fpcloud_firewall.office", "rules.300.match.sources.*", "203.0.113.7"),
 					func(*terraform.State) error {
 						api.mu.Lock()
 						defer api.mu.Unlock()
@@ -715,9 +1105,9 @@ resource "fpcloud_firewall" "office" {
   project        = "proj-1"
   name           = "office"
   default_action = "deny"
-  rules = [
-    { priority = 100, action = "allow", match = { sources = [%q] } },
-  ]
+  rules = {
+    100 = { action = "allow", match = { sources = [%q] } }
+  }
 }`, source)
 	}
 	attached := fmt.Sprintf(fakeFirewallApp, "firewall = fpcloud_firewall.office.id")
@@ -774,8 +1164,8 @@ resource "fpcloud_firewall" "office" {
 					func(*terraform.State) error {
 						api.mu.Lock()
 						defer api.mu.Unlock()
-						if api.puts == 0 || api.conditional != 0 {
-							return fmt.Errorf("%d of %d updates were conditional on a revision; a configuration is written on none", api.conditional, api.puts)
+						if api.puts == 0 || api.conditional != api.puts {
+							return fmt.Errorf("%d of %d updates were conditional on a revision; every one is made to the revision its plan read", api.conditional, api.puts)
 						}
 						return nil
 					},

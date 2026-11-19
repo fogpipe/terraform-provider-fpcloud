@@ -3,43 +3,52 @@
 page_title: "fpcloud_firewall Resource - fpcloud"
 subcategory: ""
 description: |-
-  Manages a firewall: a project's ordered access list on client addresses, enforced at the platform's edge. Rules are evaluated in priority order, lowest first, the first match decides, and a request no rule matches gets default_action. A firewall does nothing until it is attached: set firewall on an fpcloud_app or on an fpcloud_bucket serving a website, and it applies to every host the edge serves for that target, custom domains included. It covers requests arriving through the edge and nothing else: not calls between apps inside the platform, and not outbound traffic. The rules declared here are the whole list: a rule added outside this configuration is removed by the next apply. A rule matches the address the edge sees the connection come from, so behind a CDN or a proxy of your own the rules see that CDN's addresses, never the visitor's.
+  Manages a firewall: a project's ordered access list on client addresses, enforced at the platform's edge. Rules are evaluated in priority order, lowest first, the first match decides, and a request no rule matches gets default_action. A firewall does nothing until it is attached: set firewall on an fpcloud_app or on an fpcloud_bucket serving a website, and it applies to every host the edge serves for that target, custom domains included. It covers requests arriving through the edge and nothing else: not calls between apps inside the platform, and not outbound traffic. The rules declared here are the whole list: a rule added outside this configuration is removed by the next apply. An apply writes the firewall only if it is still at the revision its plan read, so a change made elsewhere after the plan fails the apply rather than being overwritten unseen. A rule matches the address the edge sees the connection come from, so behind a CDN or a proxy of your own the rules see that CDN's addresses, never the visitor's.
 ---
 
 # fpcloud_firewall (Resource)
 
-Manages a firewall: a project's ordered access list on client addresses, enforced at the platform's edge. Rules are evaluated in priority order, lowest first, the first match decides, and a request no rule matches gets `default_action`. A firewall does nothing until it is attached: set `firewall` on an fpcloud_app or on an fpcloud_bucket serving a website, and it applies to every host the edge serves for that target, custom domains included. It covers requests arriving through the edge and nothing else: not calls between apps inside the platform, and not outbound traffic. The rules declared here are the whole list: a rule added outside this configuration is removed by the next apply. A rule matches the address the edge sees the connection come from, so behind a CDN or a proxy of your own the rules see that CDN's addresses, never the visitor's.
+Manages a firewall: a project's ordered access list on client addresses, enforced at the platform's edge. Rules are evaluated in priority order, lowest first, the first match decides, and a request no rule matches gets `default_action`. A firewall does nothing until it is attached: set `firewall` on an fpcloud_app or on an fpcloud_bucket serving a website, and it applies to every host the edge serves for that target, custom domains included. It covers requests arriving through the edge and nothing else: not calls between apps inside the platform, and not outbound traffic. The rules declared here are the whole list: a rule added outside this configuration is removed by the next apply. An apply writes the firewall only if it is still at the revision its plan read, so a change made elsewhere after the plan fails the apply rather than being overwritten unseen. A rule matches the address the edge sees the connection come from, so behind a CDN or a proxy of your own the rules see that CDN's addresses, never the visitor's.
 
 ## Example Usage
 
 ```terraform
-# An allowlist: only the office and the VPN reach the app. Rules are evaluated
-# in priority order, lowest first, and a request no rule matches gets
-# default_action.
+# An allowlist: only the office and the VPN reach the app. Each rule is keyed
+# by its priority; rules are evaluated in priority order, lowest first, and a
+# request no rule matches gets default_action.
 resource "fpcloud_firewall" "office" {
   project        = fpcloud_project.production.id
   name           = "office"
   description    = "The office and the VPN, nobody else"
   default_action = "deny"
 
-  rules = [
-    {
-      priority    = 100
+  rules = {
+    100 = {
       action      = "allow"
       description = "Office"
       match = {
         sources = ["198.51.100.0/24", "2001:db8:100::/48"]
       }
-    },
-    {
-      priority    = 200
+    }
+
+    # Inserted between two existing rules: the gap between priorities is what
+    # makes room for it, and the plan shows this one rule being added.
+    150 = {
+      action      = "allow"
+      description = "Partner office"
+      match = {
+        sources = ["192.0.2.0/24"]
+      }
+    }
+
+    200 = {
       action      = "allow"
       description = "VPN exit"
       match = {
         sources = ["203.0.113.7"] # a bare address is the one-address range
       }
-    },
-  ]
+    }
+  }
 }
 
 # The firewall does nothing until something names it. It then applies to every
@@ -58,15 +67,14 @@ resource "fpcloud_firewall" "blocklist" {
   project = fpcloud_project.production.id
   name    = "blocklist"
 
-  rules = [
-    {
-      priority = 100
-      action   = "deny"
+  rules = {
+    100 = {
+      action = "deny"
       match = {
         sources = ["192.0.2.0/24"]
       }
-    },
-  ]
+    }
+  }
 }
 
 # The same attribute attaches one to a bucket's website.
@@ -126,13 +134,61 @@ The rules in the configuration are the whole list. An apply writes them over
 whatever the firewall holds, including a rule somebody added with the CLI or
 in the console since the last apply: the plan shows that rule being removed.
 
+An apply only writes over what its plan showed. Every apply writes the whole
+firewall in one request, on condition that it is still at the `revision` the
+plan read. When somebody changes it between the plan and the apply, the apply
+fails with "Firewall changed since the plan" and nothing is written; a new plan
+shows their change, and applying that plan is what replaces it.
+
+## Rules are keyed by priority
+
+`rules` is a map from a rule's priority to the rule. The key is the rule's
+identifier and its place in the evaluation order, so a plan names each rule by
+it:
+
+- adding a rule between two others, such as `150` between `100` and `200`,
+  plans that one rule being added and touches no other;
+- changing a rule plans a change under its key alone;
+- moving a rule to another priority plans the old key removed and the new one
+  added, and both happen in the same write, so the rule is never absent.
+
+A key is written as a plain number from 1 to 65535, with no sign, space or
+leading zero: `0100` and `+100` are refused, so one priority has one spelling.
+Leave gaps between priorities so a rule can be added between two others later.
+
 ## Rule order and spelling
 
-Rules may be written in any order: `priority` decides the order they are
-evaluated in. The API keeps every source as a masked CIDR, so `10.0.0.5` is
-stored as `10.0.0.5/32` and `10.1.2.3/8` as `10.0.0.0/8`. Either spelling in the
-configuration is the same source and plans no change. An imported firewall is
-read the way the API spells it.
+Rules may be written in any order: the key decides the order they are
+evaluated in, and reordering them in the configuration plans no change. The API
+keeps every source as a masked CIDR, so `10.0.0.5` is stored as `10.0.0.5/32`
+and `10.1.2.3/8` as `10.0.0.0/8`. Either spelling in the configuration is the
+same source and plans no change. An imported firewall is read the way the API
+spells it, and plans no change against a configuration that holds the same
+rules in any order.
+
+## Upgrading from a list of rules
+
+Earlier versions of this provider took `rules` as a list, with `priority`
+inside each rule. Rewrite each rule under its priority and drop the
+`priority` attribute:
+
+```terraform
+# Before
+rules = [
+  { priority = 100, action = "allow", match = { sources = ["198.51.100.0/24"] } },
+  { priority = 200, action = "deny", match = { sources = ["192.0.2.0/24"] } },
+]
+
+# After
+rules = {
+  100 = { action = "allow", match = { sources = ["198.51.100.0/24"] } }
+  200 = { action = "deny", match = { sources = ["192.0.2.0/24"] } }
+}
+```
+
+State written by an earlier version is converted on the first plan, with no
+request to the API beyond the usual refresh, and the rewritten configuration
+plans no change against it.
 
 <!-- schema generated by tfplugindocs -->
 ## Schema
@@ -146,7 +202,7 @@ read the way the API spells it.
 
 - `default_action` (String) What happens to a request no enabled rule matches: `allow` or `deny`. Defaults to `allow`, so a firewall with no rules changes nothing. `deny` makes the rules an allowlist.
 - `description` (String) What the firewall is for.
-- `rules` (Attributes List) The access rules, all of them. A rule is identified by its priority, and rules are evaluated in priority order whatever order they are written in. At most 50 rules and 500 sources across them. (see [below for nested schema](#nestedatt--rules))
+- `rules` (Attributes Map) The access rules, all of them, keyed by priority: `rules = { 100 = { ... } }`. The key is the rule's identifier and its evaluation order, lowest first: a whole number from 1 to 65535, written without a sign or leading zeros. Rules are evaluated in priority order whatever order they are written in. Leave gaps so a rule can be added between two others later; adding one plans that rule alone. At most 50 rules and 500 sources across them. (see [below for nested schema](#nestedatt--rules))
 
 ### Read-Only
 
@@ -164,7 +220,6 @@ Required:
 
 - `action` (String) `allow` or `deny`.
 - `match` (Attributes) What the rule matches on. (see [below for nested schema](#nestedatt--rules--match))
-- `priority` (Number) Evaluation order, lowest first, between 1 and 65535. Unique within the firewall. Leave gaps so a rule can be added between two others later.
 
 Optional:
 
@@ -186,7 +241,7 @@ Required:
 Read-Only:
 
 - `code` (String) What kind of warning it is.
-- `field` (String) What it is about, as `rules[2]` or `default_action`; empty when it is about the firewall as a whole.
+- `field` (String) What it is about, as the API names it: `rules[2]` is the third rule in priority order, or `default_action`; empty when it is about the firewall as a whole.
 - `message` (String) The warning.
 
 ## Import

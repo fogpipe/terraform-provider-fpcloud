@@ -11,21 +11,32 @@ import (
 // errNotAccessible marks the case where a resource could not be resolved by
 // name because it is not among the resources the current API token is allowed
 // to see. The list endpoints are IAM-scoped to the caller, so a name that is
-// absent from the list — despite create returning 409 Conflict (it exists) —
+// absent from the list, despite create answering that it already exists,
 // means the token lacks access to adopt it. Adoption and import handlers use
 // errors.Is to tell this apart from a transient list failure and emit a precise
 // message.
 var errNotAccessible = errors.New("not found among the resources accessible to the current API token")
 
-// isConflict reports whether err is an API 409 Conflict — the status the
-// control plane returns when a resource of the same name already exists
-// (org/project/app uniqueness, SQLSTATE 23505). Create handlers use it to
-// distinguish "name already taken" from any other create failure so the
-// opt-in adopt_existing path can take over management of the existing resource
-// instead of hard-failing the apply.
-func isConflict(err error) bool {
+// codeAlreadyExists is the code the platform answers a create with when a
+// resource of the same kind and name already exists.
+const codeAlreadyExists = "ALREADY_EXISTS"
+
+// isConflictCode reports whether err is an API 409 Conflict carrying code. A
+// conflict is read by its code, never by its status alone: the platform
+// answers 409 for several refusals (a name another resource holds, a delete
+// still being carried out, a firewall still attached), and each means
+// something different to the caller.
+func isConflictCode(err error, code string) bool {
 	var apiErr *client.APIError
-	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict && apiErr.Code == code
+}
+
+// isAlreadyExists reports a create refused because a resource of the same
+// name already exists, the one conflict the opt-in adopt_existing path may
+// take over instead of failing the apply. Every other 409 names nothing to
+// adopt, and its message is the one to show.
+func isAlreadyExists(err error) bool {
+	return isConflictCode(err, codeAlreadyExists)
 }
 
 // isNotFound reports whether err is an API 404. Import handlers use it to fall
@@ -43,7 +54,7 @@ func isNotFound(err error) bool {
 func adoptErrorDetail(kind, name string, err error) string {
 	if errors.Is(err, errNotAccessible) {
 		return fmt.Sprintf(
-			"%s %q already exists (create returned 409 Conflict) but is not accessible with the current "+
+			"%s %q already exists but is not accessible with the current "+
 				"API token, so it cannot be adopted. Grant the token's identity access (an IAM binding) to "+
 				"the %s, or drop adopt_existing.",
 			kind, name, kind,

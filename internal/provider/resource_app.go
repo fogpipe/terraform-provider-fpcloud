@@ -576,7 +576,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	app, err := r.client.CreateApp(ctx, plan.Project.ValueString(), createReq)
 	if err != nil {
-		if isConflict(err) && plan.AdoptExisting.ValueBool() {
+		if isAlreadyExists(err) && plan.AdoptExisting.ValueBool() {
 			existing, ferr := r.findAppByName(ctx, plan.Project.ValueString(), plan.Name.ValueString())
 			if ferr != nil {
 				resp.Diagnostics.AddError(

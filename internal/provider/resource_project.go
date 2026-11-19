@@ -2,9 +2,7 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -166,7 +164,7 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 		return r.client.CreateProject(ctx, apiReq)
 	})
 	if err != nil {
-		if isConflict(err) && plan.AdoptExisting.ValueBool() {
+		if isAlreadyExists(err) && plan.AdoptExisting.ValueBool() {
 			project, err = r.findProjectByName(ctx, plan.Org.ValueString(), plan.Name.ValueString())
 			if err != nil {
 				resp.Diagnostics.AddError(
@@ -205,7 +203,7 @@ func createWaitingForName[T any](ctx context.Context, code string, create func(c
 	deadline := time.Now().Add(nameFreeWait)
 	for {
 		created, err := create(ctx)
-		if !isTearingDown(err, code) {
+		if !isConflictCode(err, code) {
 			return created, err
 		}
 		if time.Now().After(deadline) {
@@ -217,13 +215,6 @@ func createWaitingForName[T any](ctx context.Context, code string, create func(c
 		case <-time.After(nameFreePoll):
 		}
 	}
-}
-
-// isTearingDown reports a create refused with code, which the platform answers
-// while a deleted resource of the same name is still being torn down.
-func isTearingDown(err error, code string) bool {
-	var apiErr *client.APIError
-	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict && apiErr.Code == code
 }
 
 // findProjectByName resolves a project by name, scoped to org when provided

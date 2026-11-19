@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"regexp"
 	"sort"
 	"strconv"
@@ -457,7 +456,7 @@ func (r *FirewallResource) Update(ctx context.Context, req resource.UpdateReques
 		IfRevision:    int(state.Revision.ValueInt64()),
 	})
 	if err != nil {
-		if isFirewallRevisionConflict(err) {
+		if isConflictCode(err, "FIREWALL_REVISION_CONFLICT") {
 			resp.Diagnostics.AddError("Firewall changed since the plan",
 				fmt.Sprintf("Firewall %s was changed outside this configuration after this plan read it at revision %d, "+
 					"so the plan does not show what this apply would overwrite. Nothing was written. Run a new plan to "+
@@ -498,7 +497,7 @@ func (r *FirewallResource) Delete(ctx context.Context, req resource.DeleteReques
 		}
 		// The API names what the firewall is still attached to; that is the
 		// thing to change, so its message is the one shown.
-		if isConflict(err) {
+		if isConflictCode(err, "FIREWALL_ATTACHED") {
 			resp.Diagnostics.AddError("Firewall is still attached", err.Error())
 			return
 		}
@@ -546,13 +545,6 @@ func (r *FirewallResource) ImportState(ctx context.Context, req resource.ImportS
 // the machine running the apply, so it is a warning on that apply and never
 // part of the firewall's state.
 const findingDeniesCaller = "denies_caller"
-
-// isFirewallRevisionConflict reports a conditional write refused because the
-// firewall had moved past the revision it was made to.
-func isFirewallRevisionConflict(err error) bool {
-	var apiErr *client.APIError
-	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict && apiErr.Code == "FIREWALL_REVISION_CONFLICT"
-}
 
 // findingRule is how a finding's field names one rule: its index among the
 // firewall's rules in priority order, as the API answers them.

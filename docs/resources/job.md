@@ -49,12 +49,12 @@ resource "fpcloud_job" "nightly_cleanup" {
 ### Required
 
 - `name` (String) Job name, unique within the project (DNS-1123 label). Changing it forces a new job.
-- `project` (String) ID or name of the project this job belongs to. Changing it forces a new job.
+- `project` (String) The project, by name or id, this job belongs to. It records the reference as written: another spelling of the same project changes nothing, and only a different project forces a new job.
 - `schedule` (String) Cron schedule, e.g. "*/15 * * * *". Mutable in place.
 
 ### Optional
 
-- `app` (String) Name or ID of the app whose image, config, secrets and identity the job inherits. Changing it forces a new job.
+- `app` (String) The app, by name or id, whose image, config, secrets and identity the job inherits, from the job's project. It records the reference as written: another spelling of the same app changes nothing, and only a different app forces a new job.
 - `args` (List of String) Arguments for a container job.
 - `command` (List of String) Entrypoint override for a container job. A single element containing spaces runs through `sh -c`.
 - `concurrency` (String) What happens when a run is still going at the next fire: `forbid` (the default — skip), `replace` (kill and restart), or `allow` (run in parallel).
@@ -74,7 +74,9 @@ resource "fpcloud_job" "nightly_cleanup" {
 
 ### Read-Only
 
+- `app_id` (String) The id of the app `app` names, null when the job has none. This is what a plan compares: the job is replaced when it changes, never when `app` is merely spelled differently.
 - `id` (String) Job ID.
+- `project_id` (String) The project's id. This is what a plan compares: the job is replaced when it changes, never when `project` is merely spelled differently.
 - `target` (String) Resolved target type: `http` when `http_url` is set, otherwise `container`.
 
 ## Import

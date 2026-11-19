@@ -16,23 +16,22 @@ Manages a Fogpipe service account.
 # A standalone identity in a project: a deployer that is no app. An app's own
 # identity is never declared here; it is read from the app's `service_account`.
 resource "fpcloud_service_account" "deployer" {
-  project_id   = fpcloud_project.production.id
+  project      = fpcloud_project.production.id
   name         = "deployer"
   display_name = "GitHub Actions deployer"
 }
 
 resource "fpcloud_iam_binding" "deployer_editor" {
-  project_id  = fpcloud_project.production.id
-  member_type = "serviceAccount"
-  member_id   = fpcloud_service_account.deployer.email
-  role        = "editor"
+  project = fpcloud_project.production.id
+  member  = "serviceAccount:${fpcloud_service_account.deployer.email}"
+  role    = "editor"
 }
 
 # An organization identity that outlives any one project: the account a
 # Terraform root runs as, which creates and destroys projects of its own.
 resource "fpcloud_service_account" "tofu" {
-  organization_id = fpcloud_org.example.id
-  name            = "tofu"
+  org  = data.fpcloud_org.example.id
+  name = "tofu"
 }
 ```
 
@@ -46,8 +45,8 @@ resource "fpcloud_service_account" "tofu" {
 ### Optional
 
 - `display_name` (String) Human-readable display name. Mutable in place.
-- `organization_id` (String) The organization that holds this service account directly, for a machine identity that outlives any single project — a CI suite that creates and destroys its own projects, or a Terraform root. Requires org administrate. Exactly one of `project_id` and `organization_id` must be set.
-- `project_id` (String) The project this service account belongs to. Exactly one of `project_id` and `organization_id` must be set.
+- `org` (String) The organization, by name or id, that holds this service account directly, for a machine identity that outlives any single project: a CI suite that creates and destroys its own projects, or a Terraform root. Requires org administrate. Exactly one of `project` and `org` must be set. It records the reference as written: another spelling of the same organization changes nothing, and only a different organization forces a new service account.
+- `project` (String) The project, by name or id, this service account belongs to. Exactly one of `project` and `org` must be set. It records the reference as written: another spelling of the same project changes nothing, and only a different project forces a new service account.
 
 ### Read-Only
 
@@ -55,6 +54,8 @@ resource "fpcloud_service_account" "tofu" {
 - `created_at` (String) Timestamp when the service account was created.
 - `email` (String) Auto-generated email address for this service account.
 - `id` (String) Service account ID.
+- `organization_id` (String) The id of the organization `org` names, null for a project's account. This is what a plan compares: the account is replaced when it changes, never when `org` is merely spelled differently.
+- `project_id` (String) The id of the project `project` names, null for an account the organization holds. This is what a plan compares: the account is replaced when it changes, never when `project` is merely spelled differently.
 - `status` (String) Current status of the service account.
 
 ## Import
@@ -64,10 +65,11 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import by "project/<project_id>/<service_account_id>" for a project-scoped
-# machine identity, or "org/<organization_id>/<service_account_id>" for one the
-# organization holds directly. The API lists service accounts per owner and has
-# no get-by-id, so the import id names which owner to look in.
+# Import by "project/<project>/<service_account_id>" for a project-scoped
+# machine identity, or "org/<org>/<service_account_id>" for one the
+# organization holds directly, the owner by name or id. The API lists service
+# accounts per owner and has no get-by-id, so the import id names which owner to
+# look in.
 terraform import fpcloud_service_account.deployer project/6c1f0a2e-9d3b-4b7e-8f2a-0e5d7c4a1b9f/2a7e4c1d-5b8f-4e3a-9c6d-1f0b8a7e5d3c
 
 terraform import fpcloud_service_account.ci org/8e2b1f6a-3c7d-4a9e-b1f5-7d2c0a6e4b8f/9f3a5c7e-2d1b-4f8a-a6c3-5e0b9d7f2a4c

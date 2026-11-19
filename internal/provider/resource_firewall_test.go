@@ -520,7 +520,7 @@ func startFakeFirewallAPI(t *testing.T) *fakeFirewallAPI {
 
 const fakeFirewallApp = `
 resource "fpcloud_app" "web" {
-  project_id = "proj-1"
+  project    = "proj-1"
   name       = "web"
   image      = "ghcr.io/acme/web:v1"
   %s

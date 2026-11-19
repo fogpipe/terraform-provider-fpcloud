@@ -18,9 +18,11 @@ import (
 )
 
 var (
-	_ resource.Resource                = &DatabaseResource{}
-	_ resource.ResourceWithConfigure   = &DatabaseResource{}
-	_ resource.ResourceWithImportState = &DatabaseResource{}
+	_ resource.Resource                 = &DatabaseResource{}
+	_ resource.ResourceWithConfigure    = &DatabaseResource{}
+	_ resource.ResourceWithImportState  = &DatabaseResource{}
+	_ resource.ResourceWithModifyPlan   = &DatabaseResource{}
+	_ resource.ResourceWithUpgradeState = &DatabaseResource{}
 )
 
 // NewDatabaseResource returns a new database resource.
@@ -43,6 +45,7 @@ type DatabaseBackupModel struct {
 // DatabaseResourceModel describes the resource data model.
 type DatabaseResourceModel struct {
 	ID          types.String `tfsdk:"id"`
+	Project     types.String `tfsdk:"project"`
 	ProjectID   types.String `tfsdk:"project_id"`
 	Name        types.String `tfsdk:"name"`
 	DisplayName types.String `tfsdk:"display_name"`
@@ -76,6 +79,7 @@ func (r *DatabaseResource) Metadata(_ context.Context, req resource.MetadataRequ
 func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a Fogpipe managed database.",
+		Version:     1,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "The unique identifier of the database.",
@@ -84,11 +88,18 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"project": schema.StringAttribute{
+				Description: "The project, by name or id, this database belongs to. It records the " +
+					"reference as written: another spelling of the same project changes nothing, and only " +
+					"a different project forces a new database.",
+				Required: true,
+			},
 			"project_id": schema.StringAttribute{
-				Description: "The project ID this database belongs to.",
-				Required:    true,
+				Description: "The project's id. This is what a plan compares: the database is replaced " +
+					"when it changes, never when `project` is merely spelled differently.",
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{
@@ -286,7 +297,7 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 		Extensions:  extensionNames(plan.Extensions),
 	}
 	db, err := createWaitingForName(ctx, "DATABASE_TEARING_DOWN", func(ctx context.Context) (*client.Database, error) {
-		return r.client.CreateDatabase(ctx, plan.ProjectID.ValueString(), apiReq)
+		return r.client.CreateDatabase(ctx, plan.Project.ValueString(), apiReq)
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating database", err.Error())
@@ -361,7 +372,16 @@ func (r *DatabaseResource) Read(ctx context.Context, req resource.ReadRequest, r
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// ModifyPlan decides whether a changed `project` is a different project; see
+// referenceKind.plan.
+func (r *DatabaseResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	planReferences(ctx, r.client, req, resp, projectReference)
+}
+
 func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if respellInPlace(ctx, req, resp, projectReference) {
+		return
+	}
 	var plan, state DatabaseResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -517,7 +537,7 @@ func extensionSet(names []string) types.Set {
 // mapDatabaseToState maps an API Database response to the Terraform state model.
 func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 	state.ID = types.StringValue(db.ID)
-	state.ProjectID = types.StringValue(db.ProjectID)
+	setProjectReference(&state.Project, &state.ProjectID, db.ProjectID)
 	state.Name = types.StringValue(db.Name)
 	state.DisplayName = types.StringValue(db.DisplayName)
 	state.Engine = types.StringValue(db.Engine)
@@ -555,6 +575,15 @@ func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 	state.ReadHost = types.StringValue(db.ReadHost)
 	state.Secrets, _ = types.MapValueFrom(context.Background(), types.StringType, orEmptyMap(db.Secrets))
 	state.Port = types.Int64Value(int64(db.Port))
+}
+
+// UpgradeState moves a state written against schema version 0, which held the
+// project in `project_id` as the id the API answered, to `project`, as
+// written, beside the computed `project_id`.
+func (r *DatabaseResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
+	return map[int64]resource.StateUpgrader{
+		0: rawStateUpgrader("database", moveReference("project_id", projectReference)),
+	}
 }
 
 // awaitDatabaseRunning blocks until the database leaves provisioning. A

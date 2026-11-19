@@ -19,6 +19,8 @@ var (
 	_ resource.ResourceWithConfigure      = &ServiceAccountResource{}
 	_ resource.ResourceWithImportState    = &ServiceAccountResource{}
 	_ resource.ResourceWithValidateConfig = &ServiceAccountResource{}
+	_ resource.ResourceWithModifyPlan     = &ServiceAccountResource{}
+	_ resource.ResourceWithUpgradeState   = &ServiceAccountResource{}
 )
 
 // NewServiceAccountResource returns a new service account resource.
@@ -34,11 +36,13 @@ type ServiceAccountResource struct {
 // ServiceAccountResourceModel describes the resource data model.
 type ServiceAccountResourceModel struct {
 	ID types.String `tfsdk:"id"`
-	// Exactly one of ProjectID and OrganizationID, mirroring the control
+	// Exactly one of Project and Org, mirroring the control
 	// plane's own CHECK: a machine identity belongs to a project, or to the
 	// organization itself when it outlives every project
 	// (fogpipe/cloud-workspace#778).
+	Project        types.String `tfsdk:"project"`
 	ProjectID      types.String `tfsdk:"project_id"`
+	Org            types.String `tfsdk:"org"`
 	OrganizationID types.String `tfsdk:"organization_id"`
 	Name           types.String `tfsdk:"name"`
 	DisplayName    types.String `tfsdk:"display_name"`
@@ -55,6 +59,7 @@ func (r *ServiceAccountResource) Metadata(_ context.Context, req resource.Metada
 func (r *ServiceAccountResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a Fogpipe service account.",
+		Version:     1,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Service account ID.",
@@ -63,18 +68,38 @@ func (r *ServiceAccountResource) Schema(_ context.Context, _ resource.SchemaRequ
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"project": schema.StringAttribute{
+				Description: "The project, by name or id, this service account belongs to. Exactly one of " +
+					"`project` and `org` must be set. It records the reference as written: another spelling " +
+					"of the same project changes nothing, and only a different project forces a new " +
+					"service account.",
+				Optional: true,
+			},
 			"project_id": schema.StringAttribute{
-				Description: "The project this service account belongs to. Exactly one of `project_id` and `organization_id` must be set.",
-				Optional:    true,
+				Description: "The id of the project `project` names, null for an account the organization " +
+					"holds. This is what a plan compares: the account is replaced when it changes, never " +
+					"when `project` is merely spelled differently.",
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"org": schema.StringAttribute{
+				Description: "The organization, by name or id, that holds this service account directly, for " +
+					"a machine identity that outlives any single project: a CI suite that creates and destroys " +
+					"its own projects, or a Terraform root. Requires org administrate. Exactly one of " +
+					"`project` and `org` must be set. It records the reference as written: another spelling " +
+					"of the same organization changes nothing, and only a different organization forces a " +
+					"new service account.",
+				Optional: true,
+			},
 			"organization_id": schema.StringAttribute{
-				Description: "The organization that holds this service account directly, for a machine identity that outlives any single project — a CI suite that creates and destroys its own projects, or a Terraform root. Requires org administrate. Exactly one of `project_id` and `organization_id` must be set.",
-				Optional:    true,
+				Description: "The id of the organization `org` names, null for a project's account. This is " +
+					"what a plan compares: the account is replaced when it changes, never when `org` is " +
+					"merely spelled differently.",
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{
@@ -136,31 +161,30 @@ func (r *ServiceAccountResource) ValidateConfig(ctx context.Context, req resourc
 	}
 	// Unknown at plan time is not absent: a value flowing from another
 	// resource is not yet readable and must not be reported as missing.
-	project := !cfg.ProjectID.IsNull() || cfg.ProjectID.IsUnknown()
-	org := !cfg.OrganizationID.IsNull() || cfg.OrganizationID.IsUnknown()
+	project := !cfg.Project.IsNull() || cfg.Project.IsUnknown()
+	org := !cfg.Org.IsNull() || cfg.Org.IsUnknown()
 	switch {
 	case project && org:
 		resp.Diagnostics.AddError(
-			"Both project_id and organization_id set",
+			"Both project and org set",
 			"A service account belongs to a project or to the organization itself, never to both. Set exactly one.",
 		)
 	case !project && !org:
 		resp.Diagnostics.AddError(
-			"Neither project_id nor organization_id set",
-			"A service account needs an owner. Set project_id for a project-scoped machine identity, or organization_id for one the organization holds directly.",
+			"Neither project nor org set",
+			"A service account needs an owner. Set project for a project-scoped machine identity, or org for one the organization holds directly.",
 		)
 	}
 }
 
 // applyServiceAccount writes what the API returned onto the model. The owner
-// fields are written back as the API reports them rather than as configured,
-// and an empty one becomes null rather than "" — an Optional attribute the
-// config omitted must stay null, or every apply reports a result inconsistent
-// with its own plan.
+// ids are written as the API reports them and the owner references stay as
+// configured; the owner the config omitted stays null on both, or every apply
+// reports a result inconsistent with its own plan.
 func applyServiceAccount(m *ServiceAccountResourceModel, sa *client.ServiceAccount) {
 	m.ID = types.StringValue(sa.ID)
-	m.ProjectID = optionalString(sa.ProjectID)
-	m.OrganizationID = optionalString(sa.OrganizationID)
+	setReference(&m.Project, &m.ProjectID, sa.ProjectID)
+	setReference(&m.Org, &m.OrganizationID, sa.OrganizationID)
 	m.Name = types.StringValue(sa.Name)
 	m.DisplayName = types.StringValue(sa.DisplayName)
 	m.Email = types.StringValue(sa.Email)
@@ -186,10 +210,10 @@ func (r *ServiceAccountResource) Create(ctx context.Context, req resource.Create
 	)
 	// Which owner is set picks the endpoint: the org route needs org
 	// administrate, the same bar as granting a binding on the org.
-	if !plan.OrganizationID.IsNull() {
-		sa, err = r.client.CreateOrgServiceAccount(ctx, plan.OrganizationID.ValueString(), body)
+	if !plan.Org.IsNull() {
+		sa, err = r.client.CreateOrgServiceAccount(ctx, plan.Org.ValueString(), body)
 	} else {
-		sa, err = r.client.CreateServiceAccount(ctx, plan.ProjectID.ValueString(), body)
+		sa, err = r.client.CreateServiceAccount(ctx, plan.Project.ValueString(), body)
 	}
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating service account", err.Error())
@@ -221,7 +245,16 @@ func (r *ServiceAccountResource) Read(ctx context.Context, req resource.ReadRequ
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// ModifyPlan decides whether a changed `project` or `org` names a different
+// one; see referenceKind.plan.
+func (r *ServiceAccountResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	planReferences(ctx, r.client, req, resp, projectReference, orgReference)
+}
+
 func (r *ServiceAccountResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if respellInPlace(ctx, req, resp, projectReference, orgReference) {
+		return
+	}
 	var plan, state ServiceAccountResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -256,8 +289,8 @@ func (r *ServiceAccountResource) Delete(ctx context.Context, req resource.Delete
 }
 
 // ImportState imports a service account by a
-// "project/<project_id>/<service_account_id>" or
-// "org/<organization_id>/<service_account_id>" identifier. Read looks the
+// "project/<project>/<service_account_id>" or
+// "org/<org>/<service_account_id>" identifier, the owner by name or id. Read looks the
 // account up in its owner's listing and there is no get-by-id, so the import
 // id has to name which owner — a bare "<id>/<id>" cannot, because a project
 // reference and an org reference are both opaque strings and guessing wrong
@@ -270,9 +303,9 @@ func (r *ServiceAccountResource) ImportState(ctx context.Context, req resource.I
 	if !malformed {
 		switch parts[0] {
 		case "project":
-			owner = "project_id"
+			owner = "project"
 		case "org":
-			owner = "organization_id"
+			owner = "org"
 		default:
 			malformed = true
 		}
@@ -280,10 +313,21 @@ func (r *ServiceAccountResource) ImportState(ctx context.Context, req resource.I
 	if malformed {
 		resp.Diagnostics.AddError(
 			"Error importing service account",
-			fmt.Sprintf("expected an import id of the form \"project/<project_id>/<service_account_id>\" or \"org/<organization_id>/<service_account_id>\", got %q", req.ID),
+			fmt.Sprintf("expected an import id of the form \"project/<project>/<service_account_id>\" or \"org/<org>/<service_account_id>\", got %q", req.ID),
 		)
 		return
 	}
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(owner), parts[1])...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[2])...)
+}
+
+// UpgradeState moves a state written against schema version 0, which held the
+// owner in `project_id` or `organization_id` as the id the API answered, to
+// `project` or `org`, as written, beside the computed id.
+func (r *ServiceAccountResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
+	return map[int64]resource.StateUpgrader{
+		0: rawStateUpgrader("service account",
+			moveReference("project_id", projectReference),
+			moveReference("organization_id", orgReference)),
+	}
 }

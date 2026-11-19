@@ -15,7 +15,7 @@ Manages an auto-delete retention policy for a project's container registry repos
 ```terraform
 # Project-wide default: keep the newest 10 tags, delete anything older than 30 days.
 resource "fpcloud_registry_retention_policy" "default" {
-  project_id = fpcloud_project.example.id
+  project = fpcloud_project.example.id
 
   keep_last    = 10
   max_age_days = 30
@@ -24,8 +24,8 @@ resource "fpcloud_registry_retention_policy" "default" {
 
 # A per-repo override: this one repo keeps a longer history.
 resource "fpcloud_registry_retention_policy" "releases" {
-  project_id = fpcloud_project.example.id
-  repo       = "example/releases"
+  project = fpcloud_project.example.id
+  repo    = "example/releases"
 
   keep_last    = 50
   max_age_days = 0
@@ -39,7 +39,7 @@ resource "fpcloud_registry_retention_policy" "releases" {
 ### Required
 
 - `enabled` (Boolean) Whether this policy is enforced by the hourly sweeper. Required — an enabled policy needs keep_last and/or max_age_days set to actually delete anything.
-- `project_id` (String) The project this policy applies to. Changing it forces a new policy.
+- `project` (String) The project, by name or id, this policy applies to. It records the reference as written: another spelling of the same project changes nothing, and only a different project forces a new policy.
 
 ### Optional
 
@@ -51,6 +51,7 @@ resource "fpcloud_registry_retention_policy" "releases" {
 
 - `created_at` (String) Timestamp when the policy was created.
 - `id` (String) Retention policy ID.
+- `project_id` (String) The project's id. This is what a plan compares: the policy is replaced when it changes, never when `project` is merely spelled differently.
 - `updated_at` (String) Timestamp when the policy was last updated.
 
 ## Import
@@ -60,9 +61,9 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import the project-wide policy by "project_id", or a per-repo policy by
-# "project_id/repo" — the repo may itself contain slashes; everything after
-# the first "/" is the repo.
+# Import the project-wide policy by "project", or a per-repo policy by
+# "project/repo", the project by name or id. The repo may itself contain
+# slashes; everything after the first "/" is the repo.
 terraform import fpcloud_registry_retention_policy.all 6c1f0a2e-9d3b-4b7e-8f2a-0e5d7c4a1b9f
 terraform import fpcloud_registry_retention_policy.api 6c1f0a2e-9d3b-4b7e-8f2a-0e5d7c4a1b9f/acme/platform/api
 ```

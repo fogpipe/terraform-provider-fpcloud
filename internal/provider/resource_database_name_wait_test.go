@@ -82,7 +82,7 @@ func TestDatabase_CreateWaitsForANameStillBeingTornDown(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{{
 			Config: `resource "fpcloud_database" "main" {
-  project_id = "proj-1"
+  project    = "proj-1"
   name       = "maindb"
 }`,
 			Check: resource.TestCheckResourceAttr("fpcloud_database.main", "id", "db-1"),

@@ -31,9 +31,9 @@ resource "fpcloud_bucket" "site" {
 # Hand the bucket to an app. The bucket owns two project secrets holding its
 # key; referencing them is the grant, and no key value sits in this file.
 resource "fpcloud_app" "uploader" {
-  project_id = fpcloud_project.production.id
-  name       = "uploader"
-  image      = "ghcr.io/myorg/uploader:latest"
+  project = fpcloud_project.production.id
+  name    = "uploader"
+  image   = "ghcr.io/myorg/uploader:latest"
 
   env = {
     AWS_ENDPOINT_URL = fpcloud_bucket.assets.endpoint

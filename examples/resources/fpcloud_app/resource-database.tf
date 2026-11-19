@@ -3,16 +3,16 @@
 # removing the reference revokes it. No password ever sits in this file or in
 # state.
 resource "fpcloud_database" "orders" {
-  project_id = fpcloud_project.production.id
-  name       = "orders"
-  pooler     = true
+  project = fpcloud_project.production.id
+  name    = "orders"
+  pooler  = true
 }
 
 resource "fpcloud_app" "api" {
-  project_id = fpcloud_project.production.id
-  name       = "api"
-  image      = "ghcr.io/myorg/api:1.4.2"
-  port       = 8080
+  project = fpcloud_project.production.id
+  name    = "api"
+  image   = "ghcr.io/myorg/api:1.4.2"
+  port    = 8080
 
   secret_env = {
     DATABASE_URL = { secret = fpcloud_database.orders.secrets["url"] }

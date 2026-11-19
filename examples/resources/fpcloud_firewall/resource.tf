@@ -39,10 +39,10 @@ resource "fpcloud_firewall" "office" {
 # The firewall does nothing until something names it. It then applies to every
 # host the edge serves for the app, custom domains included.
 resource "fpcloud_app" "admin" {
-  project_id = fpcloud_project.production.id
-  name       = "admin"
-  image      = "ghcr.io/myorg/admin:latest"
-  ingress    = "all"
+  project = fpcloud_project.production.id
+  name    = "admin"
+  image   = "ghcr.io/myorg/admin:latest"
+  ingress = "all"
 
   firewall = fpcloud_firewall.office.id
 }

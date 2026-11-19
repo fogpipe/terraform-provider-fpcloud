@@ -5,7 +5,7 @@ subcategory: ""
 description: |-
   A spend target for a Fogpipe organization, and the percentages of it at which the organization is told.
   A budget alerts; it never caps. Crossing a threshold changes nothing about what runs — no deploy is refused and no workload is stopped. To bound what a project can actually consume, set its resource caps instead.
-  There is at most one budget per organization, so the organization is the id. Managing it requires billing.admin, a role on the organization (fpcloud_iam_binding with org_id).
+  There is at most one budget per organization, so the organization is the id. Managing it requires billing.admin, a role on the organization (fpcloud_iam_binding with org).
 ---
 
 # fpcloud_billing_budget (Resource)
@@ -14,7 +14,7 @@ A spend target for a Fogpipe organization, and the percentages of it at which th
 
 **A budget alerts; it never caps.** Crossing a threshold changes nothing about what runs — no deploy is refused and no workload is stopped. To bound what a project can actually consume, set its resource caps instead.
 
-There is at most one budget per organization, so the organization is the id. Managing it requires `billing.admin`, a role on the organization (`fpcloud_iam_binding` with `org_id`).
+There is at most one budget per organization, so the organization is the id. Managing it requires `billing.admin`, a role on the organization (`fpcloud_iam_binding` with `org`).
 
 ## Example Usage
 
@@ -22,7 +22,7 @@ There is at most one budget per organization, so the organization is the id. Man
 # A spend target for the organization. It alerts; it never caps — crossing a
 # threshold changes nothing about what runs.
 resource "fpcloud_billing_budget" "monthly" {
-  org_id = var.org_id
+  org    = "acme" # by name or id; the plan compares organization_id
   amount = "250.00"
 
   # Percentages of `amount`. Above 100 is allowed: 150 is how you hear about it
@@ -37,7 +37,7 @@ resource "fpcloud_billing_budget" "monthly" {
 ### Required
 
 - `amount` (String) Target spend for the period, as a decimal string ("250.00"). A string, not a number: amounts are NUMERIC end to end because a float sum over a month of hourly rows drifts.
-- `org_id` (String) The organization this budget belongs to. Also the resource id — an organization has at most one budget.
+- `org` (String) The organization, by name or id, this budget belongs to. It records the reference as written: another spelling of the same organization changes nothing, and only a different organization forces a new budget.
 
 ### Optional
 
@@ -47,6 +47,7 @@ resource "fpcloud_billing_budget" "monthly" {
 ### Read-Only
 
 - `created_at` (String) Timestamp when the budget was first set.
+- `organization_id` (String) The organization's id, and so the budget's: an organization has at most one. This is what a plan compares: the budget is replaced when it changes, never when `org` is merely spelled differently.
 
 ## Import
 
@@ -55,7 +56,7 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import by the organization id alone: an organization has at most one budget,
-# so the organization names it.
+# Import by the organization alone, by name or id: an organization has at most
+# one budget, so the organization names it.
 terraform import fpcloud_billing_budget.main 4b9d2e7a-1c5f-4a8e-b3d6-9f0e8c7a5b1d
 ```

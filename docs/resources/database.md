@@ -14,11 +14,11 @@ Manages a Fogpipe managed database.
 
 ```terraform
 resource "fpcloud_database" "main" {
-  project_id = fpcloud_project.production.id
-  name       = "maindb"
-  cpu        = "1"
-  memory     = "2Gi"
-  storage    = "20Gi"
+  project = fpcloud_project.production.name # by name or id; the plan compares project_id
+  name    = "maindb"
+  cpu     = "1"
+  memory  = "2Gi"
+  storage = "20Gi"
 
   backup {
     enabled   = true
@@ -34,7 +34,7 @@ resource "fpcloud_database" "main" {
 ### Required
 
 - `name` (String) The name of the database.
-- `project_id` (String) The project ID this database belongs to.
+- `project` (String) The project, by name or id, this database belongs to. It records the reference as written: another spelling of the same project changes nothing, and only a different project forces a new database.
 
 ### Optional
 
@@ -57,6 +57,7 @@ resource "fpcloud_database" "main" {
 - `instances` (Number) Number of Postgres instances the platform runs this database as. Read-only: replication across nodes is what the platform promises, not a size the tenant buys (ADR-136). A client-side default here is what would delete a replica on the next apply.
 - `plan` (String) Legacy size tier, derived by the server from cpu/memory (e.g. "starter", "custom"). Read-only — size the database with cpu/memory/storage instead.
 - `port` (Number) The database port.
+- `project_id` (String) The project's id. This is what a plan compares: the database is replaced when it changes, never when `project` is merely spelled differently.
 - `read_host` (String) Cluster-internal hostname of the database's REPLICA (CNPG's `-ro` Service), on the same `port` and with the same credential — a replica is not a second identity. Every managed database has one, because every one is two instances. **Reads here can be stale**: replication is asynchronous, so a read-your-own-write can miss; send anything that must see everything committed so far to `host`. Empty when the platform cannot derive a replica endpoint for the database, which means there is none — never fall back to `host` under this name.
 - `secrets` (Map of String) Names of the project secrets holding this database's credential, by part: `url` is `<name>-owner`, the owner connection URL; `password` is `<name>-owner-password`. Created with the database, rewritten together by a rotation. Reference one from the app's env (fpcloud_app's `secret_env`, `DATABASE_URL = { secret = fpcloud_database.x.secrets["url"] }`) to hand the app the database. The read replica is the same credential at `read_host`.
 - `status` (String) The current status of the database.

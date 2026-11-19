@@ -73,7 +73,7 @@ func TestAppReleaseCommand_ClearedOutOfBandIsDriftAndIsRestored(t *testing.T) {
 
 	config := `
 resource "fpcloud_app" "web" {
-  project_id      = "proj-1"
+  project         = "proj-1"
   name            = "web"
   image           = "ghcr.io/acme/web:v1"
   release_command = ["migrate"]

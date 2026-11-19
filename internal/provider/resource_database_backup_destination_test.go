@@ -23,7 +23,7 @@ resource "fpcloud_project" "test" {
 }
 
 resource "fpcloud_database" "test" {
-  project_id = fpcloud_project.test.id
+  project    = fpcloud_project.test.id
   name       = "backupdb"
 }
 

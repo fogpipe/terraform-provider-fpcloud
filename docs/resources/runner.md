@@ -88,7 +88,7 @@ resource "fpcloud_runner" "one_repo" {
 
 ### Required
 
-- `project` (String) ID or name of the project this runner belongs to. A project has one runner, so this is also what identifies it. Changing it forces a new runner.
+- `project` (String) The project, by name or id, this runner belongs to. A project has one runner, so this is also what identifies it. It records the reference as written: another spelling of the same project changes nothing, and only a different project forces a new runner.
 
 ### Optional
 
@@ -111,6 +111,7 @@ resource "fpcloud_runner" "one_repo" {
 - `id` (String) Runner ID.
 - `labels` (List of String) The `runs-on` labels this runner answers to.
 - `pending_runners` (Number) Runners that exist without a job — above all, waiting for room to schedule.
+- `project_id` (String) The project's id. This is what a plan compares: the runner is replaced when it changes, never when `project` is merely spelled differently.
 - `running_runners` (Number) Runners executing a job right now.
 - `status` (String) Runner state: `pending` while it registers with GitHub, then `running`.
 

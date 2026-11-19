@@ -61,7 +61,7 @@ import {
 }
 
 resource "fpcloud_app" "web" {
-  project_id   = "proj-1"
+  project      = "proj-1"
   name         = "web"
   display_name = "Web, adopted"
   image        = "ghcr.io/acme/web:v1"

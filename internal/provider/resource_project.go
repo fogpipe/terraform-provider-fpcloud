@@ -78,8 +78,9 @@ func (r *ProjectResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"org": schema.StringAttribute{
-				Description: "The organization the project belongs to, by uuid, opaque id or readable name — " +
-					"whichever the configuration finds convenient. Defaults to the API key's organization. " +
+				Description: "The organization the project belongs to, by name or id: its uuid, its opaque id " +
+					"or its readable name, whichever the configuration finds convenient. Defaults to the API " +
+					"key's organization. " +
 					"It records the reference as written and forces nothing on its own: a different spelling " +
 					"of the same organization is not a change, and only a different organization replaces " +
 					"the project.",

@@ -16,9 +16,11 @@ import (
 )
 
 var (
-	_ resource.Resource                = &RegistryRetentionPolicyResource{}
-	_ resource.ResourceWithConfigure   = &RegistryRetentionPolicyResource{}
-	_ resource.ResourceWithImportState = &RegistryRetentionPolicyResource{}
+	_ resource.Resource                 = &RegistryRetentionPolicyResource{}
+	_ resource.ResourceWithConfigure    = &RegistryRetentionPolicyResource{}
+	_ resource.ResourceWithImportState  = &RegistryRetentionPolicyResource{}
+	_ resource.ResourceWithModifyPlan   = &RegistryRetentionPolicyResource{}
+	_ resource.ResourceWithUpgradeState = &RegistryRetentionPolicyResource{}
 )
 
 // NewRegistryRetentionPolicyResource returns a new registry retention policy resource.
@@ -34,6 +36,7 @@ type RegistryRetentionPolicyResource struct {
 // RegistryRetentionPolicyResourceModel describes the resource data model.
 type RegistryRetentionPolicyResourceModel struct {
 	ID         types.String `tfsdk:"id"`
+	Project    types.String `tfsdk:"project"`
 	ProjectID  types.String `tfsdk:"project_id"`
 	Repo       types.String `tfsdk:"repo"`
 	KeepLast   types.Int64  `tfsdk:"keep_last"`
@@ -54,6 +57,7 @@ func (r *RegistryRetentionPolicyResource) Schema(_ context.Context, _ resource.S
 			"of Terraform — this resource only manages the policy, not when enforcement fires. Deletion " +
 			"is irreversible: keep_last protects the newest N tags, max_age_days deletes tags older than " +
 			"N days, both together apply as AND.",
+		Version: 1,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Retention policy ID.",
@@ -62,11 +66,18 @@ func (r *RegistryRetentionPolicyResource) Schema(_ context.Context, _ resource.S
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"project": schema.StringAttribute{
+				Description: "The project, by name or id, this policy applies to. It records the reference as " +
+					"written: another spelling of the same project changes nothing, and only a different " +
+					"project forces a new policy.",
+				Required: true,
+			},
 			"project_id": schema.StringAttribute{
-				Description: "The project this policy applies to. Changing it forces a new policy.",
-				Required:    true,
+				Description: "The project's id. This is what a plan compares: the policy is replaced " +
+					"when it changes, never when `project` is merely spelled differently.",
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"repo": schema.StringAttribute{
@@ -123,7 +134,7 @@ func (r *RegistryRetentionPolicyResource) Configure(_ context.Context, req resou
 }
 
 func (r *RegistryRetentionPolicyResource) set(ctx context.Context, m *RegistryRetentionPolicyResourceModel) (*client.RegistryRetentionPolicy, error) {
-	return r.client.SetRetentionPolicy(ctx, m.ProjectID.ValueString(), client.SetRetentionPolicyRequest{
+	return r.client.SetRetentionPolicy(ctx, referenceTarget(m.Project, m.ProjectID), client.SetRetentionPolicyRequest{
 		Repo:       m.Repo.ValueString(),
 		KeepLast:   int(m.KeepLast.ValueInt64()),
 		MaxAgeDays: int(m.MaxAgeDays.ValueInt64()),
@@ -156,7 +167,7 @@ func (r *RegistryRetentionPolicyResource) Read(ctx context.Context, req resource
 	}
 
 	// No single-policy GET, so list the project's policies and find ours by repo.
-	policies, err := r.client.ListRetentionPolicies(ctx, state.ProjectID.ValueString())
+	policies, err := r.client.ListRetentionPolicies(ctx, referenceTarget(state.Project, state.ProjectID))
 	if err != nil {
 		if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
 			resp.State.RemoveResource(ctx)
@@ -182,7 +193,16 @@ func (r *RegistryRetentionPolicyResource) Read(ctx context.Context, req resource
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// ModifyPlan decides whether a changed `project` is a different project; see
+// referenceKind.plan.
+func (r *RegistryRetentionPolicyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	planReferences(ctx, r.client, req, resp, projectReference)
+}
+
 func (r *RegistryRetentionPolicyResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if respellInPlace(ctx, req, resp, projectReference) {
+		return
+	}
 	var plan RegistryRetentionPolicyResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -206,7 +226,7 @@ func (r *RegistryRetentionPolicyResource) Delete(ctx context.Context, req resour
 		return
 	}
 
-	err := r.client.DeleteRetentionPolicy(ctx, state.ProjectID.ValueString(), state.Repo.ValueString())
+	err := r.client.DeleteRetentionPolicy(ctx, referenceTarget(state.Project, state.ProjectID), state.Repo.ValueString())
 	if err != nil {
 		if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
 			return
@@ -218,7 +238,7 @@ func (r *RegistryRetentionPolicyResource) Delete(ctx context.Context, req resour
 // apply maps an API RegistryRetentionPolicy response onto the model.
 func (r *RegistryRetentionPolicyResource) apply(m *RegistryRetentionPolicyResourceModel, p *client.RegistryRetentionPolicy) {
 	m.ID = types.StringValue(p.ID)
-	m.ProjectID = types.StringValue(p.ProjectID)
+	setProjectReference(&m.Project, &m.ProjectID, p.ProjectID)
 	m.Repo = types.StringValue(p.Repo)
 	m.KeepLast = types.Int64Value(int64(p.KeepLast))
 	m.MaxAgeDays = types.Int64Value(int64(p.MaxAgeDays))
@@ -227,8 +247,9 @@ func (r *RegistryRetentionPolicyResource) apply(m *RegistryRetentionPolicyResour
 	m.UpdatedAt = types.StringValue(p.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 }
 
-// ImportState imports a policy by "project_id" (the project-wide policy, whose
-// repo is empty) or "project_id/repo" (a per-repo one). Read looks the policy
+// ImportState imports a policy by "project" (the project-wide policy, whose
+// repo is empty) or "project/repo" (a per-repo one), the project by name or
+// id. Read looks the policy
 // up by repo within the project, and a repo path contains slashes of its own,
 // so everything after the first "/" is the repo. Read fills in everything else.
 func (r *RegistryRetentionPolicyResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
@@ -236,7 +257,7 @@ func (r *RegistryRetentionPolicyResource) ImportState(ctx context.Context, req r
 	if parts[0] == "" {
 		resp.Diagnostics.AddError(
 			"Error importing registry retention policy",
-			fmt.Sprintf("expected an import id of the form \"project_id\" or \"project_id/repo\", got %q", req.ID),
+			fmt.Sprintf("expected an import id of the form \"project\" or \"project/repo\", got %q", req.ID),
 		)
 		return
 	}
@@ -244,6 +265,15 @@ func (r *RegistryRetentionPolicyResource) ImportState(ctx context.Context, req r
 	if len(parts) == 2 {
 		repo = parts[1]
 	}
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project_id"), parts[0])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project"), parts[0])...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("repo"), repo)...)
+}
+
+// UpgradeState moves a state written against schema version 0, which held the
+// project in `project_id` as the id the API answered, to `project`, as
+// written, beside the computed `project_id`.
+func (r *RegistryRetentionPolicyResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
+	return map[int64]resource.StateUpgrader{
+		0: rawStateUpgrader("registry retention policy", moveReference("project_id", projectReference)),
+	}
 }

@@ -1,15 +1,15 @@
 # A person on a project. A member may hold several roles on one target; each
 # is its own binding, and the scope roles contain each other: viewer < editor < owner.
 resource "fpcloud_iam_binding" "jane_editor" {
-  project_id = fpcloud_project.production.id
-  member     = "user:jane@example.com"
-  role       = "editor"
+  project = fpcloud_project.production.id
+  member  = "user:jane@example.com"
+  role    = "editor"
 }
 
 # A billing role is a binding on the organization. An owner holds
 # billing.admin by inclusion; this gives someone the bill and nothing else.
 resource "fpcloud_iam_binding" "finance_reads_the_bill" {
-  org_id = fpcloud_project.production.organization_id
+  org    = fpcloud_project.production.organization_id
   member = "user:finance@example.com"
   role   = "billing.viewer"
 }
@@ -19,8 +19,8 @@ resource "fpcloud_iam_binding" "finance_reads_the_bill" {
 # `database.user`; `bucket.reader`, `bucket.user` or `bucket.publisher`;
 # `secret.reader`.
 resource "fpcloud_iam_binding" "api_uses_orders" {
-  project_id = fpcloud_project.production.id
-  resource   = "database/${fpcloud_database.orders.id}"
-  member     = "serviceAccount:${fpcloud_app.api.service_account}"
-  role       = "database.user"
+  project  = fpcloud_project.production.id
+  resource = "database/${fpcloud_database.orders.id}"
+  member   = "serviceAccount:${fpcloud_app.api.service_account}"
+  role     = "database.user"
 }

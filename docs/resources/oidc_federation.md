@@ -3,12 +3,12 @@
 page_title: "fpcloud_oidc_federation Resource - fpcloud"
 subcategory: ""
 description: |-
-  Trusts a GitHub repository (via OIDC) to authenticate as a service account in a Fogpipe project — the repo's CI presents its OIDC token and receives a short-lived, service-account-scoped credential, with no stored keys. Immutable: changes force replacement.
+  Trusts a GitHub repository (via OIDC) to authenticate as a service account in a Fogpipe project: the repo's CI presents its OIDC token and receives a short-lived, service-account-scoped credential, with no stored keys. Immutable: changes force replacement, except another spelling of the same project.
 ---
 
 # fpcloud_oidc_federation (Resource)
 
-Trusts a GitHub repository (via OIDC) to authenticate as a service account in a Fogpipe project — the repo's CI presents its OIDC token and receives a short-lived, service-account-scoped credential, with no stored keys. Immutable: changes force replacement.
+Trusts a GitHub repository (via OIDC) to authenticate as a service account in a Fogpipe project: the repo's CI presents its OIDC token and receives a short-lived, service-account-scoped credential, with no stored keys. Immutable: changes force replacement, except another spelling of the same project.
 
 ## Example Usage
 
@@ -27,7 +27,7 @@ resource "fpcloud_oidc_federation" "ci" {
 
 ### Required
 
-- `project` (String) The project (ID or name) the binding belongs to.
+- `project` (String) The project, by name or id, the binding belongs to. It records the reference as written: another spelling of the same project changes nothing, and only a different project forces a new binding.
 - `service_account` (String) Service account (email or ID) the repo may assume. Must belong to the project.
 - `subject_pattern` (String) Subject to match, e.g. "repo:owner/name:ref:refs/tags/*". "*" is a wildcard; a bare "*" is rejected. A pattern in that slug form also matches GitHub's immutable subject form ("repo:owner@OWNER-ID/name@REPO-ID:..."), which newer repositories and any renamed, transferred or opted-in one carry; a pattern written with the ids matches only tokens carrying them.
 
@@ -41,6 +41,7 @@ resource "fpcloud_oidc_federation" "ci" {
 
 - `created_at` (String) Timestamp when the binding was created.
 - `id` (String) Trust binding ID.
+- `project_id` (String) The project's id. This is what a plan compares: the binding is replaced when it changes, never when `project` is merely spelled differently.
 
 ## Import
 

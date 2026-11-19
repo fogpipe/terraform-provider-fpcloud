@@ -7,13 +7,13 @@ import (
 	"strings"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 )
 
 var (
@@ -23,6 +23,7 @@ var (
 	_ resource.ResourceWithValidateConfig = &IAMBindingResource{}
 	_ resource.ResourceWithUpgradeState   = &IAMBindingResource{}
 	_ resource.ResourceWithMoveState      = &IAMBindingResource{}
+	_ resource.ResourceWithModifyPlan     = &IAMBindingResource{}
 )
 
 // NewIAMBindingResource returns a new IAM binding resource.
@@ -38,13 +39,15 @@ type IAMBindingResource struct {
 
 // IAMBindingResourceModel describes the resource data model.
 type IAMBindingResourceModel struct {
-	ID        types.String `tfsdk:"id"`
-	OrgID     types.String `tfsdk:"org_id"`
-	ProjectID types.String `tfsdk:"project_id"`
-	Resource  types.String `tfsdk:"resource"`
-	Role      types.String `tfsdk:"role"`
-	Member    types.String `tfsdk:"member"`
-	CreatedAt types.String `tfsdk:"created_at"`
+	ID             types.String `tfsdk:"id"`
+	Org            types.String `tfsdk:"org"`
+	OrganizationID types.String `tfsdk:"organization_id"`
+	Project        types.String `tfsdk:"project"`
+	ProjectID      types.String `tfsdk:"project_id"`
+	Resource       types.String `tfsdk:"resource"`
+	Role           types.String `tfsdk:"role"`
+	Member         types.String `tfsdk:"member"`
+	CreatedAt      types.String `tfsdk:"created_at"`
 }
 
 // splitMember takes `user:<email>` or `serviceAccount:<email>` apart, the way
@@ -70,7 +73,7 @@ func (r *IAMBindingResource) Metadata(_ context.Context, req resource.MetadataRe
 
 func (r *IAMBindingResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Version: 1,
+		Version: 2,
 		Description: "Manages an IAM binding: a member holding a role on a Fogpipe organization or project, " +
 			"or, with `resource`, handed an app, database, bucket or secret in it (`app.deployer`, `database.user`, `bucket.reader` or `bucket.user`, `secret.reader` or `secret.writer`). " +
 			"Billing is two roles on the organization, `billing.viewer` and `billing.admin`, which an owner holds by inclusion. " +
@@ -85,18 +88,34 @@ func (r *IAMBindingResource) Schema(_ context.Context, _ resource.SchemaRequest,
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"org_id": schema.StringAttribute{
-				Description: "The organization the role is held on. Exactly one of `org_id` and `project_id`.",
-				Optional:    true,
+			"org": schema.StringAttribute{
+				Description: "The organization, by name or id, the role is held on. Exactly one of `org` and " +
+					"`project`. It records the reference as written: another spelling of the same " +
+					"organization changes nothing, and only a different organization forces a new binding.",
+				Optional: true,
+			},
+			"organization_id": schema.StringAttribute{
+				Description: "The id of the organization `org` names, null for a binding on a project. This " +
+					"is what a plan compares: the binding is replaced when it changes, never when `org` is " +
+					"merely spelled differently.",
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"project": schema.StringAttribute{
+				Description: "The project, by name or id, the role is held on. Exactly one of `org` and " +
+					"`project`. It records the reference as written: another spelling of the same project " +
+					"changes nothing, and only a different project forces a new binding.",
+				Optional: true,
+			},
 			"project_id": schema.StringAttribute{
-				Description: "The project the role is held on. Exactly one of `org_id` and `project_id`.",
-				Optional:    true,
+				Description: "The id of the project `project` names, null for a binding on an organization. " +
+					"This is what a plan compares: the binding is replaced when it changes, never when " +
+					"`project` is merely spelled differently.",
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"resource": schema.StringAttribute{
@@ -132,19 +151,19 @@ func (r *IAMBindingResource) Schema(_ context.Context, _ resource.SchemaRequest,
 	}
 }
 
-// ValidateConfig holds the target to one scope: exactly one of org_id and
-// project_id, and a member spelled with its type.
+// ValidateConfig holds the target to one scope: exactly one of org and
+// project, and a member spelled with its type.
 func (r *IAMBindingResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var cfg IAMBindingResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	hasOrg := !cfg.OrgID.IsNull() && !cfg.OrgID.IsUnknown()
-	hasProject := !cfg.ProjectID.IsNull() && !cfg.ProjectID.IsUnknown()
-	if hasOrg == hasProject && !cfg.OrgID.IsUnknown() && !cfg.ProjectID.IsUnknown() {
-		resp.Diagnostics.AddAttributeError(path.Root("project_id"), "Invalid binding target",
-			"A binding is held on an organization or a project: set exactly one of org_id and project_id.")
+	hasOrg := !cfg.Org.IsNull() && !cfg.Org.IsUnknown()
+	hasProject := !cfg.Project.IsNull() && !cfg.Project.IsUnknown()
+	if hasOrg == hasProject && !cfg.Org.IsUnknown() && !cfg.Project.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(path.Root("project"), "Invalid binding target",
+			"A binding is held on an organization or a project: set exactly one of org and project.")
 	}
 	if !cfg.Member.IsNull() && !cfg.Member.IsUnknown() {
 		if _, _, err := splitMember(cfg.Member.ValueString()); err != nil {
@@ -185,9 +204,15 @@ func (r *IAMBindingResource) Create(ctx context.Context, req resource.CreateRequ
 		Member:     member,
 		Resource:   plan.Resource.ValueString(),
 	}
+	// A binding held on a resource answers with the resource, not the
+	// scope, so the scope's id is resolved here rather than read off it.
+	r.resolveScope(ctx, &plan, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	var binding *client.IAMBinding
-	if plan.ProjectID.IsNull() {
-		binding, err = r.client.SetOrgIAMBinding(ctx, plan.OrgID.ValueString(), body)
+	if plan.Project.IsNull() {
+		binding, err = r.client.SetOrgIAMBinding(ctx, plan.OrganizationID.ValueString(), body)
 	} else {
 		binding, err = r.client.SetIAMBinding(ctx, plan.ProjectID.ValueString(), body)
 	}
@@ -208,10 +233,15 @@ func (r *IAMBindingResource) Read(ctx context.Context, req resource.ReadRequest,
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	// An import names the scope as written and nothing has resolved it yet.
+	r.resolveScope(ctx, &state, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	var bindings []*client.IAMBinding
 	var err error
-	if state.ProjectID.IsNull() || state.ProjectID.ValueString() == "" {
-		bindings, err = r.client.ListOrgIAMBindings(ctx, state.OrgID.ValueString())
+	if state.Project.IsNull() || state.Project.ValueString() == "" {
+		bindings, err = r.client.ListOrgIAMBindings(ctx, state.OrganizationID.ValueString())
 	} else {
 		bindings, err = r.client.ListIAMBindings(ctx, state.ProjectID.ValueString())
 	}
@@ -238,7 +268,24 @@ func (r *IAMBindingResource) Read(ctx context.Context, req resource.ReadRequest,
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *IAMBindingResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
+// resolveScope fills the scope's id from its reference where nothing has.
+func (r *IAMBindingResource) resolveScope(ctx context.Context, m *IAMBindingResourceModel, diags *diag.Diagnostics) {
+	resolveReference(ctx, r.client, projectReference, m.Project, &m.ProjectID, diags)
+	resolveReference(ctx, r.client, orgReference, m.Org, &m.OrganizationID, diags)
+}
+
+// ModifyPlan decides whether a changed `project` or `org` names a different
+// one; see referenceKind.plan.
+func (r *IAMBindingResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	planReferences(ctx, r.client, req, resp, projectReference, orgReference)
+}
+
+// Update records another spelling of the scope, the one change a binding
+// takes in place; everything else about it replaces it.
+func (r *IAMBindingResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if respellInPlace(ctx, req, resp, projectReference, orgReference) {
+		return
+	}
 	resp.Diagnostics.AddError(
 		"Update not supported",
 		"IAM binding resources are immutable. Changes require replacement.",
@@ -252,10 +299,10 @@ func (r *IAMBindingResource) Delete(ctx context.Context, req resource.DeleteRequ
 		return
 	}
 	var err error
-	if state.ProjectID.IsNull() || state.ProjectID.ValueString() == "" {
-		err = r.client.RemoveOrgIAMBinding(ctx, state.OrgID.ValueString(), state.ID.ValueString())
+	if state.Project.IsNull() || state.Project.ValueString() == "" {
+		err = r.client.RemoveOrgIAMBinding(ctx, referenceTarget(state.Org, state.OrganizationID), state.ID.ValueString())
 	} else {
-		err = r.client.RemoveIAMBinding(ctx, state.ProjectID.ValueString(), state.ID.ValueString())
+		err = r.client.RemoveIAMBinding(ctx, referenceTarget(state.Project, state.ProjectID), state.ID.ValueString())
 	}
 	if err != nil {
 		if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
@@ -265,8 +312,9 @@ func (r *IAMBindingResource) Delete(ctx context.Context, req resource.DeleteRequ
 	}
 }
 
-// apply copies what the API reports. The scope attribute that was set stays;
-// the row says which resource, if any, it is held on.
+// apply copies what the API reports. The scope reference that was set stays
+// as written, beside the id the row names when it is the scope's own; the row
+// says which resource, if any, it is held on.
 func (r *IAMBindingResource) apply(m *IAMBindingResourceModel, b *client.IAMBinding) {
 	m.ID = types.StringValue(b.ID)
 	m.Role = types.StringValue(b.Role)
@@ -279,15 +327,16 @@ func (r *IAMBindingResource) apply(m *IAMBindingResourceModel, b *client.IAMBind
 		m.Resource = types.StringNull()
 	}
 	if b.ResourceType == "project" {
-		m.ProjectID = types.StringValue(b.ResourceID)
+		setReference(&m.Project, &m.ProjectID, b.ResourceID)
 	}
 	if b.ResourceType == "organization" {
-		m.OrgID = types.StringValue(b.ResourceID)
+		setReference(&m.Org, &m.OrganizationID, b.ResourceID)
 	}
 }
 
-// ImportState imports by "project/<project_id>/<binding_id>" or
-// "organization/<org_id>/<binding_id>": the API lists bindings per scope and
+// ImportState imports by "project/<project>/<binding_id>" or
+// "organization/<org>/<binding_id>", the scope by name or id: the API lists
+// bindings per scope and
 // Read looks ours up in that list, filling in everything else, the resource it
 // is held on included.
 func (r *IAMBindingResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
@@ -295,33 +344,36 @@ func (r *IAMBindingResource) ImportState(ctx context.Context, req resource.Impor
 	if len(parts) != 3 || parts[1] == "" || parts[2] == "" || (parts[0] != "project" && parts[0] != "organization") {
 		resp.Diagnostics.AddError(
 			"Error importing IAM binding",
-			fmt.Sprintf("expected an import id of the form \"project/<project_id>/<binding_id>\" or \"organization/<org_id>/<binding_id>\", got %q", req.ID),
+			fmt.Sprintf("expected an import id of the form \"project/<project>/<binding_id>\" or \"organization/<org>/<binding_id>\", got %q", req.ID),
 		)
 		return
 	}
-	scope := path.Root("project_id")
+	scope := path.Root("project")
 	if parts[0] == "organization" {
-		scope = path.Root("org_id")
+		scope = path.Root("org")
 	}
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, scope, parts[1])...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[2])...)
 }
 
-// UpgradeState moves a state written against schema version 0 forward:
-// `member_type` and `member_id` become one `member`, and `org_id`, which did
-// not exist, is null.
+// UpgradeState moves a state written against an earlier schema version
+// forward. Version 0 to 1: `member_type` and `member_id` become one `member`,
+// and `org_id`, which did not exist, is null. Version 1 to 2: the scope held
+// in `project_id` or `org_id`, as the id the API answered, moves to `project`
+// or `org`, as written, beside the computed `project_id` or
+// `organization_id`.
 func (r *IAMBindingResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
+	v1 := []func(map[string]json.RawMessage) error{
+		moveReference("project_id", projectReference),
+		moveReference("org_id", orgReference),
+	}
 	return map[int64]resource.StateUpgrader{
-		0: {StateUpgrader: upgradeIAMBindingStateV0},
+		0: rawStateUpgrader("IAM binding", append([]func(map[string]json.RawMessage) error{upgradeIAMBindingStateV0}, v1...)...),
+		1: rawStateUpgrader("IAM binding", v1...),
 	}
 }
 
-func upgradeIAMBindingStateV0(_ context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(req.RawState.JSON, &raw); err != nil {
-		resp.Diagnostics.AddError("Error reading prior IAM binding state", err.Error())
-		return
-	}
+func upgradeIAMBindingStateV0(raw map[string]json.RawMessage) error {
 	var memberType, memberID string
 	if v, ok := raw["member_type"]; ok {
 		_ = json.Unmarshal(v, &memberType)
@@ -339,12 +391,7 @@ func upgradeIAMBindingStateV0(_ context.Context, req resource.UpgradeStateReques
 	if _, ok := raw["resource"]; !ok {
 		raw["resource"] = json.RawMessage("null")
 	}
-	out, err := json.Marshal(raw)
-	if err != nil {
-		resp.Diagnostics.AddError("Error writing upgraded IAM binding state", err.Error())
-		return
-	}
-	resp.DynamicValue = &tfprotov6.DynamicValue{JSON: out}
+	return nil
 }
 
 // MoveState accepts a `moved` block from the two resources this one replaced:
@@ -375,13 +422,15 @@ func (r *IAMBindingResource) MoveState(_ context.Context) []resource.StateMover 
 				return
 			}
 			target := IAMBindingResourceModel{
-				ID:        types.StringValue(src.ID),
-				OrgID:     types.StringValue(src.OrganizationID),
-				ProjectID: types.StringNull(),
-				Resource:  types.StringNull(),
-				Role:      types.StringValue(src.Role),
-				Member:    types.StringValue(joinMember("user", src.Email)),
-				CreatedAt: types.StringNull(),
+				ID:             types.StringValue(src.ID),
+				Org:            types.StringValue(src.OrganizationID),
+				OrganizationID: types.StringValue(src.OrganizationID),
+				Project:        types.StringNull(),
+				ProjectID:      types.StringNull(),
+				Resource:       types.StringNull(),
+				Role:           types.StringValue(src.Role),
+				Member:         types.StringValue(joinMember("user", src.Email)),
+				CreatedAt:      types.StringNull(),
 			}
 			resp.Diagnostics.Append(resp.TargetState.Set(ctx, target)...)
 		},
@@ -407,13 +456,15 @@ func (r *IAMBindingResource) MoveState(_ context.Context) []resource.StateMover 
 				return
 			}
 			target := IAMBindingResourceModel{
-				ID:        types.StringValue(src.ID),
-				OrgID:     types.StringValue(src.OrgID),
-				ProjectID: types.StringNull(),
-				Resource:  types.StringNull(),
-				Role:      types.StringValue(src.Role),
-				Member:    types.StringValue(joinMember(src.MemberType, src.Member)),
-				CreatedAt: types.StringValue(src.CreatedAt),
+				ID:             types.StringValue(src.ID),
+				Org:            types.StringValue(src.OrgID),
+				OrganizationID: types.StringValue(src.OrgID),
+				Project:        types.StringNull(),
+				ProjectID:      types.StringNull(),
+				Resource:       types.StringNull(),
+				Role:           types.StringValue(src.Role),
+				Member:         types.StringValue(joinMember(src.MemberType, src.Member)),
+				CreatedAt:      types.StringValue(src.CreatedAt),
 			}
 			resp.Diagnostics.Append(resp.TargetState.Set(ctx, target)...)
 		},

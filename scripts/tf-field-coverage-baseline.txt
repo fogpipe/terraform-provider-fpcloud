@@ -13,7 +13,7 @@ BucketKey.can_write
 # The binding's `member` is one string, `<type>:<address>`, the way every
 # client surface spells it; the API's two fields are split from it.
 IAMBinding.member_type
-# The target is `org_id` or `project_id`, with `resource` for a row held on a
+# The target is `org` or `project`, with `resource` for a row held on a
 # resource in the scope, not the API's type-and-id pair.
 IAMBinding.resource_id
 IAMBinding.resource_type
@@ -29,8 +29,8 @@ Firewall.rules.priority
 # owners in one state file.
 App.domains
 Domain.bucket_id
-# A job's app is `app`, resolved by name like every other reference.
-Job.app_id
+# A job's app is `app`, as written, beside the `app_id` it resolved to; the
+# name the API joins on is what `app` already is when written by name.
 Job.app_name
 # Who reaches an app, a database, a bucket or a secret is each an
 # `fpcloud_iam_binding`, on the resource or on its project or organization;
@@ -43,7 +43,7 @@ Secret.access
 ServiceAccount.bindings
 # Where a binding is held relative to a resource it reaches is a fact about
 # that resource's access list, which the line above keeps off the resource;
-# on fpcloud_iam_binding itself the target is already org_id, project_id and
+# on fpcloud_iam_binding itself the target is already org, project and
 # resource.
 IAMBinding.held_on
 
@@ -127,11 +127,10 @@ IAMBinding.resource_name
 IAMBinding.inherited
 App.cluster_token
 Project.namespace
-# A job and a runner keep their parent as the reference written and expose no
-# id beside it; fpcloud_bucket and fpcloud_firewall carry it as `project_id`,
-# the id a plan compares.
-Job.project_id
-Runner.project_id
+# A budget's organization is `org`, as written, beside the id it resolved to,
+# which is `organization_id` as on every other resource held by an
+# organization rather than the API's `org_id`.
+BillingBudget.org_id
 
 # An SA key's lifetime is fixed at creation and the API returns no way to
 # change it; exposing the expiry alone would suggest otherwise.

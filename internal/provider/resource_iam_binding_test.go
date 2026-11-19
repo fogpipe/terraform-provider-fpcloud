@@ -25,12 +25,12 @@ resource "fpcloud_project" "test" {
 }
 
 resource "fpcloud_service_account" "member" {
-  project_id = fpcloud_project.test.id
+  project    = fpcloud_project.test.id
   name       = "bound"
 }
 
 resource "fpcloud_iam_binding" "test" {
-  project_id = fpcloud_project.test.id
+  project    = fpcloud_project.test.id
   role       = "viewer"
   member     = "serviceAccount:${fpcloud_service_account.member.email}"
 }
@@ -41,7 +41,7 @@ resource "fpcloud_iam_binding" "test" {
 				),
 			},
 			{
-				// An existing binding is imported as "project/<project_id>/<id>":
+				// An existing binding is imported as "project/<project>/<id>":
 				// the API lists bindings per scope. Everything is read back.
 				ResourceName:      "fpcloud_iam_binding.test",
 				ImportState:       true,
@@ -67,7 +67,7 @@ func TestAccIAMBindingResource_Organization(t *testing.T) {
 			{
 				Config: fmt.Sprintf(`
 resource "fpcloud_iam_binding" "test" {
-  org_id = %q
+  org    = %q
   role   = "billing.viewer"
   member = %q
 }
@@ -83,7 +83,7 @@ resource "fpcloud_iam_binding" "test" {
 				ImportStateVerify: true,
 				ImportStateIdFunc: func(s *terraform.State) (string, error) {
 					rs := s.RootModule().Resources["fpcloud_iam_binding.test"]
-					return "organization/" + rs.Primary.Attributes["org_id"] + "/" + rs.Primary.ID, nil
+					return "organization/" + rs.Primary.Attributes["organization_id"] + "/" + rs.Primary.ID, nil
 				},
 			},
 		},

@@ -14,11 +14,11 @@ Manages a Fogpipe application.
 
 ```terraform
 resource "fpcloud_app" "web" {
-  project_id = fpcloud_project.production.id
-  name       = "web"
-  image      = "ghcr.io/myorg/webapp:latest"
-  port       = 3000
-  ingress    = "all" # "all" = public, "internal" = default
+  project = fpcloud_project.production.id
+  name    = "web"
+  image   = "ghcr.io/myorg/webapp:latest"
+  port    = 3000
+  ingress = "all" # "all" = public, "internal" = default
 
   env = {
     APP_NAME = "My App"
@@ -71,16 +71,16 @@ resource "fpcloud_app" "web" {
 # removing the reference revokes it. No password ever sits in this file or in
 # state.
 resource "fpcloud_database" "orders" {
-  project_id = fpcloud_project.production.id
-  name       = "orders"
-  pooler     = true
+  project = fpcloud_project.production.id
+  name    = "orders"
+  pooler  = true
 }
 
 resource "fpcloud_app" "api" {
-  project_id = fpcloud_project.production.id
-  name       = "api"
-  image      = "ghcr.io/myorg/api:1.4.2"
-  port       = 8080
+  project = fpcloud_project.production.id
+  name    = "api"
+  image   = "ghcr.io/myorg/api:1.4.2"
+  port    = 8080
 
   secret_env = {
     DATABASE_URL = { secret = fpcloud_database.orders.secrets["url"] }
@@ -111,9 +111,9 @@ resource "fpcloud_bucket" "uploads" {
 }
 
 resource "fpcloud_app" "uploader" {
-  project_id = fpcloud_project.production.id
-  name       = "uploader"
-  image      = "ghcr.io/myorg/uploader:latest"
+  project = fpcloud_project.production.id
+  name    = "uploader"
+  image   = "ghcr.io/myorg/uploader:latest"
 
   env = {
     AWS_ENDPOINT_URL = fpcloud_bucket.uploads.endpoint
@@ -135,11 +135,11 @@ resource "fpcloud_app" "uploader" {
 # It keeps everything else an app has (config, secrets, identity, logs) and
 # runs the same image as the web app with a different entrypoint.
 resource "fpcloud_app" "consumer" {
-  project_id = fpcloud_project.production.id
-  name       = "consumer"
-  image      = "ghcr.io/myorg/api:1.4.2"
-  type       = "worker"
-  command    = ["node", "worker.js"]
+  project = fpcloud_project.production.id
+  name    = "consumer"
+  image   = "ghcr.io/myorg/api:1.4.2"
+  type    = "worker"
+  command = ["node", "worker.js"]
 
   secret_env = {
     DATABASE_URL = { secret = fpcloud_database.orders.secrets["url"] }
@@ -156,26 +156,24 @@ resource "fpcloud_app" "consumer" {
 # Inside its pods the app proves who it is with a token the cluster rotates, so
 # there is no key to mount, rotate or revoke.
 resource "fpcloud_app" "reporter" {
-  project_id = fpcloud_project.production.id
-  name       = "reporter"
-  image      = "ghcr.io/myorg/reporter:latest"
+  project = fpcloud_project.production.id
+  name    = "reporter"
+  image   = "ghcr.io/myorg/reporter:latest"
 }
 
 # Read the project through the API, as itself.
 resource "fpcloud_iam_binding" "reporter_viewer" {
-  project_id  = fpcloud_project.production.id
-  member_type = "serviceAccount"
-  member_id   = fpcloud_app.reporter.service_account
-  role        = "viewer"
+  project = fpcloud_project.production.id
+  member  = "serviceAccount:${fpcloud_app.reporter.service_account}"
+  role    = "viewer"
 }
 
 # Read one secret's value through the API, without referencing it in env.
 resource "fpcloud_iam_binding" "reporter_reads_stripe" {
-  project_id  = fpcloud_project.production.id
-  resource    = "secret/${fpcloud_secret.stripe.id}"
-  member_type = "serviceAccount"
-  member_id   = fpcloud_app.reporter.service_account
-  role        = "reader"
+  project  = fpcloud_project.production.id
+  resource = "secret/${fpcloud_secret.stripe.id}"
+  member   = "serviceAccount:${fpcloud_app.reporter.service_account}"
+  role     = "secret.reader"
 }
 ```
 
@@ -186,7 +184,7 @@ resource "fpcloud_iam_binding" "reporter_reads_stripe" {
 
 - `image` (String) Container image to deploy.
 - `name` (String) App name. Doubles as the frozen resource identity (namespace object names, registry path), so changing it forces a new app.
-- `project_id` (String) ID of the project this app belongs to.
+- `project` (String) The project, by name or id, this app belongs to. It records the reference as written: another spelling of the same project changes nothing, and only a different project forces a new app.
 
 ### Optional
 
@@ -223,6 +221,7 @@ resource "fpcloud_iam_binding" "reporter_reads_stripe" {
 - `firewall_id` (String) The id of the firewall `firewall` names, null when none is attached. This is what a plan compares: a firewall is attached when it changes, never when `firewall` is merely spelled differently.
 - `id` (String) App ID.
 - `identity_token_file` (String) Where each of the app's pods finds the token proving it is that service account, named in the pod by FPCLOUD_IDENTITY_TOKEN_FILE. The Fogpipe API exchanges it for a short-lived credential; the Go client and fpcloud do so on their own.
+- `project_id` (String) The project's id. This is what a plan compares: the app is replaced when it changes, never when `project` is merely spelled differently.
 - `service_account` (String) The app's own identity: the email of the service account created with the app and deleted with it. Grant it roles and resource access with fpcloud_iam_binding; it holds nothing until granted.
 - `status` (String) Current status of the app.
 - `updated_at` (String) Timestamp when the app was last updated.

@@ -35,8 +35,9 @@ type RunnerResource struct {
 
 // RunnerResourceModel describes the resource data model.
 type RunnerResourceModel struct {
-	ID      types.String `tfsdk:"id"`
-	Project types.String `tfsdk:"project"`
+	ID        types.String `tfsdk:"id"`
+	Project   types.String `tfsdk:"project"`
+	ProjectID types.String `tfsdk:"project_id"`
 
 	GitHubScope     types.String `tfsdk:"github_scope"`
 	GitHubConfigURL types.String `tfsdk:"github_config_url"`
@@ -81,11 +82,18 @@ func (r *RunnerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"project": schema.StringAttribute{
-				Description: "ID or name of the project this runner belongs to. A project has one runner, " +
-					"so this is also what identifies it. Changing it forces a new runner.",
+				Description: "The project, by name or id, this runner belongs to. A project has one runner, " +
+					"so this is also what identifies it. It records the reference as written: another " +
+					"spelling of the same project changes nothing, and only a different project forces a " +
+					"new runner.",
 				Required: true,
+			},
+			"project_id": schema.StringAttribute{
+				Description: "The project's id. This is what a plan compares: the runner is replaced when " +
+					"it changes, never when `project` is merely spelled differently.",
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"github_scope": schema.StringAttribute{
@@ -330,7 +338,7 @@ func (r *RunnerResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
-	runner, err := r.client.GetRunner(ctx, state.Project.ValueString())
+	runner, err := r.client.GetRunner(ctx, referenceTarget(state.Project, state.ProjectID))
 	if err != nil {
 		if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
 			resp.State.RemoveResource(ctx)
@@ -344,7 +352,16 @@ func (r *RunnerResource) Read(ctx context.Context, req resource.ReadRequest, res
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// ModifyPlan decides whether a changed `project` is a different project; see
+// referenceKind.plan.
+func (r *RunnerResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	planReferences(ctx, r.client, req, resp, projectReference)
+}
+
 func (r *RunnerResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if respellInPlace(ctx, req, resp, projectReference) {
+		return
+	}
 	var plan RunnerResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -421,7 +438,7 @@ func (r *RunnerResource) Update(ctx context.Context, req resource.UpdateRequest,
 		updateReq.Services = &services
 	}
 
-	runner, err := r.client.UpdateRunner(ctx, state.Project.ValueString(), updateReq)
+	runner, err := r.client.UpdateRunner(ctx, referenceTarget(state.Project, state.ProjectID), updateReq)
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating runner", err.Error())
 		return
@@ -438,7 +455,7 @@ func (r *RunnerResource) Delete(ctx context.Context, req resource.DeleteRequest,
 		return
 	}
 
-	if err := r.client.DeleteRunner(ctx, state.Project.ValueString()); err != nil {
+	if err := r.client.DeleteRunner(ctx, referenceTarget(state.Project, state.ProjectID)); err != nil {
 		if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
 			return
 		}
@@ -452,8 +469,9 @@ func (r *RunnerResource) ImportState(ctx context.Context, req resource.ImportSta
 		resp.Diagnostics.AddError("Error importing runner", err.Error())
 		return
 	}
+	// The import names the project, so it keeps the project as spelled there.
 	var state RunnerResourceModel
-	state.Project = types.StringValue(runner.ProjectID)
+	state.Project = types.StringValue(req.ID)
 	r.apply(ctx, &state, runner, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -466,6 +484,7 @@ func (r *RunnerResource) ImportState(ctx context.Context, req resource.ImportSta
 // re-send it forever.
 func (r *RunnerResource) apply(ctx context.Context, m *RunnerResourceModel, runner *client.Runner, diags *diag.Diagnostics) {
 	m.ID = types.StringValue(runner.ID)
+	setProjectReference(&m.Project, &m.ProjectID, runner.ProjectID)
 	m.GitHubConfigURL = types.StringValue(runner.GitHubConfigURL)
 	m.RunnerGroup = types.StringValue(runner.RunnerGroup)
 	m.Size = types.StringValue(runner.Size)

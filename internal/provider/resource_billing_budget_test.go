@@ -21,7 +21,7 @@ func TestAccBillingBudgetResource(t *testing.T) {
 			{
 				Config: fmt.Sprintf(`
 resource "fpcloud_billing_budget" "test" {
-  org_id = %q
+  org    = %q
   amount = "250.00"
 }
 `, orgID),
@@ -33,14 +33,14 @@ resource "fpcloud_billing_budget" "test" {
 			{
 				// The budget is imported by the organization id alone — the org
 				// has at most one, so the schema has no separate id attribute,
-				// and org_id is what identifies the imported resource (#89).
+				// and organization_id is what identifies the imported resource (#89).
 				ResourceName:                         "fpcloud_billing_budget.test",
 				ImportState:                          true,
 				ImportStateVerify:                    true,
-				ImportStateVerifyIdentifierAttribute: "org_id",
+				ImportStateVerifyIdentifierAttribute: "organization_id",
 				ImportStateIdFunc: func(s *terraform.State) (string, error) {
 					rs := s.RootModule().Resources["fpcloud_billing_budget.test"]
-					return rs.Primary.Attributes["org_id"], nil
+					return rs.Primary.Attributes["organization_id"], nil
 				},
 			},
 		},

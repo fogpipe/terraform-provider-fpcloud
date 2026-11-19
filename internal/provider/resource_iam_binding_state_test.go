@@ -12,13 +12,15 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
-// A state written against schema version 0 names its member as a type and an
-// id; the upgrade joins them into one `member` and adds the scope attribute
-// that did not exist, leaving everything else as it was.
-func TestUpgradeIAMBindingStateV0JoinsTheMember(t *testing.T) {
-	prior := []byte(`{"id":"b-1","project_id":"p-1","resource":"database/db-1","role":"database.user","member_type":"serviceAccount","member_id":"api@p.org.cloud.fogpipe.com","created_at":"2026-01-01T00:00:00Z"}`)
+// upgradeIAMBindingState runs the upgrader from version over prior.
+func upgradeIAMBindingState(t *testing.T, version int64, prior string) map[string]any {
+	t.Helper()
+	upgrader, ok := (&IAMBindingResource{}).UpgradeState(context.Background())[version]
+	if !ok {
+		t.Fatalf("no upgrader from version %d", version)
+	}
 	var resp resource.UpgradeStateResponse
-	upgradeIAMBindingStateV0(context.Background(), resource.UpgradeStateRequest{RawState: &tfprotov6.RawState{JSON: prior}}, &resp)
+	upgrader.StateUpgrader(context.Background(), resource.UpgradeStateRequest{RawState: &tfprotov6.RawState{JSON: []byte(prior)}}, &resp)
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
 	}
@@ -26,6 +28,15 @@ func TestUpgradeIAMBindingStateV0JoinsTheMember(t *testing.T) {
 	if err := json.Unmarshal(resp.DynamicValue.JSON, &got); err != nil {
 		t.Fatal(err)
 	}
+	return got
+}
+
+// A state written against schema version 0 names its member as a type and an
+// id; the upgrade joins them into one `member` and adds the scope attribute
+// that did not exist, leaving everything else as it was. The project the
+// state held, as the id the API answered, is the reference and its id.
+func TestUpgradeIAMBindingStateV0JoinsTheMember(t *testing.T) {
+	got := upgradeIAMBindingState(t, 0, `{"id":"b-1","project_id":"p-1","resource":"database/db-1","role":"database.user","member_type":"serviceAccount","member_id":"api@p.org.cloud.fogpipe.com","created_at":"2026-01-01T00:00:00Z"}`)
 	if got["member"] != "serviceAccount:api@p.org.cloud.fogpipe.com" {
 		t.Errorf("member should be the joined pair, got %v", got["member"])
 	}
@@ -34,25 +45,40 @@ func TestUpgradeIAMBindingStateV0JoinsTheMember(t *testing.T) {
 			t.Errorf("%q should have left the state", gone)
 		}
 	}
-	if v, ok := got["org_id"]; !ok || v != nil {
-		t.Errorf("org_id should be present and null, got %v (present %v)", v, ok)
+	for _, scope := range []string{"org", "organization_id"} {
+		if v, ok := got[scope]; !ok || v != nil {
+			t.Errorf("%s should be present and null, got %v (present %v)", scope, v, ok)
+		}
 	}
-	if got["id"] != "b-1" || got["project_id"] != "p-1" || got["resource"] != "database/db-1" || got["role"] != "database.user" {
+	if _, ok := got["org_id"]; ok {
+		t.Errorf("org_id should have left the state")
+	}
+	if got["id"] != "b-1" || got["project"] != "p-1" || got["project_id"] != "p-1" || got["resource"] != "database/db-1" || got["role"] != "database.user" {
 		t.Errorf("other attributes must be untouched, got %v", got)
 	}
 }
 
 // A member typed `user` by default in an old state is spelled so.
 func TestUpgradeIAMBindingStateV0DefaultsTheTypeToUser(t *testing.T) {
-	prior := []byte(`{"id":"b-2","project_id":"p-1","resource":null,"role":"viewer","member_type":"","member_id":"jane@example.com","created_at":"2026-01-01T00:00:00Z"}`)
-	var resp resource.UpgradeStateResponse
-	upgradeIAMBindingStateV0(context.Background(), resource.UpgradeStateRequest{RawState: &tfprotov6.RawState{JSON: prior}}, &resp)
-	var got map[string]any
-	if err := json.Unmarshal(resp.DynamicValue.JSON, &got); err != nil {
-		t.Fatal(err)
-	}
+	got := upgradeIAMBindingState(t, 0, `{"id":"b-2","project_id":"p-1","resource":null,"role":"viewer","member_type":"","member_id":"jane@example.com","created_at":"2026-01-01T00:00:00Z"}`)
 	if got["member"] != "user:jane@example.com" {
 		t.Errorf("got %v", got["member"])
+	}
+}
+
+// A state written against schema version 1 held the scope in `org_id` or
+// `project_id`, as the id the API answered; the upgrade makes that id both the
+// reference and its id, so a configuration naming it plans no change.
+func TestUpgradeIAMBindingStateV1MovesTheScope(t *testing.T) {
+	got := upgradeIAMBindingState(t, 1, `{"id":"b-3","org_id":"o-1","project_id":null,"resource":null,"role":"billing.viewer","member":"user:fin@example.com","created_at":"2026-01-01T00:00:00Z"}`)
+	want := map[string]any{"org": "o-1", "organization_id": "o-1", "project": nil, "project_id": nil}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s: got %v, want %v", k, got[k], v)
+		}
+	}
+	if _, ok := got["org_id"]; ok {
+		t.Errorf("org_id should have left the state")
 	}
 }
 
@@ -91,12 +117,12 @@ func TestMoveStateIntoIAMBinding(t *testing.T) {
 		{
 			source: "fpcloud_org_member",
 			prior:  `{"id":"b-7","organization_id":"o-1","email":"ana@example.com","role":"editor","user_id":"","status":"invited"}`,
-			want:   IAMBindingResourceModel{ID: types.StringValue("b-7"), OrgID: types.StringValue("o-1"), Role: types.StringValue("editor"), Member: types.StringValue("user:ana@example.com")},
+			want:   IAMBindingResourceModel{ID: types.StringValue("b-7"), Org: types.StringValue("o-1"), Role: types.StringValue("editor"), Member: types.StringValue("user:ana@example.com")},
 		},
 		{
 			source: "fpcloud_billing_binding",
 			prior:  `{"id":"b-8","org_id":"o-1","role":"billing.viewer","member_type":"user","member":"fin@example.com","created_at":"2026-01-01T00:00:00Z"}`,
-			want:   IAMBindingResourceModel{ID: types.StringValue("b-8"), OrgID: types.StringValue("o-1"), Role: types.StringValue("billing.viewer"), Member: types.StringValue("user:fin@example.com")},
+			want:   IAMBindingResourceModel{ID: types.StringValue("b-8"), Org: types.StringValue("o-1"), Role: types.StringValue("billing.viewer"), Member: types.StringValue("user:fin@example.com")},
 		},
 	} {
 		moved := false
@@ -112,7 +138,7 @@ func TestMoveStateIntoIAMBinding(t *testing.T) {
 			moved = true
 			var got IAMBindingResourceModel
 			resp.Diagnostics.Append(resp.TargetState.Get(ctx, &got)...)
-			if got.ID != tc.want.ID || got.OrgID != tc.want.OrgID || got.Role != tc.want.Role || got.Member != tc.want.Member || !got.ProjectID.IsNull() || !got.Resource.IsNull() {
+			if got.ID != tc.want.ID || got.Org != tc.want.Org || got.OrganizationID != tc.want.Org || got.Role != tc.want.Role || got.Member != tc.want.Member || !got.Project.IsNull() || !got.ProjectID.IsNull() || !got.Resource.IsNull() {
 				t.Errorf("%s moved as %+v", tc.source, got)
 			}
 		}

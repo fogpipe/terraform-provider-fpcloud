@@ -15,23 +15,23 @@ Manages a named secret in a project or an organization. The value goes in here a
 ```terraform
 # A secret in the project, referenced from an app's env by name.
 resource "fpcloud_secret" "stripe" {
-  project_id = fpcloud_project.web.id
-  name       = "stripe-key"
-  value      = var.stripe_key
+  project = fpcloud_project.web.id
+  name    = "stripe-key"
+  value   = var.stripe_key
 }
 
 # A secret the whole organization shares: written once, referenced as
 # org/<name> by an app in any of its projects.
 resource "fpcloud_secret" "sentry_dsn" {
-  organization_id = fpcloud_org.example.id
-  name            = "sentry-dsn"
-  value           = var.sentry_dsn
+  org   = data.fpcloud_org.example.id
+  name  = "sentry-dsn"
+  value = var.sentry_dsn
 }
 
 resource "fpcloud_app" "web" {
-  project_id = fpcloud_project.web.id
-  name       = "web"
-  image      = "ghcr.io/me/web:v1"
+  project = fpcloud_project.web.id
+  name    = "web"
+  image   = "ghcr.io/me/web:v1"
 
   secret_env = {
     STRIPE_KEY = { secret = fpcloud_secret.stripe.name }
@@ -56,14 +56,16 @@ moved {
 
 ### Optional
 
-- `organization_id` (String) Organization the secret belongs to, for one written once and referenced as `org/<name>` from any of its projects. Exactly one of `project_id` and `organization_id` is set.
-- `project_id` (String) Project the secret belongs to. Exactly one of `project_id` and `organization_id` is set.
+- `org` (String) The organization, by name or id, the secret belongs to, for one written once and referenced as `org/<name>` from any of its projects. Exactly one of `project` and `org` is set. It records the reference as written: another spelling of the same organization changes nothing, and only a different organization forces a new secret.
+- `project` (String) The project, by name or id, the secret belongs to. Exactly one of `project` and `org` is set. It records the reference as written: another spelling of the same project changes nothing, and only a different project forces a new secret.
 
 ### Read-Only
 
 - `created_at` (String)
 - `id` (String) Secret ID.
-- `scope` (String) `project` or `organization`, from which of the two ids is set.
+- `organization_id` (String) The id of the organization `org` names, null for a project secret. This is what a plan compares: the secret is replaced when it changes, never when `org` is merely spelled differently.
+- `project_id` (String) The id of the project `project` names, null for an organization secret. This is what a plan compares: the secret is replaced when it changes, never when `project` is merely spelled differently.
+- `scope` (String) `project` or `organization`, from which of `project` and `org` is set.
 - `updated_at` (String)
 - `used_by` (List of String) Apps whose env references this secret, as `<project>/<app>` for an organization secret. The reference is the bind.
 

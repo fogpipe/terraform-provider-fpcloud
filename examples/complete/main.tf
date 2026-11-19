@@ -25,21 +25,21 @@ resource "fpcloud_project" "myapp" {
 
 # Database
 resource "fpcloud_database" "main" {
-  project_id = fpcloud_project.myapp.id
-  name       = "maindb"
-  cpu        = "1"
-  memory     = "2Gi"
+  project = fpcloud_project.myapp.id
+  name    = "maindb"
+  cpu     = "1"
+  memory  = "2Gi"
 }
 
 # Web application
 resource "fpcloud_app" "web" {
-  project_id      = fpcloud_project.myapp.id
-  name            = "web"
-  image           = "ghcr.io/myorg/webapp:latest"
-  port            = 3000
-  ingress         = "all"
-  min_scale       = 2
-  max_scale       = 10
+  project   = fpcloud_project.myapp.id
+  name      = "web"
+  image     = "ghcr.io/myorg/webapp:latest"
+  port      = 3000
+  ingress   = "all"
+  min_scale = 2
+  max_scale = 10
 
   env = {
     APP_NAME = "My SaaS App"
@@ -53,21 +53,19 @@ resource "fpcloud_app" "web" {
 
 # The app runs as its own service account, which holds nothing until granted.
 resource "fpcloud_iam_binding" "web_identity" {
-  project_id  = fpcloud_project.myapp.id
-  role        = "viewer"
-  member_type = "serviceAccount"
-  member_id   = fpcloud_app.web.service_account
+  project = fpcloud_project.myapp.id
+  role    = "viewer"
+  member  = "serviceAccount:${fpcloud_app.web.service_account}"
 }
 
 # A resource handed to the app's identity: a database or a bucket as its user,
 # a secret as its reader. Mounting the database's owner secret into the app
 # needs this grant, and writes it when the applier may make it.
 resource "fpcloud_iam_binding" "web_uses_db" {
-  project_id  = fpcloud_project.myapp.id
-  resource    = "database/${fpcloud_database.main.id}"
-  role        = "user"
-  member_type = "serviceAccount"
-  member_id   = fpcloud_app.web.service_account
+  project  = fpcloud_project.myapp.id
+  resource = "database/${fpcloud_database.main.id}"
+  role     = "database.user"
+  member   = "serviceAccount:${fpcloud_app.web.service_account}"
 }
 
 # Custom domain

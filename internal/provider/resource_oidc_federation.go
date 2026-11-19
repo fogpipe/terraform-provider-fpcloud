@@ -23,6 +23,7 @@ var (
 	_ resource.Resource                = &OIDCFederationResource{}
 	_ resource.ResourceWithConfigure   = &OIDCFederationResource{}
 	_ resource.ResourceWithImportState = &OIDCFederationResource{}
+	_ resource.ResourceWithModifyPlan  = &OIDCFederationResource{}
 )
 
 // NewOIDCFederationResource returns a new OIDC federation trust binding resource.
@@ -39,6 +40,7 @@ type OIDCFederationResource struct {
 type OIDCFederationResourceModel struct {
 	ID              types.String `tfsdk:"id"`
 	Project         types.String `tfsdk:"project"`
+	ProjectID       types.String `tfsdk:"project_id"`
 	Issuer          types.String `tfsdk:"issuer"`
 	Audience        types.String `tfsdk:"audience"`
 	SubjectPattern  types.String `tfsdk:"subject_pattern"`
@@ -55,8 +57,9 @@ func (r *OIDCFederationResource) Schema(_ context.Context, _ resource.SchemaRequ
 	replaceStr := []planmodifier.String{stringplanmodifier.RequiresReplace()}
 	resp.Schema = schema.Schema{
 		Description: "Trusts a GitHub repository (via OIDC) to authenticate as a service account " +
-			"in a Fogpipe project — the repo's CI presents its OIDC token and receives a short-lived, " +
-			"service-account-scoped credential, with no stored keys. Immutable: changes force replacement.",
+			"in a Fogpipe project: the repo's CI presents its OIDC token and receives a short-lived, " +
+			"service-account-scoped credential, with no stored keys. Immutable: changes force replacement, " +
+			"except another spelling of the same project.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Trust binding ID.",
@@ -66,9 +69,18 @@ func (r *OIDCFederationResource) Schema(_ context.Context, _ resource.SchemaRequ
 				},
 			},
 			"project": schema.StringAttribute{
-				Description:   "The project (ID or name) the binding belongs to.",
-				Required:      true,
-				PlanModifiers: replaceStr,
+				Description: "The project, by name or id, the binding belongs to. It records the reference as " +
+					"written: another spelling of the same project changes nothing, and only a different " +
+					"project forces a new binding.",
+				Required: true,
+			},
+			"project_id": schema.StringAttribute{
+				Description: "The project's id. This is what a plan compares: the binding is replaced " +
+					"when it changes, never when `project` is merely spelled differently.",
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"issuer": schema.StringAttribute{
 				Description:   "OIDC issuer URL. Defaults to GitHub Actions.",
@@ -135,7 +147,12 @@ func (r *OIDCFederationResource) Create(ctx context.Context, req resource.Create
 		return
 	}
 
-	binding, err := r.client.CreateTrustBinding(ctx, plan.Project.ValueString(), client.CreateTrustBindingRequest{
+	// A trust binding's answer does not name its project.
+	resolveReference(ctx, r.client, projectReference, plan.Project, &plan.ProjectID, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	binding, err := r.client.CreateTrustBinding(ctx, plan.ProjectID.ValueString(), client.CreateTrustBindingRequest{
 		Issuer:          plan.Issuer.ValueString(),
 		Audience:        plan.Audience.ValueString(),
 		SubjectPattern:  plan.SubjectPattern.ValueString(),
@@ -158,13 +175,19 @@ func (r *OIDCFederationResource) Read(ctx context.Context, req resource.ReadRequ
 		return
 	}
 
-	bindings, err := r.client.ListTrustBindings(ctx, state.Project.ValueString())
+	bindings, err := r.client.ListTrustBindings(ctx, referenceTarget(state.Project, state.ProjectID))
 	if err != nil {
 		if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
 			resp.State.RemoveResource(ctx)
 			return
 		}
 		resp.Diagnostics.AddError("Error reading OIDC federation bindings", err.Error())
+		return
+	}
+	// An import, and state written before the id was recorded, have only
+	// the project as written.
+	resolveReference(ctx, r.client, projectReference, state.Project, &state.ProjectID, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -184,7 +207,18 @@ func (r *OIDCFederationResource) Read(ctx context.Context, req resource.ReadRequ
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *OIDCFederationResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
+// ModifyPlan decides whether a changed `project` is a different project; see
+// referenceKind.plan.
+func (r *OIDCFederationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	planReferences(ctx, r.client, req, resp, projectReference)
+}
+
+// Update records another spelling of the project, the one change a binding
+// takes in place; everything else about it replaces it.
+func (r *OIDCFederationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if respellInPlace(ctx, req, resp, projectReference) {
+		return
+	}
 	resp.Diagnostics.AddError(
 		"Update not supported",
 		"OIDC federation bindings are immutable. Changes require replacement.",
@@ -198,7 +232,7 @@ func (r *OIDCFederationResource) Delete(ctx context.Context, req resource.Delete
 		return
 	}
 
-	err := r.client.DeleteTrustBinding(ctx, state.Project.ValueString(), state.ID.ValueString())
+	err := r.client.DeleteTrustBinding(ctx, referenceTarget(state.Project, state.ProjectID), state.ID.ValueString())
 	if err != nil {
 		if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
 			return

@@ -21,7 +21,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
-	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 )
 
 var (
@@ -38,6 +37,7 @@ type AppResource struct {
 // AppResourceModel describes the resource data model.
 type AppResourceModel struct {
 	ID                  types.String `tfsdk:"id"`
+	Project             types.String `tfsdk:"project"`
 	ProjectID           types.String `tfsdk:"project_id"`
 	Name                types.String `tfsdk:"name"`
 	DisplayName         types.String `tfsdk:"display_name"`
@@ -132,7 +132,7 @@ func (r *AppResource) Metadata(_ context.Context, req resource.MetadataRequest, 
 func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a Fogpipe application.",
-		Version:     2,
+		Version:     3,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "App ID.",
@@ -141,11 +141,18 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"project": schema.StringAttribute{
+				Description: "The project, by name or id, this app belongs to. It records the reference " +
+					"as written: another spelling of the same project changes nothing, and only a different " +
+					"project forces a new app.",
+				Required: true,
+			},
 			"project_id": schema.StringAttribute{
-				Description: "ID of the project this app belongs to.",
-				Required:    true,
+				Description: "The project's id. This is what a plan compares: the app is replaced when it " +
+					"changes, never when `project` is merely spelled differently.",
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{
@@ -567,10 +574,10 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	// plan declares and never spends a rollout at the platform's default.
 	createReq.CPULimit, createReq.MemoryLimit = plan.CPULimit.ValueString(), plan.MemoryLimit.ValueString()
 
-	app, err := r.client.CreateApp(ctx, plan.ProjectID.ValueString(), createReq)
+	app, err := r.client.CreateApp(ctx, plan.Project.ValueString(), createReq)
 	if err != nil {
 		if isConflict(err) && plan.AdoptExisting.ValueBool() {
-			existing, ferr := r.findAppByName(ctx, plan.ProjectID.ValueString(), plan.Name.ValueString())
+			existing, ferr := r.findAppByName(ctx, plan.Project.ValueString(), plan.Name.ValueString())
 			if ferr != nil {
 				resp.Diagnostics.AddError(
 					"Error adopting existing app",
@@ -989,8 +996,9 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-// ModifyPlan resolves a changed `firewall` to the firewall it names, so the
-// plan attaches one only when it is a different firewall.
+// ModifyPlan resolves a changed `project` and a changed `firewall`, each once:
+// another spelling of the same project is an update that writes nothing, and
+// another spelling of the attached firewall attaches nothing.
 func (r *AppResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
 		return
@@ -1001,16 +1009,18 @@ func (r *AppResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	var firewallID types.String
-	if config.ProjectID.Equal(state.ProjectID) {
-		firewallID = planFirewallReference(ctx, r.client, state.ProjectID.ValueString(), config.Firewall, state.Firewall, state.FirewallID, &resp.Diagnostics)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-	} else {
+	if planReferences(ctx, r.client, req, resp, projectReference) {
 		// A new project is a new app, created with the firewall the
 		// configuration names in that project; there is nothing to compare.
-		firewallID = types.StringUnknown()
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("firewall_id"), types.StringUnknown())...)
+		return
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	firewallID := planFirewallReference(ctx, r.client, referenceTarget(state.Project, state.ProjectID), config.Firewall, state.Firewall, state.FirewallID, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("firewall_id"), firewallID)...)
 }
@@ -1314,7 +1324,7 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	setVolumeMountsOnModel(model, app.VolumeMounts, diags)
 	setSecurityContextOnModel(model, app.SecurityContext, diags)
 	model.ID = types.StringValue(app.ID)
-	model.ProjectID = types.StringValue(app.ProjectID)
+	setProjectReference(&model.Project, &model.ProjectID, app.ProjectID)
 	model.Name = types.StringValue(app.Name)
 	model.DisplayName = types.StringValue(app.DisplayName)
 	model.URLSlug = types.StringValue(app.URLSlug)
@@ -1543,35 +1553,17 @@ var _ resource.ResourceWithUpgradeState = &AppResource{}
 
 // UpgradeState moves a state written against an earlier schema version to the
 // current one. The framework does not chain upgraders: each one is handed the
-// state as its version wrote it and returns the current version's, so the
-// version 0 upgrader applies both steps.
+// state as its version wrote it and returns the current version's, so each
+// upgrader applies every step since its version.
+//
+// Version 2 held the project in `project_id`, as the id the API answered; it
+// is now `project`, as written, beside the computed `project_id`.
 func (r *AppResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
+	v2 := moveReference("project_id", projectReference)
 	return map[int64]resource.StateUpgrader{
-		0: {StateUpgrader: upgradeAppStateFrom(upgradeAppStateV0, upgradeAppStateV1)},
-		1: {StateUpgrader: upgradeAppStateFrom(upgradeAppStateV1)},
-	}
-}
-
-// upgradeAppStateFrom runs each step over the raw state in order.
-func upgradeAppStateFrom(steps ...func(map[string]json.RawMessage) error) func(context.Context, resource.UpgradeStateRequest, *resource.UpgradeStateResponse) {
-	return func(_ context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
-		var raw map[string]json.RawMessage
-		if err := json.Unmarshal(req.RawState.JSON, &raw); err != nil {
-			resp.Diagnostics.AddError("Error reading prior app state", err.Error())
-			return
-		}
-		for _, step := range steps {
-			if err := step(raw); err != nil {
-				resp.Diagnostics.AddError("Error upgrading prior app state", err.Error())
-				return
-			}
-		}
-		out, err := json.Marshal(raw)
-		if err != nil {
-			resp.Diagnostics.AddError("Error writing upgraded app state", err.Error())
-			return
-		}
-		resp.DynamicValue = &tfprotov6.DynamicValue{JSON: out}
+		0: rawStateUpgrader("app", upgradeAppStateV0, upgradeAppStateV1, v2),
+		1: rawStateUpgrader("app", upgradeAppStateV1, v2),
+		2: rawStateUpgrader("app", v2),
 	}
 }
 

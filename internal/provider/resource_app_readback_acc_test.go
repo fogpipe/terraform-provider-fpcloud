@@ -38,7 +38,7 @@ resource "fpcloud_project" "test" {
 }
 
 resource "fpcloud_app" "test" {
-  project_id      = fpcloud_project.test.id
+  project         = fpcloud_project.test.id
   name            = %[2]q
   image           = "busybox:1.37"
   type            = "worker"

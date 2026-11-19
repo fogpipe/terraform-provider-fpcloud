@@ -20,6 +20,8 @@ var (
 	_ resource.ResourceWithMoveState      = &SecretResource{}
 	_ resource.ResourceWithImportState    = &SecretResource{}
 	_ resource.ResourceWithValidateConfig = &SecretResource{}
+	_ resource.ResourceWithModifyPlan     = &SecretResource{}
+	_ resource.ResourceWithUpgradeState   = &SecretResource{}
 )
 
 // NewSecretResource returns a new secret resource (#1069, ADR-287).
@@ -38,7 +40,9 @@ type SecretResource struct {
 // SecretResourceModel describes the resource data model.
 type SecretResourceModel struct {
 	ID             types.String `tfsdk:"id"`
+	Project        types.String `tfsdk:"project"`
 	ProjectID      types.String `tfsdk:"project_id"`
+	Org            types.String `tfsdk:"org"`
 	OrganizationID types.String `tfsdk:"organization_id"`
 	Scope          types.String `tfsdk:"scope"`
 	Name           types.String `tfsdk:"name"`
@@ -62,6 +66,7 @@ func (r *SecretResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"organization write). A database's owner credential is a project secret of this kind too " +
 			"(<database>-owner), created with the database and rotated by its rotate-password; reference " +
 			"it, never manage it here.",
+		Version: 1,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Secret ID.",
@@ -70,22 +75,39 @@ func (r *SecretResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"project": schema.StringAttribute{
+				Description: "The project, by name or id, the secret belongs to. Exactly one of `project` " +
+					"and `org` is set. It records the reference as written: another spelling of the same " +
+					"project changes nothing, and only a different project forces a new secret.",
+				Optional: true,
+			},
 			"project_id": schema.StringAttribute{
-				Description: "Project the secret belongs to. Exactly one of `project_id` and `organization_id` is set.",
-				Optional:    true,
+				Description: "The id of the project `project` names, null for an organization secret. This " +
+					"is what a plan compares: the secret is replaced when it changes, never when `project` " +
+					"is merely spelled differently.",
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"org": schema.StringAttribute{
+				Description: "The organization, by name or id, the secret belongs to, for one written once " +
+					"and referenced as `org/<name>` from any of its projects. Exactly one of `project` and " +
+					"`org` is set. It records the reference as written: another spelling of the same " +
+					"organization changes nothing, and only a different organization forces a new secret.",
+				Optional: true,
+			},
 			"organization_id": schema.StringAttribute{
-				Description: "Organization the secret belongs to, for one written once and referenced as `org/<name>` from any of its projects. Exactly one of `project_id` and `organization_id` is set.",
-				Optional:    true,
+				Description: "The id of the organization `org` names, null for a project secret. This is " +
+					"what a plan compares: the secret is replaced when it changes, never when `org` is " +
+					"merely spelled differently.",
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"scope": schema.StringAttribute{
-				Description: "`project` or `organization`, from which of the two ids is set.",
+				Description: "`project` or `organization`, from which of `project` and `org` is set.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -116,8 +138,8 @@ func (r *SecretResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 	}
 }
 
-// ValidateConfig holds the scope rule: exactly one of project_id and
-// organization_id, the way the schema holds it on the server.
+// ValidateConfig holds the scope rule: exactly one of project and org, the way
+// the schema holds it on the server.
 func (r *SecretResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var cfg SecretResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
@@ -129,12 +151,12 @@ func (r *SecretResource) ValidateConfig(ctx context.Context, req resource.Valida
 	if !cfg.Value.IsUnknown() && cfg.Value.ValueString() == "" {
 		resp.Diagnostics.AddAttributeError(path.Root("value"), "A secret holds a value", "value is empty; a secret with nothing to hold is not created. Leave the resource out instead.")
 	}
-	if cfg.ProjectID.IsUnknown() || cfg.OrganizationID.IsUnknown() {
+	if cfg.Project.IsUnknown() || cfg.Org.IsUnknown() {
 		return
 	}
-	hasProject, hasOrg := !cfg.ProjectID.IsNull(), !cfg.OrganizationID.IsNull()
+	hasProject, hasOrg := !cfg.Project.IsNull(), !cfg.Org.IsNull()
 	if hasProject == hasOrg {
-		resp.Diagnostics.AddAttributeError(path.Root("project_id"), "A secret is in a project or in an organization", "Set exactly one of project_id and organization_id.")
+		resp.Diagnostics.AddAttributeError(path.Root("project"), "A secret is in a project or in an organization", "Set exactly one of project and org.")
 	}
 }
 
@@ -161,10 +183,10 @@ func (r *SecretResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 	var sec *client.Secret
 	var err error
-	if org := plan.OrganizationID.ValueString(); org != "" {
+	if org := plan.Org.ValueString(); org != "" {
 		sec, err = r.client.CreateOrgSecret(ctx, org, plan.Name.ValueString(), plan.Value.ValueString())
 	} else {
-		sec, err = r.client.CreateProjectSecret(ctx, plan.ProjectID.ValueString(), plan.Name.ValueString(), plan.Value.ValueString())
+		sec, err = r.client.CreateProjectSecret(ctx, plan.Project.ValueString(), plan.Name.ValueString(), plan.Value.ValueString())
 	}
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating secret", err.Error())
@@ -193,7 +215,17 @@ func (r *SecretResource) Read(ctx context.Context, req resource.ReadRequest, res
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// ModifyPlan decides whether a changed `project` or `org` names a different
+// one; see referenceKind.plan.
+func (r *SecretResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	planReferences(ctx, r.client, req, resp, projectReference, orgReference)
+}
+
 func (r *SecretResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	// Writing the value again would roll every app referencing the secret.
+	if respellInPlace(ctx, req, resp, projectReference, orgReference) {
+		return
+	}
 	var plan, state SecretResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -260,7 +292,9 @@ func (r *SecretResource) MoveState(_ context.Context) []resource.StateMover {
 			resp.Diagnostics.Append(diags...)
 			target := SecretResourceModel{
 				ID:             types.StringValue(src.ID),
+				Project:        types.StringValue(src.ProjectID),
 				ProjectID:      types.StringValue(src.ProjectID),
+				Org:            types.StringNull(),
 				OrganizationID: types.StringNull(),
 				Scope:          types.StringValue("project"),
 				Name:           types.StringValue(src.Name),
@@ -274,13 +308,24 @@ func (r *SecretResource) MoveState(_ context.Context) []resource.StateMover {
 	}}
 }
 
+// UpgradeState moves a state written against schema version 0, which held the
+// scope in `project_id` or `organization_id` as the id the API answered, to
+// `project` or `org`, as written, beside the computed id.
+func (r *SecretResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
+	return map[int64]resource.StateUpgrader{
+		0: rawStateUpgrader("secret",
+			moveReference("project_id", projectReference),
+			moveReference("organization_id", orgReference)),
+	}
+}
+
 // mapSecretToModel copies what the API reports; the value is never read back
 // and stays what the configuration holds.
 func mapSecretToModel(ctx context.Context, sec *client.Secret, m *SecretResourceModel) {
 	m.ID = types.StringValue(sec.ID)
 	m.Scope = types.StringValue(sec.Scope)
-	m.ProjectID = optionalString(sec.ProjectID)
-	m.OrganizationID = optionalString(sec.OrganizationID)
+	setReference(&m.Project, &m.ProjectID, sec.ProjectID)
+	setReference(&m.Org, &m.OrganizationID, sec.OrganizationID)
 	m.Name = types.StringValue(sec.Name)
 	used, _ := types.ListValueFrom(ctx, types.StringType, sec.UsedBy)
 	m.UsedBy = used

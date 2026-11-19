@@ -7,9 +7,9 @@ resource "fpcloud_bucket" "uploads" {
 }
 
 resource "fpcloud_app" "uploader" {
-  project_id = fpcloud_project.production.id
-  name       = "uploader"
-  image      = "ghcr.io/myorg/uploader:latest"
+  project = fpcloud_project.production.id
+  name    = "uploader"
+  image   = "ghcr.io/myorg/uploader:latest"
 
   env = {
     AWS_ENDPOINT_URL = fpcloud_bucket.uploads.endpoint

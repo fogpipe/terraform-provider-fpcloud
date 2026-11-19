@@ -25,7 +25,7 @@ func TestSecretEmptyValueIsRefusedAtPlan(t *testing.T) {
 		for name, at := range typ.AttributeTypes {
 			attrs[name] = tftypes.NewValue(at, nil)
 		}
-		attrs["project_id"] = tftypes.NewValue(tftypes.String, "p")
+		attrs["project"] = tftypes.NewValue(tftypes.String, "p")
 		attrs["name"] = tftypes.NewValue(tftypes.String, "stripe-key")
 		attrs["value"] = value
 		var resp fwresource.ValidateConfigResponse

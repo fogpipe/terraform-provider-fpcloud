@@ -150,7 +150,7 @@ resource "fpcloud_firewall" "test" {
 }
 
 resource "fpcloud_app" "scaffold" {
-  project_id = fpcloud_project.scaffold.id
+  project    = fpcloud_project.scaffold.id
   name       = %[2]q
   image      = "nginxinc/nginx-unprivileged:latest"
   ingress    = "all"

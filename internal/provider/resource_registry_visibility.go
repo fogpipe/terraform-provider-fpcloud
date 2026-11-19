@@ -15,8 +15,11 @@ import (
 )
 
 var (
-	_ resource.Resource              = &RegistryVisibilityResource{}
-	_ resource.ResourceWithConfigure = &RegistryVisibilityResource{}
+	_ resource.Resource                 = &RegistryVisibilityResource{}
+	_ resource.ResourceWithConfigure    = &RegistryVisibilityResource{}
+	_ resource.ResourceWithImportState  = &RegistryVisibilityResource{}
+	_ resource.ResourceWithModifyPlan   = &RegistryVisibilityResource{}
+	_ resource.ResourceWithUpgradeState = &RegistryVisibilityResource{}
 )
 
 // NewRegistryVisibilityResource returns a new registry repo visibility resource.
@@ -32,6 +35,7 @@ type RegistryVisibilityResource struct {
 // RegistryVisibilityResourceModel describes the resource data model.
 type RegistryVisibilityResourceModel struct {
 	ID        types.String `tfsdk:"id"`
+	Project   types.String `tfsdk:"project"`
 	ProjectID types.String `tfsdk:"project_id"`
 	Repo      types.String `tfsdk:"repo"`
 	Public    types.Bool   `tfsdk:"public"`
@@ -49,6 +53,7 @@ func (r *RegistryVisibilityResource) Schema(_ context.Context, _ resource.Schema
 			"A public repo is anonymously pullable; private is the default. platform/** repos can never " +
 			"be made public — the API rejects that with a 400 regardless of caller permissions. There is " +
 			"no delete endpoint: destroying this resource sets public back to false.",
+		Version: 1,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Synthetic ID (\"<project_id>/<repo>\") — the API has no id field for a visibility record.",
@@ -57,11 +62,18 @@ func (r *RegistryVisibilityResource) Schema(_ context.Context, _ resource.Schema
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"project": schema.StringAttribute{
+				Description: "The project, by name or id, the repository belongs to. It records the reference as " +
+					"written: another spelling of the same project changes nothing, and only a different " +
+					"project forces a new resource.",
+				Required: true,
+			},
 			"project_id": schema.StringAttribute{
-				Description: "The project the repository belongs to. Changing it forces a new resource.",
-				Required:    true,
+				Description: "The project's id. This is what a plan compares: the resource is replaced " +
+					"when it changes, never when `project` is merely spelled differently.",
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"repo": schema.StringAttribute{
@@ -117,7 +129,7 @@ func (r *RegistryVisibilityResource) Create(ctx context.Context, req resource.Cr
 		return
 	}
 
-	record, err := r.set(ctx, plan.ProjectID.ValueString(), &plan)
+	record, err := r.set(ctx, plan.Project.ValueString(), &plan)
 	if err != nil {
 		resp.Diagnostics.AddError("Error setting registry visibility", err.Error())
 		return
@@ -135,7 +147,7 @@ func (r *RegistryVisibilityResource) Read(ctx context.Context, req resource.Read
 	}
 
 	// No single-record GET, so list the project's visibility records and find ours.
-	records, err := r.client.ListRegistryVisibility(ctx, state.ProjectID.ValueString())
+	records, err := r.client.ListRegistryVisibility(ctx, referenceTarget(state.Project, state.ProjectID))
 	if err != nil {
 		if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
 			resp.State.RemoveResource(ctx)
@@ -161,14 +173,23 @@ func (r *RegistryVisibilityResource) Read(ctx context.Context, req resource.Read
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// ModifyPlan decides whether a changed `project` is a different project; see
+// referenceKind.plan.
+func (r *RegistryVisibilityResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	planReferences(ctx, r.client, req, resp, projectReference)
+}
+
 func (r *RegistryVisibilityResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if respellInPlace(ctx, req, resp, projectReference) {
+		return
+	}
 	var plan RegistryVisibilityResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	record, err := r.set(ctx, plan.ProjectID.ValueString(), &plan)
+	record, err := r.set(ctx, referenceTarget(plan.Project, plan.ProjectID), &plan)
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating registry visibility", err.Error())
 		return
@@ -187,7 +208,7 @@ func (r *RegistryVisibilityResource) Delete(ctx context.Context, req resource.De
 
 	// No delete route — revert to private (the implicit default for a repo with
 	// no visibility record) instead.
-	_, err := r.client.SetRegistryVisibility(ctx, state.ProjectID.ValueString(), client.SetRegistryVisibilityRequest{
+	_, err := r.client.SetRegistryVisibility(ctx, referenceTarget(state.Project, state.ProjectID), client.SetRegistryVisibilityRequest{
 		Repo:   state.Repo.ValueString(),
 		Public: false,
 	})
@@ -199,24 +220,34 @@ func (r *RegistryVisibilityResource) Delete(ctx context.Context, req resource.De
 	}
 }
 
-// ImportState imports by "<project_id>/<repo>".
+// ImportState imports by "<project>/<repo>", the project by name or id.
 func (r *RegistryVisibilityResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	projectID, repo, found := strings.Cut(req.ID, "/")
+	project, repo, found := strings.Cut(req.ID, "/")
 	if !found {
 		resp.Diagnostics.AddError(
 			"Invalid import ID",
-			fmt.Sprintf("expected \"<project_id>/<repo>\", got %q", req.ID),
+			fmt.Sprintf("expected \"<project>/<repo>\", got %q", req.ID),
 		)
 		return
 	}
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project_id"), projectID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project"), project)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("repo"), repo)...)
 }
 
-// apply maps an API RegistryRepoVisibility response onto the model.
+// UpgradeState moves a state written against schema version 0, which held the
+// project in `project_id` as the id the API answered, to `project`, as
+// written, beside the computed `project_id`.
+func (r *RegistryVisibilityResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
+	return map[int64]resource.StateUpgrader{
+		0: rawStateUpgrader("registry visibility", moveReference("project_id", projectReference)),
+	}
+}
+
+// apply maps an API RegistryRepoVisibility response onto the model. The id is
+// built from the project's id, never from `project` as written.
 func (r *RegistryVisibilityResource) apply(m *RegistryVisibilityResourceModel, v *client.RegistryRepoVisibility) {
-	m.ID = types.StringValue(v.ProjectID + "/" + v.Repo)
-	m.ProjectID = types.StringValue(v.ProjectID)
+	setProjectReference(&m.Project, &m.ProjectID, v.ProjectID)
+	m.ID = types.StringValue(m.ProjectID.ValueString() + "/" + v.Repo)
 	m.Repo = types.StringValue(v.Repo)
 	m.Public = types.BoolValue(v.Public)
 	m.CreatedAt = types.StringValue(v.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))

@@ -16,15 +16,15 @@ Manages an IAM binding: a member holding a role on a Fogpipe organization or pro
 # A person on a project. A member may hold several roles on one target; each
 # is its own binding, and the scope roles contain each other: viewer < editor < owner.
 resource "fpcloud_iam_binding" "jane_editor" {
-  project_id = fpcloud_project.production.id
-  member     = "user:jane@example.com"
-  role       = "editor"
+  project = fpcloud_project.production.id
+  member  = "user:jane@example.com"
+  role    = "editor"
 }
 
 # A billing role is a binding on the organization. An owner holds
 # billing.admin by inclusion; this gives someone the bill and nothing else.
 resource "fpcloud_iam_binding" "finance_reads_the_bill" {
-  org_id = fpcloud_project.production.organization_id
+  org    = fpcloud_project.production.organization_id
   member = "user:finance@example.com"
   role   = "billing.viewer"
 }
@@ -34,10 +34,10 @@ resource "fpcloud_iam_binding" "finance_reads_the_bill" {
 # `database.user`; `bucket.reader`, `bucket.user` or `bucket.publisher`;
 # `secret.reader`.
 resource "fpcloud_iam_binding" "api_uses_orders" {
-  project_id = fpcloud_project.production.id
-  resource   = "database/${fpcloud_database.orders.id}"
-  member     = "serviceAccount:${fpcloud_app.api.service_account}"
-  role       = "database.user"
+  project  = fpcloud_project.production.id
+  resource = "database/${fpcloud_database.orders.id}"
+  member   = "serviceAccount:${fpcloud_app.api.service_account}"
+  role     = "database.user"
 }
 ```
 
@@ -51,14 +51,16 @@ resource "fpcloud_iam_binding" "api_uses_orders" {
 
 ### Optional
 
-- `org_id` (String) The organization the role is held on. Exactly one of `org_id` and `project_id`.
-- `project_id` (String) The project the role is held on. Exactly one of `org_id` and `project_id`.
+- `org` (String) The organization, by name or id, the role is held on. Exactly one of `org` and `project`. It records the reference as written: another spelling of the same organization changes nothing, and only a different organization forces a new binding.
+- `project` (String) The project, by name or id, the role is held on. Exactly one of `org` and `project`. It records the reference as written: another spelling of the same project changes nothing, and only a different project forces a new binding.
 - `resource` (String) A resource in the scope handed to the member instead of a role on the scope, as `<kind>/<id>`: `app/<id>`, `database/<id>`, `bucket/<id>` or `secret/<id>` of the project, or `secret/<id>` for an organization's own secret. The role is then one held on that kind, which `fpcloud iam roles` lists: `app.deployer` on an app, `database.user` on a database, `bucket.reader`, `bucket.user` or `bucket.publisher` on a bucket, `secret.reader` or `secret.writer` on a secret. Handing a resource over needs `iam.set` on it and everything the role carries, so an owner does it.
 
 ### Read-Only
 
 - `created_at` (String) Timestamp when the binding was created.
 - `id` (String) Binding ID.
+- `organization_id` (String) The id of the organization `org` names, null for a binding on a project. This is what a plan compares: the binding is replaced when it changes, never when `org` is merely spelled differently.
+- `project_id` (String) The id of the project `project` names, null for a binding on an organization. This is what a plan compares: the binding is replaced when it changes, never when `project` is merely spelled differently.
 
 ## Import
 
@@ -67,9 +69,10 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import by "project/<project_id>/<binding_id>" or "organization/<org_id>/<binding_id>":
-# the API lists bindings per scope. The member comes back spelled the way the
-# server canonicalized it, and the resource it is held on, if any, is read back.
+# Import by "project/<project>/<binding_id>" or "organization/<org>/<binding_id>",
+# the scope by name or id: the API lists bindings per scope. The member comes
+# back spelled the way the server canonicalized it, and the resource it is held
+# on, if any, is read back.
 terraform import fpcloud_iam_binding.viewer project/6c1f0a2e-9d3b-4b7e-8f2a-0e5d7c4a1b9f/2a7e4c1d-5b8f-4e3a-9c6d-1f0b8a7e5d3c
 terraform import fpcloud_iam_binding.finance organization/4b9d2e7a-1c5f-4a8e-b3d6-9f0e8c7a5b1d/9e1c3b5a-7d2f-4c8e-a6b4-0f3d9e8c7b2a
 ```

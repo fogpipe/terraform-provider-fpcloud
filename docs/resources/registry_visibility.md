@@ -15,9 +15,9 @@ Manages a container registry repository's public/private visibility (ADR-013 S4)
 ```terraform
 # Make one repo anonymously pullable, without exposing the rest of the project.
 resource "fpcloud_registry_visibility" "public_image" {
-  project_id = fpcloud_project.example.id
-  repo       = "example/public-app"
-  public     = true
+  project = fpcloud_project.example.id
+  repo    = "example/public-app"
+  public  = true
 }
 ```
 
@@ -26,7 +26,7 @@ resource "fpcloud_registry_visibility" "public_image" {
 
 ### Required
 
-- `project_id` (String) The project the repository belongs to. Changing it forces a new resource.
+- `project` (String) The project, by name or id, the repository belongs to. It records the reference as written: another spelling of the same project changes nothing, and only a different project forces a new resource.
 - `public` (Boolean) Whether the repository is anonymously pullable. Required — explicit, since this controls public exposure of container images.
 - `repo` (String) Repository name (project-relative). Changing it forces a new resource.
 
@@ -34,4 +34,5 @@ resource "fpcloud_registry_visibility" "public_image" {
 
 - `created_at` (String) Timestamp when the visibility record was created.
 - `id` (String) Synthetic ID ("<project_id>/<repo>") — the API has no id field for a visibility record.
+- `project_id` (String) The project's id. This is what a plan compares: the resource is replaced when it changes, never when `project` is merely spelled differently.
 - `updated_at` (String) Timestamp when the visibility record was last updated.

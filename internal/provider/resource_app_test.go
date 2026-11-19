@@ -28,7 +28,7 @@ resource "fpcloud_project" "test" {
 }
 
 resource "fpcloud_app" "test" {
-  project_id   = fpcloud_project.test.id
+  project      = fpcloud_project.test.id
   name         = %[2]q
   image        = "nginxinc/nginx-unprivileged:latest"
   port         = 8080
@@ -77,7 +77,7 @@ func TestAppResourceSchema(t *testing.T) {
 			{
 				Config: `
 resource "fpcloud_app" "test" {
-  project_id = "fake-project-id"
+  project    = "fake-project-id"
   name       = "schema-validation-test"
   image      = "nginx:latest"
 }

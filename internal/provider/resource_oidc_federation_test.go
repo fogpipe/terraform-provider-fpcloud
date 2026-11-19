@@ -25,7 +25,7 @@ resource "fpcloud_project" "test" {
 }
 
 resource "fpcloud_service_account" "ci" {
-  project_id = fpcloud_project.test.id
+  project    = fpcloud_project.test.id
   name       = "ci"
 }
 

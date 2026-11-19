@@ -2,10 +2,12 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/fogpipe/cloud-cli/pkg/client"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
@@ -18,6 +20,7 @@ var (
 	_ resource.Resource                = &JobResource{}
 	_ resource.ResourceWithConfigure   = &JobResource{}
 	_ resource.ResourceWithImportState = &JobResource{}
+	_ resource.ResourceWithModifyPlan  = &JobResource{}
 )
 
 // NewJobResource returns a new scheduled job resource.
@@ -34,9 +37,11 @@ type JobResource struct {
 type JobResourceModel struct {
 	ID          types.String `tfsdk:"id"`
 	Project     types.String `tfsdk:"project"`
+	ProjectID   types.String `tfsdk:"project_id"`
 	Name        types.String `tfsdk:"name"`
 	DisplayName types.String `tfsdk:"display_name"`
 	App         types.String `tfsdk:"app"`
+	AppID       types.String `tfsdk:"app_id"`
 
 	Schedule    types.String `tfsdk:"schedule"`
 	Timezone    types.String `tfsdk:"timezone"`
@@ -81,10 +86,17 @@ func (r *JobResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"project": schema.StringAttribute{
-				Description: "ID or name of the project this job belongs to. Changing it forces a new job.",
-				Required:    true,
+				Description: "The project, by name or id, this job belongs to. It records the reference as " +
+					"written: another spelling of the same project changes nothing, and only a different " +
+					"project forces a new job.",
+				Required: true,
+			},
+			"project_id": schema.StringAttribute{
+				Description: "The project's id. This is what a plan compares: the job is replaced " +
+					"when it changes, never when `project` is merely spelled differently.",
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{
@@ -100,11 +112,18 @@ func (r *JobResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Computed:    true,
 			},
 			"app": schema.StringAttribute{
-				Description: "Name or ID of the app whose image, config, secrets and identity the job " +
-					"inherits. Changing it forces a new job.",
+				Description: "The app, by name or id, whose image, config, secrets and identity the job " +
+					"inherits, from the job's project. It records the reference as written: another " +
+					"spelling of the same app changes nothing, and only a different app forces a new job.",
 				Optional: true,
+			},
+			"app_id": schema.StringAttribute{
+				Description: "The id of the app `app` names, null when the job has none. This is what a " +
+					"plan compares: the job is replaced when it changes, never when `app` is merely spelled " +
+					"differently.",
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"schedule": schema.StringAttribute{
@@ -301,7 +320,68 @@ func (r *JobResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// ModifyPlan decides whether a changed `project` is a different project; see
+// referenceKind.plan.
+func (r *JobResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if planReferences(ctx, r.client, req, resp, projectReference) {
+		// A new job in another project, created with the app the
+		// configuration names there; there is nothing to compare.
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("app_id"), types.StringUnknown())...)
+		return
+	}
+	if resp.Diagnostics.HasError() || req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+	var projectID types.String
+	resp.Diagnostics.Append(resp.Plan.GetAttribute(ctx, path.Root("project_id"), &projectID)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	planReferences(ctx, r.client, req, resp, appReference(projectID.ValueString()))
+}
+
+// appReference is a job's `app`, by name or id, beside its `app_id`. An app
+// is named within a project, so it is resolved in the job's.
+func appReference(projectID string) referenceKind {
+	return referenceKind{
+		attr:    "app",
+		partner: "app_id",
+		name:    "app",
+		noun:    "an app",
+		resolve: func(ctx context.Context, c *client.Client, ref string) (string, error) {
+			return resolveApp(ctx, c, projectID, ref)
+		},
+	}
+}
+
+// resolveApp finds the app ref names in a project, by id or by name.
+func resolveApp(ctx context.Context, c *client.Client, projectID, ref string) (string, error) {
+	app, err := c.GetApp(ctx, ref)
+	if err == nil && app.ProjectID == projectID {
+		return app.ID, nil
+	}
+	// A name is not an id the app route answers to; anything but a refusal
+	// of the reference itself is an error of its own.
+	var apiErr *client.APIError
+	if err != nil && (!errors.As(err, &apiErr) || apiErr.StatusCode >= 500) {
+		return "", err
+	}
+	apps, err := c.ListApps(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	for _, a := range apps {
+		if a.Name == ref {
+			return a.ID, nil
+		}
+	}
+	return "", fmt.Errorf("project %s has no app %q", projectID, ref)
+}
+
 func (r *JobResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if respellInPlace(ctx, req, resp, projectReference, appReference("")) {
+		return
+	}
 	var plan JobResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -419,9 +499,10 @@ func (r *JobResource) apply(m *JobResourceModel, job *client.Job) {
 	} else {
 		m.HTTPMethod = types.StringNull()
 	}
-	if m.Project.IsNull() || m.Project.IsUnknown() {
-		m.Project = types.StringValue(job.ProjectID)
-	}
+	setProjectReference(&m.Project, &m.ProjectID, job.ProjectID)
+	// The app stays as written; a job read without it, an import, takes the
+	// app's name.
+	m.AppID = optionalString(job.AppID)
 	if job.AppName != "" && (m.App.IsNull() || m.App.IsUnknown()) {
 		m.App = types.StringValue(job.AppName)
 	}

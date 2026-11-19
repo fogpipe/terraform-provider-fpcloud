@@ -3,7 +3,6 @@ package provider_test
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
@@ -28,7 +27,7 @@ resource "fpcloud_project" "test" {
 }
 
 resource "fpcloud_service_account" "test" {
-  project_id = fpcloud_project.test.id
+  project    = fpcloud_project.test.id
   name       = "deployer"
 }
 `, proj),
@@ -38,7 +37,7 @@ resource "fpcloud_service_account" "test" {
 				),
 			},
 			{
-				// Imported as "project/<project_id>/<id>": the API lists
+				// Imported as "project/<project>/<id>": the API lists
 				// service accounts per owner and has no get-by-id, so the id
 				// names which owner to look in (#89, #778). Everything is read
 				// back, so nothing is ignored.
@@ -66,7 +65,7 @@ func TestServiceAccountOwnerIsProjectOrOrg(t *testing.T) {
 	var resp fwresource.SchemaResponse
 	provider.NewServiceAccountResource().Schema(context.Background(), fwresource.SchemaRequest{}, &resp)
 
-	for _, name := range []string{"project_id", "organization_id"} {
+	for name, partner := range map[string]string{"project": "project_id", "org": "organization_id"} {
 		attr, ok := resp.Schema.Attributes[name].(schema.StringAttribute)
 		if !ok {
 			t.Fatalf("%s attribute missing or not a StringAttribute", name)
@@ -77,15 +76,16 @@ func TestServiceAccountOwnerIsProjectOrOrg(t *testing.T) {
 		if !attr.Optional {
 			t.Errorf("%s must be Optional so exactly one owner can be configured", name)
 		}
-		var replaces bool
-		for _, pm := range attr.PlanModifiers {
-			if strings.Contains(strings.ToLower(fmt.Sprintf("%T", pm)), "requiresreplace") {
-				replaces = true
-			}
+		// An account cannot change owner in place, so a different owner
+		// replaces it. That is decided on the owner's id, which the plan
+		// resolves, so that another spelling of the same owner does not.
+		id, ok := resp.Schema.Attributes[partner].(schema.StringAttribute)
+		if !ok || !id.Computed || id.Optional || id.Required {
+			t.Errorf("%s must be computed only, the id %s resolves to", partner, name)
 		}
-		if !replaces {
-			t.Errorf("%s must force replacement: an account cannot change owner in place", name)
-		}
+	}
+	if _, ok := provider.NewServiceAccountResource().(fwresource.ResourceWithModifyPlan); !ok {
+		t.Errorf("nothing replaces an account whose owner changes: the resource has no ModifyPlan")
 	}
 }
 
@@ -102,8 +102,8 @@ func TestAccServiceAccountResource_org(t *testing.T) {
 			{
 				Config: fmt.Sprintf(`
 resource "fpcloud_service_account" "org" {
-  organization_id = %q
-  name            = %q
+  org  = %q
+  name = %q
 }
 `, orgID, accName("saorg")),
 				Check: resource.ComposeAggregateTestCheckFunc(

@@ -1,9 +1,9 @@
 resource "fpcloud_app" "web" {
-  project_id = fpcloud_project.production.id
-  name       = "web"
-  image      = "ghcr.io/myorg/webapp:latest"
-  port       = 3000
-  ingress    = "all" # "all" = public, "internal" = default
+  project = fpcloud_project.production.id
+  name    = "web"
+  image   = "ghcr.io/myorg/webapp:latest"
+  port    = 3000
+  ingress = "all" # "all" = public, "internal" = default
 
   env = {
     APP_NAME = "My App"

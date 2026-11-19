@@ -90,12 +90,13 @@ Bucket.used_bytes
 # show` and the console are where a staleness reading belongs.
 Database.replication_lag_seconds
 
-# `firewall` on an app and on a bucket is a reference, the firewall's id. The
-# rest of what the API reports beside it is how far the edge has come in
-# enforcing that firewall: it moves after every edit to the firewall's rules
-# with nothing on the app or the bucket changed. An apply waits on it and
-# fails with `message`; it is not a value a configuration can state. The
-# firewall's own `revision` is on fpcloud_firewall.
+# `firewall` on an app and on a bucket is a reference, by name or id, and
+# `firewall_id` is the id it resolved to. The rest of what the API reports
+# beside it is how far the edge has come in enforcing that firewall: it moves
+# after every edit to the firewall's rules with nothing on the app or the
+# bucket changed. An apply waits on it and fails with `message`; it is not a
+# value a configuration can state. The firewall's own `revision` is on
+# fpcloud_firewall.
 App.firewall.applied_revision
 App.firewall.message
 App.firewall.revision
@@ -121,10 +122,9 @@ IAMBinding.resource_name
 IAMBinding.inherited
 App.cluster_token
 Project.namespace
-# The parent is already the resource's own reference, so the id it echoes
-# adds nothing to configure.
-Bucket.project_id
-Firewall.project_id
+# A job and a runner keep their parent as the reference written and expose no
+# id beside it; fpcloud_bucket and fpcloud_firewall carry it as `project_id`,
+# the id a plan compares.
 Job.project_id
 Runner.project_id
 

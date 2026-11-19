@@ -84,22 +84,22 @@ func firewallSchema(t *testing.T) schema.Schema {
 }
 
 // The shape the documentation promises: rules are a list written inline,
-// identified by priority, with sources a set, and the two attributes that
-// name the firewall replace it.
+// identified by priority, with sources a set, the name replaces the firewall,
+// and the project is a reference whose id decides whether it is replaced.
 func TestFirewallSchema(t *testing.T) {
 	sch := firewallSchema(t)
 	if diags := sch.ValidateImplementation(context.Background()); diags.HasError() {
 		t.Fatalf("schema is invalid: %v", diags)
 	}
 
-	for _, name := range []string{"project", "name"} {
-		a := sch.Attributes[name].(schema.StringAttribute)
-		if !a.Required || len(a.PlanModifiers) == 0 {
-			t.Errorf("%s: want required and replacing, got required=%v with %d plan modifiers", name, a.Required, len(a.PlanModifiers))
-		}
+	if a := sch.Attributes["name"].(schema.StringAttribute); !a.Required || len(a.PlanModifiers) == 0 {
+		t.Errorf("name: want required and replacing, got required=%v with %d plan modifiers", a.Required, len(a.PlanModifiers))
 	}
-	for _, name := range []string{"id", "revision", "findings"} {
-		if a := sch.Attributes[name]; !a.IsComputed() || a.IsOptional() || a.IsRequired() {
+	if a := sch.Attributes["project"].(schema.StringAttribute); !a.Required || len(a.PlanModifiers) != 0 {
+		t.Errorf("project: want required and compared by project_id, got required=%v with %d plan modifiers", a.Required, len(a.PlanModifiers))
+	}
+	for _, name := range []string{"id", "project_id", "revision", "findings"} {
+		if a := sch.Attributes[name]; a == nil || !a.IsComputed() || a.IsOptional() || a.IsRequired() {
 			t.Errorf("%s: want computed only", name)
 		}
 	}
@@ -325,21 +325,38 @@ func (f *fakeFirewallAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": message}})
 	}
 	missing := func() { refuse(http.StatusNotFound, "NOT_FOUND", "not found") }
+	// The API resolves a project by name or id at the route boundary, and
+	// whatever follows reads its id.
+	project := ""
+	if rest, ok := strings.CutPrefix(r.URL.Path, "/api/v1/projects/"); ok {
+		ref, tail, _ := strings.Cut(rest, "/")
+		p, known := fakeProjects[ref]
+		if !known {
+			missing()
+			return
+		}
+		project = p.ID
+		if tail == "" {
+			_ = json.NewEncoder(w).Encode(p)
+			return
+		}
+		r.URL.Path = "/api/v1/projects/" + p.ID + "/" + tail
+	}
 	switch {
-	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/proj-1/firewalls":
+	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/"+project+"/firewalls":
 		var req client.CreateFirewallRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		if req.DefaultAction == "" {
 			req.DefaultAction = "allow"
 		}
 		now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-		f.fw = &client.Firewall{ID: "fw-1", ProjectID: "proj-1", Name: req.Name, Description: req.Description,
+		f.fw = &client.Firewall{ID: "fw-1", ProjectID: project, Name: req.Name, Description: req.Description,
 			Revision: 1, DefaultAction: req.DefaultAction, Rules: f.canonical(req.Rules), CreatedAt: now, UpdatedAt: now}
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(f.firewall())
-	case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/proj-1/firewalls":
+	case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/"+project+"/firewalls":
 		out := []client.Firewall{}
-		if f.fw != nil {
+		if f.fw != nil && f.fw.ProjectID == project {
 			out = append(out, f.firewall())
 		}
 		_ = json.NewEncoder(w).Encode(out)
@@ -390,7 +407,7 @@ func (f *fakeFirewallAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// A firewall named on the create is attached by it, and the create's
 		// answer is where its warning about the caller is.
 		if req.Firewall != "" {
-			if f.fw == nil || req.Firewall != f.fw.ID {
+			if !f.names(req.Firewall) {
 				f.appExists = false
 				missing()
 				return
@@ -414,7 +431,7 @@ func (f *fakeFirewallAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPut && r.URL.Path == "/api/v1/apps/app-1/firewall":
 		var req client.AttachFirewallRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		if f.fw == nil || req.Firewall != f.fw.ID {
+		if !f.names(req.Firewall) {
 			missing()
 			return
 		}
@@ -436,6 +453,21 @@ func (f *fakeFirewallAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		missing()
 	}
+}
+
+// fakeProjects is every project the fake API holds, by each spelling it
+// resolves.
+var fakeProjects = map[string]client.Project{
+	"demo":   {ID: "proj-1", Name: "demo"},
+	"proj-1": {ID: "proj-1", Name: "demo"},
+	"other":  {ID: "proj-2", Name: "other"},
+	"proj-2": {ID: "proj-2", Name: "other"},
+}
+
+// names reports whether an attach's reference names the firewall, by id or
+// by name, as the API resolves it in the app's project.
+func (f *fakeFirewallAPI) names(ref string) bool {
+	return f.fw != nil && f.fw.ProjectID == "proj-1" && (ref == f.fw.ID || ref == f.fw.Name)
 }
 
 func startFakeFirewallAPI(t *testing.T) *fakeFirewallAPI {

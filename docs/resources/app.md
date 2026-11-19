@@ -196,7 +196,7 @@ resource "fpcloud_iam_binding" "reporter_reads_stripe" {
 - `cpu_limit` (String) CPU limit (e.g. 500m). Defaults to 500m.
 - `display_name` (String) Human-readable display name (mutable cosmetic label). Defaults to the name.
 - `env` (Map of String) Environment variables (plaintext). Set as part of the create, so a release command on a new app reads them on its first run.
-- `firewall` (String) ID of the fpcloud_firewall attached to the app, from the same project. It applies to every host the edge serves for the app, custom domains included, and to nothing that does not cross the edge: calls from other apps inside the platform are not filtered. Setting, changing or removing it waits until the edge enforces the result. An app created with it set is created with the firewall attached, so it is never served without it; added to an app that exists, the app stays open until the edge has taken it. Leave it out for no firewall.
+- `firewall` (String) The fpcloud_firewall attached to the app, by name or id, from the same project. It records the reference as written: another spelling of the attached firewall attaches nothing. It applies to every host the edge serves for the app, custom domains included, and to nothing that does not cross the edge: calls from other apps inside the platform are not filtered. Setting, changing or removing it waits until the edge enforces the result. An app created with it set is created with the firewall attached, so it is never served without it; added to an app that exists, the app stays open until the edge has taken it. Leave it out for no firewall.
 - `health_check_interval` (Number) Health check interval in seconds. Defaults to 10.
 - `health_check_path` (String) HTTP path for health checks. Defaults to '/' on a web app; not valid on a worker. Set a custom path (e.g. '/healthz') to enable startup probes.
 - `health_check_retries` (Number) Health check failure threshold. Defaults to 3.
@@ -220,6 +220,7 @@ resource "fpcloud_iam_binding" "reporter_reads_stripe" {
 ### Read-Only
 
 - `created_at` (String) Timestamp when the app was created.
+- `firewall_id` (String) The id of the firewall `firewall` names, null when none is attached. This is what a plan compares: a firewall is attached when it changes, never when `firewall` is merely spelled differently.
 - `id` (String) App ID.
 - `identity_token_file` (String) Where each of the app's pods finds the token proving it is that service account, named in the pod by FPCLOUD_IDENTITY_TOKEN_FILE. The Fogpipe API exchanges it for a short-lived credential; the Go client and fpcloud do so on their own.
 - `service_account` (String) The app's own identity: the email of the service account created with the app and deleted with it. Grant it roles and resource access with fpcloud_iam_binding; it holds nothing until granted.

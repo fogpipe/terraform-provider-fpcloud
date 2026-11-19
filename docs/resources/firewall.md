@@ -140,7 +140,7 @@ read the way the API spells it.
 ### Required
 
 - `name` (String) Firewall name, unique in the project. Changing it forces a new firewall.
-- `project` (String) ID of the project this firewall belongs to. It attaches to apps and websites of the same project. Changing it forces a new firewall.
+- `project` (String) The project, by name or id, this firewall belongs to. It attaches to apps and websites of the same project. It records the reference as written: another spelling of the same project changes nothing, and only a different project forces a new firewall.
 
 ### Optional
 
@@ -152,7 +152,8 @@ read the way the API spells it.
 
 - `created_at` (String) When the firewall was created, RFC 3339.
 - `findings` (Attributes List) Warnings about a firewall that is valid and enforced as written: a rule no request can reach, a default of deny with no IPv6 source. Also shown as warnings when an apply writes the firewall. The warning that a change denies the address the apply ran from is shown on that apply only and is not kept here, since it is about the machine and not about the firewall. (see [below for nested schema](#nestedatt--findings))
-- `id` (String) Firewall ID. What an app's or a bucket's `firewall` attribute takes.
+- `id` (String) Firewall ID. An app's or a bucket's `firewall` attribute takes it, or the firewall's name.
+- `project_id` (String) The project's id. This is what a plan compares: the firewall is replaced when it changes, never when `project` is merely spelled differently.
 - `revision` (Number) Counts the firewall's content: every change to the default action or the rules stores the next one. An apply returns once every target enforces it.
 - `updated_at` (String) When the firewall last changed, RFC 3339.
 
@@ -195,7 +196,7 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import by "project/name" (project is the project's id), or by firewall id.
+# Import by "project/name" (the project by name or id), or by firewall id.
 terraform import fpcloud_firewall.office 0d1c7e5a-8b3f-4c2e-9a6d-5f4e3b2a1c0d/office
 
 # Or declaratively (Terraform 1.5+ / OpenTofu):

@@ -54,11 +54,11 @@ resource "fpcloud_app" "uploader" {
 ### Required
 
 - `name` (String) Bucket name. Changing it forces a new bucket.
-- `project` (String) ID of the project this bucket belongs to. Changing it forces a new bucket.
+- `project` (String) The project, by name or id, this bucket belongs to. It records the reference as written: another spelling of the same project changes nothing, and only a different project forces a new bucket.
 
 ### Optional
 
-- `firewall` (String) ID of the fpcloud_firewall attached to the bucket's website, from the same project. It applies to every host the edge serves the website on, custom domains included, and not to the S3 endpoint. Needs website_enabled. Setting, changing or removing it waits until the edge enforces the result. A bucket created with it set is created with the firewall attached, so its website is never served without it. Leave it out for no firewall.
+- `firewall` (String) The fpcloud_firewall attached to the bucket's website, by name or id, from the same project. It records the reference as written: another spelling of the attached firewall attaches nothing. It applies to every host the edge serves the website on, custom domains included, and not to the S3 endpoint. Needs website_enabled. Setting, changing or removing it waits until the edge enforces the result. A bucket created with it set is created with the firewall attached, so its website is never served without it. Leave it out for no firewall.
 - `public_read` (Boolean) Serve the bucket's objects to anyone with the URL, without a signature. This is the property a website needs and can be had without one: an asset origin is public_read and nothing else, with no index document and no versioned publishing. Setting website_enabled sets this; clearing this clears website_enabled, because a site nobody can read is not a site. Mutable in place.
 - `url_slug` (String) Vanity website host label: the site moves to <url_slug>.web.<platform domain>. Globally unique; empty reverts to the derived host. Mutable in place.
 - `website_enabled` (Boolean) Add the static-website serving conventions to a public bucket: an index document for a directory request, an error document for a miss, and eligibility for SPA fallback and versioned publishing. Implies public_read. Mutable in place.
@@ -68,8 +68,10 @@ resource "fpcloud_app" "uploader" {
 ### Read-Only
 
 - `endpoint` (String) S3 endpoint URL for the bucket.
+- `firewall_id` (String) The id of the firewall `firewall` names, null when none is attached. This is what a plan compares: a firewall is attached when it changes, never when `firewall` is merely spelled differently.
 - `global_alias` (String) The bucket's name in the object store's global namespace — the value S3 itself uses, and the website host label. Derived as <name>-<project>-<org>, but read it from here rather than composing it: buckets created before that scheme kept an older alias. This is what an `aws s3` command or a `backend "s3"` block needs.
 - `id` (String) Bucket ID.
+- `project_id` (String) The project's id. This is what a plan compares: the bucket is replaced when it changes, never when `project` is merely spelled differently.
 - `region` (String) S3 region for the bucket.
 - `secrets` (Map of String) Names of the project secrets holding this bucket's read+write key, by part, the only place the key is reached from: `access_key_id` is `<name>-access-key-id`, `secret_access_key` is `<name>-secret-access-key`. Created and deleted with the bucket. Reference them from the app's env (fpcloud_app's `secret_env`, `AWS_ACCESS_KEY_ID = { secret = fpcloud_bucket.x.secrets["access_key_id"] }` and `AWS_SECRET_ACCESS_KEY = { secret = fpcloud_bucket.x.secrets["secret_access_key"] }`) to hand the app the bucket; `endpoint` and `region` are plain config.
 - `status` (String) Current status of the bucket.

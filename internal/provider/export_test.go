@@ -33,3 +33,10 @@ func CIDRSemanticallyEqual(a, b string) bool {
 	equal, _ := newCIDRValue(a).StringSemanticEquals(context.Background(), newCIDRValue(b))
 	return equal
 }
+
+// SetFirewallTimeout bounds a wait for the edge at d, until the test ends.
+func SetFirewallTimeout(t interface{ Cleanup(func()) }, d time.Duration) {
+	prev := firewallTimeout
+	firewallTimeout = d
+	t.Cleanup(func() { firewallTimeout = prev })
+}

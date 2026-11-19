@@ -25,6 +25,7 @@ var (
 	_ resource.ResourceWithConfigure      = &FirewallResource{}
 	_ resource.ResourceWithImportState    = &FirewallResource{}
 	_ resource.ResourceWithValidateConfig = &FirewallResource{}
+	_ resource.ResourceWithModifyPlan     = &FirewallResource{}
 )
 
 // NewFirewallResource returns a new firewall resource.
@@ -43,6 +44,7 @@ type FirewallResource struct {
 type FirewallResourceModel struct {
 	ID            types.String `tfsdk:"id"`
 	Project       types.String `tfsdk:"project"`
+	ProjectID     types.String `tfsdk:"project_id"`
 	Name          types.String `tfsdk:"name"`
 	Description   types.String `tfsdk:"description"`
 	DefaultAction types.String `tfsdk:"default_action"`
@@ -84,18 +86,24 @@ func (r *FirewallResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			"or a proxy of your own the rules see that CDN's addresses, never the visitor's.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Description: "Firewall ID. What an app's or a bucket's `firewall` attribute takes.",
+				Description: "Firewall ID. An app's or a bucket's `firewall` attribute takes it, or the firewall's name.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"project": schema.StringAttribute{
-				Description: "ID of the project this firewall belongs to. It attaches to apps and websites of " +
-					"the same project. Changing it forces a new firewall.",
+				Description: "The project, by name or id, this firewall belongs to. It attaches to apps and " +
+					"websites of the same project. It records the reference as written: another spelling of " +
+					"the same project changes nothing, and only a different project forces a new firewall.",
 				Required: true,
+			},
+			"project_id": schema.StringAttribute{
+				Description: "The project's id. This is what a plan compares: the firewall is replaced when " +
+					"it changes, never when `project` is merely spelled differently.",
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{
@@ -313,6 +321,28 @@ func sourceString(v attr.Value) (string, bool) {
 	return sv.ValueString(), true
 }
 
+// ModifyPlan decides whether a changed `project` is a different project; see
+// planProjectReference.
+func (r *FirewallResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+	var state, config FirewallResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	projectID, replace := planProjectReference(ctx, r.client, config.Project, state.Project, state.ProjectID, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("project_id"), projectID)...)
+	if replace {
+		resp.RequiresReplace = append(resp.RequiresReplace, path.Root("project"))
+	}
+}
+
 func (r *FirewallResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan FirewallResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -371,6 +401,22 @@ func (r *FirewallResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 	id := state.ID.ValueString()
+
+	// A plan that respells only `project` changes nothing the API holds, and
+	// writing the content again would be a write nobody asked for. Every
+	// computed attribute is unknown in the plan all the same, so the firewall
+	// is read and that is what reaches state.
+	if plan.Description.Equal(state.Description) && plan.DefaultAction.Equal(state.DefaultAction) && plan.Rules.Equal(state.Rules) {
+		fw, err := r.client.GetFirewall(ctx, id)
+		if err != nil {
+			resp.Diagnostics.AddError("Error reading firewall", err.Error())
+			return
+		}
+		setModelFromFirewall(&plan, fw, &resp.Diagnostics)
+		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+		return
+	}
+
 	// On no condition of the revision last read: the configuration is the
 	// whole of the firewall, and an apply is meant to win over an edit made
 	// elsewhere.
@@ -422,8 +468,9 @@ func (r *FirewallResource) Delete(ctx context.Context, req resource.DeleteReques
 }
 
 // ImportState accepts a firewall id, or "project/name" where project is the
-// project's id. The id is tried first; on a miss the value is resolved through
-// the project's list.
+// project's name or id. The id is tried first; on a miss the value is resolved
+// through the project's list, and `project` records the project as the import
+// spelled it, so a configuration written the same way plans no change.
 func (r *FirewallResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	id := req.ID
 	if _, err := r.client.GetFirewall(ctx, id); err == nil {
@@ -447,6 +494,7 @@ func (r *FirewallResource) ImportState(ctx context.Context, req resource.ImportS
 	for _, fw := range firewalls {
 		if fw.Name == name {
 			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), fw.ID)...)
+			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project"), project)...)
 			return
 		}
 	}
@@ -613,11 +661,7 @@ func firewallRulesToList(prior types.List, rules []client.FirewallRule, diags *d
 // setModelFromFirewall copies what the API reports.
 func setModelFromFirewall(m *FirewallResourceModel, fw *client.Firewall, diags *diag.Diagnostics) {
 	m.ID = types.StringValue(fw.ID)
-	// Keep the configured project when the API does not echo one, so a
-	// required attribute never turns to "" after an apply.
-	if fw.ProjectID != "" {
-		m.Project = types.StringValue(fw.ProjectID)
-	}
+	setProjectReference(&m.Project, &m.ProjectID, fw.ProjectID)
 	m.Name = types.StringValue(fw.Name)
 	m.Description = types.StringValue(fw.Description)
 	m.DefaultAction = types.StringValue(fw.DefaultAction)
@@ -739,12 +783,100 @@ func orNoMessage(msg string) string {
 	return msg
 }
 
-// attachedFirewallID reads a target's firewall as the `firewall` attribute
-// holds it: the id, or null for none. A firewall still being taken off the
-// edge has no id and reads as none, which is what was asked for.
-func attachedFirewallID(ref *client.FirewallRef) types.String {
+// attachedFirewall reads a target's firewall onto its two attributes:
+// `firewall`, the reference the configuration wrote, and `firewall_id`, the
+// firewall that reference resolved to. Nothing attached is null in both, and
+// a firewall still being taken off the edge has no id and reads as none,
+// which is what was asked for. The written reference is kept while it still
+// names the attached firewall, by the id it resolved to, by its id or by its
+// name; anything else attached is drift, and `firewall` then holds its id.
+func attachedFirewall(ref *client.FirewallRef, written, resolved types.String) (firewall, firewallID types.String) {
 	if ref == nil || ref.ID == "" {
-		return types.StringNull()
+		return types.StringNull(), types.StringNull()
 	}
-	return types.StringValue(ref.ID)
+	id := types.StringValue(ref.ID)
+	if written.IsNull() || written.IsUnknown() || written.ValueString() == "" {
+		return id, id
+	}
+	if resolved.ValueString() == ref.ID || written.ValueString() == ref.ID || written.ValueString() == ref.Name {
+		return written, id
+	}
+	return id, id
+}
+
+// firewallTarget is what an update does to a target's firewall, from the
+// planned and the stored reference and the ids they resolved to. A respelled
+// reference to the firewall already attached does nothing.
+func firewallTarget(plan, planID, state, stateID types.String) (attach, detach bool) {
+	if plan.IsNull() || plan.ValueString() == "" {
+		return false, !state.IsNull() && state.ValueString() != ""
+	}
+	if plan.Equal(state) {
+		return false, false
+	}
+	if !planID.IsUnknown() && !planID.IsNull() && planID.Equal(stateID) {
+		return false, false
+	}
+	return true, false
+}
+
+// answeredFirewallID is the id a wait for the edge keys on: the one the API
+// answered an attach with, since the configuration may have named the
+// firewall by its name. written is the fallback for an answer carrying none.
+func answeredFirewallID(ref *client.FirewallRef, written string) string {
+	if ref != nil && ref.ID != "" {
+		return ref.ID
+	}
+	return written
+}
+
+// resolveFirewall finds the firewall ref names in a project, by id or by name,
+// the way the API resolves the firewall an attach names: an id in the
+// project, else a name in it. One list read answers both.
+func resolveFirewall(ctx context.Context, c *client.Client, projectID, ref string) (string, error) {
+	firewalls, err := c.ListFirewalls(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	for _, fw := range firewalls {
+		if fw.ID == ref {
+			return fw.ID, nil
+		}
+	}
+	for _, fw := range firewalls {
+		if fw.Name == ref {
+			return fw.ID, nil
+		}
+	}
+	return "", fmt.Errorf("there is no firewall %q in project %s", ref, projectID)
+}
+
+// planFirewallReference plans `firewall_id` for a target whose `firewall` is
+// a reference, by name or id, to a firewall in the target's project. An
+// unchanged reference keeps the id it resolved to and costs no request; a
+// changed one is resolved once, so a respelling of the firewall already
+// attached plans no attach; a reference that resolves to nothing fails the
+// plan rather than the apply.
+func planFirewallReference(ctx context.Context, c *client.Client, projectID string, config, state, stateID types.String, diags *diag.Diagnostics) types.String {
+	switch {
+	case config.IsUnknown():
+		return types.StringUnknown()
+	case config.IsNull() || config.ValueString() == "":
+		return types.StringNull()
+	case config.Equal(state):
+		// State written before firewall_id existed has none to carry over;
+		// the apply reads it.
+		if stateID.IsNull() {
+			return types.StringUnknown()
+		}
+		return stateID
+	}
+	id, err := resolveFirewall(ctx, c, projectID, config.ValueString())
+	if err != nil {
+		diags.AddAttributeError(path.Root("firewall"), "Error resolving firewall",
+			fmt.Sprintf("%q could not be resolved to a firewall, so the plan cannot tell another spelling of "+
+				"the attached firewall from a different one: %s", config.ValueString(), err))
+		return types.StringUnknown()
+	}
+	return types.StringValue(id)
 }

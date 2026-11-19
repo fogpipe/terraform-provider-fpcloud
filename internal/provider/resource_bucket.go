@@ -17,6 +17,7 @@ import (
 var (
 	_ resource.Resource                = &BucketResource{}
 	_ resource.ResourceWithImportState = &BucketResource{}
+	_ resource.ResourceWithModifyPlan  = &BucketResource{}
 )
 
 // BucketResource defines the resource implementation.
@@ -26,13 +27,14 @@ type BucketResource struct {
 
 // BucketResourceModel describes the resource data model.
 type BucketResourceModel struct {
-	ID       types.String `tfsdk:"id"`
-	Project  types.String `tfsdk:"project"`
-	Name     types.String `tfsdk:"name"`
-	Endpoint types.String `tfsdk:"endpoint"`
-	Region   types.String `tfsdk:"region"`
-	Status   types.String `tfsdk:"status"`
-	Secrets  types.Map    `tfsdk:"secrets"`
+	ID        types.String `tfsdk:"id"`
+	Project   types.String `tfsdk:"project"`
+	ProjectID types.String `tfsdk:"project_id"`
+	Name      types.String `tfsdk:"name"`
+	Endpoint  types.String `tfsdk:"endpoint"`
+	Region    types.String `tfsdk:"region"`
+	Status    types.String `tfsdk:"status"`
+	Secrets   types.Map    `tfsdk:"secrets"`
 
 	PublicRead           types.Bool   `tfsdk:"public_read"`
 	WebsiteEnabled       types.Bool   `tfsdk:"website_enabled"`
@@ -45,6 +47,7 @@ type BucketResourceModel struct {
 	TLSNextAttempt       types.String `tfsdk:"tls_next_attempt"`
 	GlobalAlias          types.String `tfsdk:"global_alias"`
 	Firewall             types.String `tfsdk:"firewall"`
+	FirewallID           types.String `tfsdk:"firewall_id"`
 }
 
 // NewBucketResource returns a new bucket resource.
@@ -69,10 +72,17 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"project": schema.StringAttribute{
-				Description: "ID of the project this bucket belongs to. Changing it forces a new bucket.",
-				Required:    true,
+				Description: "The project, by name or id, this bucket belongs to. It records the reference " +
+					"as written: another spelling of the same project changes nothing, and only a different " +
+					"project forces a new bucket.",
+				Required: true,
+			},
+			"project_id": schema.StringAttribute{
+				Description: "The project's id. This is what a plan compares: the bucket is replaced when it " +
+					"changes, never when `project` is merely spelled differently.",
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{
@@ -153,13 +163,23 @@ func (r *BucketResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed:    true,
 			},
 			"firewall": schema.StringAttribute{
-				Description: "ID of the fpcloud_firewall attached to the bucket's website, from the same " +
-					"project. It applies to every host the edge serves the website on, custom domains " +
-					"included, and not to the S3 endpoint. Needs website_enabled. Setting, changing or " +
+				Description: "The fpcloud_firewall attached to the bucket's website, by name or id, from the " +
+					"same project. It records the reference as written: another spelling of the attached " +
+					"firewall attaches nothing. It applies to every host the edge serves the website on, " +
+					"custom domains included, and not to the S3 endpoint. Needs website_enabled. Setting, changing or " +
 					"removing it waits until the edge enforces the result. A bucket created with it set is " +
 					"created with the firewall attached, so its website is never served without it. Leave it " +
 					"out for no firewall.",
 				Optional: true,
+			},
+			"firewall_id": schema.StringAttribute{
+				Description: "The id of the firewall `firewall` names, null when none is attached. This is " +
+					"what a plan compares: a firewall is attached when it changes, never when `firewall` is " +
+					"merely spelled differently.",
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"global_alias": schema.StringAttribute{
 				Description: "The bucket's name in the object store's global namespace — the value S3 " +
@@ -207,10 +227,13 @@ func (r *BucketResource) Create(ctx context.Context, req resource.CreateRequest,
 		resp.Diagnostics.AddError("Error creating bucket", err.Error())
 		return
 	}
-	// What the attach warned about is on the create's answer alone.
+	// What the attach warned about is on the create's answer alone, and so
+	// is the id of the firewall it attached: the website writes below may
+	// answer without it.
 	if bucket.Firewall != nil {
 		warnFindings(path.Root("firewall"), bucket.Firewall.Name, bucket.Firewall.Findings, &resp.Diagnostics)
 	}
+	firewallID := answeredFirewallID(bucket.Firewall, firewall)
 
 	// Website serving + vanity slug are separate API calls layered on the bucket.
 	if plan.WebsiteEnabled.ValueBool() {
@@ -237,12 +260,12 @@ func (r *BucketResource) Create(ctx context.Context, req resource.CreateRequest,
 		// firewall the edge could not take leaves a bucket Terraform knows it
 		// made.
 		r.apply(&plan, bucket)
-		plan.Firewall = types.StringValue(firewall)
+		plan.Firewall, plan.FirewallID = types.StringValue(firewall), types.StringValue(firewallID)
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		if bucket, err = r.awaitFirewall(ctx, bucket.ID, bucket.Name, firewall); err != nil {
+		if bucket, err = r.awaitFirewall(ctx, bucket.ID, bucket.Name, firewallID); err != nil {
 			resp.Diagnostics.AddError("Error attaching firewall", err.Error())
 			return
 		}
@@ -252,28 +275,30 @@ func (r *BucketResource) Create(ctx context.Context, req resource.CreateRequest,
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-// setFirewall attaches firewall want to the bucket's website, or takes the
-// website's firewall off when want is empty, waits until the edge enforces
-// the result and returns the bucket as it then reads. What the attach warns
-// about is added to diags.
-func (r *BucketResource) setFirewall(ctx context.Context, bucketID, name, want string, diags *diag.Diagnostics) (*client.Bucket, error) {
-	if want == "" {
+// setFirewall attaches the firewall written names, by name or id, to the
+// bucket's website, or takes the website's firewall off when written is empty,
+// waits until the edge enforces the result and returns the bucket as it then
+// reads. What the attach warns about is added to diags.
+func (r *BucketResource) setFirewall(ctx context.Context, bucketID, name, written string, diags *diag.Diagnostics) (*client.Bucket, error) {
+	want := ""
+	if written == "" {
 		if err := r.client.DetachWebsiteFirewall(ctx, bucketID); err != nil {
 			return nil, err
 		}
 	} else {
-		ref, err := r.client.AttachWebsiteFirewall(ctx, bucketID, client.AttachFirewallRequest{Firewall: want})
+		ref, err := r.client.AttachWebsiteFirewall(ctx, bucketID, client.AttachFirewallRequest{Firewall: written})
 		if err != nil {
 			return nil, err
 		}
 		warnFindings(path.Root("firewall"), ref.Name, ref.Findings, diags)
+		want = answeredFirewallID(ref, written)
 	}
 	return r.awaitFirewall(ctx, bucketID, name, want)
 }
 
-// awaitFirewall waits until the edge enforces firewall want on the bucket's
-// website, or no firewall when want is empty, and returns the bucket as it
-// then reads.
+// awaitFirewall waits until the edge enforces the firewall whose id is want on
+// the bucket's website, or no firewall when want is empty, and returns the
+// bucket as it then reads.
 func (r *BucketResource) awaitFirewall(ctx context.Context, bucketID, name, want string) (*client.Bucket, error) {
 	var bucket *client.Bucket
 	err := awaitAttachedFirewall(ctx, "the website of bucket "+name, want, func(ctx context.Context) (*client.FirewallRef, error) {
@@ -316,8 +341,8 @@ func (r *BucketResource) Update(ctx context.Context, req resource.UpdateRequest,
 		return
 	}
 
-	// Website serving and the vanity slug are mutable in place (project/name
-	// force replacement).
+	// Website serving and the vanity slug are mutable in place (a different
+	// project and the name force replacement).
 	bucket, err := r.client.GetBucket(ctx, state.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Error reading bucket", err.Error())
@@ -327,8 +352,8 @@ func (r *BucketResource) Update(ctx context.Context, req resource.UpdateRequest,
 	// A firewall that is being removed goes first, while the website it is on
 	// is still there to take it off; one being attached goes last, once the
 	// website it needs is.
-	firewallChanged := !plan.Firewall.IsUnknown() && plan.Firewall.ValueString() != state.Firewall.ValueString()
-	if firewallChanged && plan.Firewall.ValueString() == "" {
+	attachFirewall, detachFirewall := firewallTarget(plan.Firewall, plan.FirewallID, state.Firewall, state.FirewallID)
+	if detachFirewall {
 		if bucket, err = r.setFirewall(ctx, state.ID.ValueString(), state.Name.ValueString(), "", &resp.Diagnostics); err != nil {
 			resp.Diagnostics.AddError("Error detaching firewall", err.Error())
 			return
@@ -388,7 +413,7 @@ func (r *BucketResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 	}
 
-	if firewallChanged && plan.Firewall.ValueString() != "" {
+	if attachFirewall {
 		if bucket, err = r.setFirewall(ctx, state.ID.ValueString(), state.Name.ValueString(), plan.Firewall.ValueString(), &resp.Diagnostics); err != nil {
 			resp.Diagnostics.AddError("Error attaching firewall", err.Error())
 			return
@@ -404,6 +429,38 @@ func (r *BucketResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 	r.apply(&plan, bucket)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// ModifyPlan resolves a changed `project` and a changed `firewall`, each once:
+// another spelling of the same project is an update that writes nothing, and
+// another spelling of the attached firewall attaches nothing.
+func (r *BucketResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+	var state, config BucketResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	projectID, replace := planProjectReference(ctx, r.client, config.Project, state.Project, state.ProjectID, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("project_id"), projectID)...)
+	if replace {
+		// A new bucket in another project, created with the firewall the
+		// configuration names there; there is nothing to compare.
+		resp.RequiresReplace = append(resp.RequiresReplace, path.Root("project"))
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("firewall_id"), types.StringUnknown())...)
+		return
+	}
+	firewallID := planFirewallReference(ctx, r.client, projectID.ValueString(), config.Firewall, state.Firewall, state.FirewallID, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("firewall_id"), firewallID)...)
 }
 
 func (r *BucketResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -442,11 +499,7 @@ func (r *BucketResource) ImportState(ctx context.Context, req resource.ImportSta
 // its two values are the project secrets `secrets` names (ADR-296, ADR-303).
 func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 	m.ID = types.StringValue(bucket.ID)
-	// Preserve the configured project when the API does not echo it back, so a
-	// required-but-unreturned field never flips to "" after apply.
-	if bucket.ProjectID != "" {
-		m.Project = types.StringValue(bucket.ProjectID)
-	}
+	setProjectReference(&m.Project, &m.ProjectID, bucket.ProjectID)
 	m.Name = types.StringValue(bucket.Name)
 	m.Endpoint = types.StringValue(bucket.Endpoint)
 	m.Region = types.StringValue(bucket.Region)
@@ -461,7 +514,7 @@ func (r *BucketResource) apply(m *BucketResourceModel, bucket *client.Bucket) {
 	m.TLSReason = types.StringValue(bucket.TLSReason)
 	m.TLSNextAttempt = types.StringValue(rfc3339OrEmpty(bucket.TLSNextAttempt))
 	m.GlobalAlias = types.StringValue(bucket.GlobalAlias)
-	m.Firewall = attachedFirewallID(bucket.Firewall)
+	m.Firewall, m.FirewallID = attachedFirewall(bucket.Firewall, m.Firewall, m.FirewallID)
 	m.Secrets, _ = types.MapValueFrom(context.Background(), types.StringType, orEmptyMap(bucket.Secrets))
 }
 

@@ -27,6 +27,7 @@ import (
 var (
 	_ resource.Resource                = &AppResource{}
 	_ resource.ResourceWithImportState = &AppResource{}
+	_ resource.ResourceWithModifyPlan  = &AppResource{}
 )
 
 // AppResource defines the resource implementation.
@@ -68,6 +69,7 @@ type AppResourceModel struct {
 	AdoptExisting       types.Bool   `tfsdk:"adopt_existing"`
 	Routes              types.List   `tfsdk:"routes"`
 	Firewall            types.String `tfsdk:"firewall"`
+	FirewallID          types.String `tfsdk:"firewall_id"`
 	Status              types.String `tfsdk:"status"`
 	URL                 types.String `tfsdk:"url"`
 	CreatedAt           types.String `tfsdk:"created_at"`
@@ -443,14 +445,25 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"firewall": schema.StringAttribute{
-				Description: "ID of the fpcloud_firewall attached to the app, from the same project. It applies " +
-					"to every host the edge serves for the app, custom domains included, and to nothing that " +
-					"does not cross the edge: calls from other apps inside the platform are not filtered. " +
+				Description: "The fpcloud_firewall attached to the app, by name or id, from the same project. It " +
+					"records the reference as written: another spelling of the attached firewall attaches " +
+					"nothing. It applies to every host the edge serves for the app, custom domains included, " +
+					"and to nothing that does not cross the edge: calls from other apps inside the platform " +
+					"are not filtered. " +
 					"Setting, changing or removing it waits until the edge enforces the result. An app created " +
 					"with it set is created with the firewall attached, so it is never served without it; " +
 					"added to an app that exists, the app stays open until the edge has taken it. Leave it " +
 					"out for no firewall.",
 				Optional: true,
+			},
+			"firewall_id": schema.StringAttribute{
+				Description: "The id of the firewall `firewall` names, null when none is attached. This is " +
+					"what a plan compares: a firewall is attached when it changes, never when `firewall` is " +
+					"merely spelled differently.",
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"status": schema.StringAttribute{
 				Description: "Current status of the app.",
@@ -604,7 +617,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 
 	if firewall != "" {
-		if err := r.awaitFirewall(ctx, app.ID, app.Name, firewall); err != nil {
+		if err := r.awaitFirewall(ctx, app.ID, app.Name, answeredFirewallID(app.Firewall, firewall)); err != nil {
 			resp.Diagnostics.AddError("Error attaching firewall", err.Error())
 			return
 		}
@@ -619,8 +632,8 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-// awaitFirewall waits until the edge enforces firewall want on the app, or no
-// firewall when want is empty.
+// awaitFirewall waits until the edge enforces the firewall whose id is want
+// on the app, or no firewall when want is empty.
 func (r *AppResource) awaitFirewall(ctx context.Context, appID, name, want string) error {
 	return awaitAttachedFirewall(ctx, "app "+name, want, func(ctx context.Context) (*client.FirewallRef, error) {
 		app, err := r.client.GetApp(ctx, appID)
@@ -735,20 +748,21 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	// The firewall moves first: an apply that narrows who reaches the app does
 	// not wait on a deploy to do it, and does not lose the change to a deploy
 	// that fails.
-	if !plan.Firewall.IsUnknown() && plan.Firewall.ValueString() != state.Firewall.ValueString() {
-		want := plan.Firewall.ValueString()
-		if want == "" {
+	if attach, detach := firewallTarget(plan.Firewall, plan.FirewallID, state.Firewall, state.FirewallID); attach || detach {
+		want := ""
+		if detach {
 			if err := r.client.DetachAppFirewall(ctx, appID); err != nil {
 				resp.Diagnostics.AddError("Error detaching firewall", err.Error())
 				return
 			}
 		} else {
-			ref, err := r.client.AttachAppFirewall(ctx, appID, client.AttachFirewallRequest{Firewall: want})
+			ref, err := r.client.AttachAppFirewall(ctx, appID, client.AttachFirewallRequest{Firewall: plan.Firewall.ValueString()})
 			if err != nil {
 				resp.Diagnostics.AddError("Error attaching firewall", err.Error())
 				return
 			}
 			warnFindings(path.Root("firewall"), ref.Name, ref.Findings, &resp.Diagnostics)
+			want = answeredFirewallID(ref, plan.Firewall.ValueString())
 		}
 		if err := r.awaitFirewall(ctx, appID, state.Name.ValueString(), want); err != nil {
 			resp.Diagnostics.AddError("Error applying firewall", err.Error())
@@ -973,6 +987,32 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	r.setModelFromApp(&plan, app, &resp.Diagnostics)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// ModifyPlan resolves a changed `firewall` to the firewall it names, so the
+// plan attaches one only when it is a different firewall.
+func (r *AppResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+	var state, config AppResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	var firewallID types.String
+	if config.ProjectID.Equal(state.ProjectID) {
+		firewallID = planFirewallReference(ctx, r.client, state.ProjectID.ValueString(), config.Firewall, state.Firewall, state.FirewallID, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	} else {
+		// A new project is a new app, created with the firewall the
+		// configuration names in that project; there is nothing to compare.
+		firewallID = types.StringUnknown()
+	}
+	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("firewall_id"), firewallID)...)
 }
 
 func (r *AppResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -1291,7 +1331,7 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	model.HealthCheckTimeout = types.Int64Value(int64(app.HealthCheckTimeout))
 	model.HealthCheckInterval = types.Int64Value(int64(app.HealthCheckInterval))
 	model.HealthCheckRetries = types.Int64Value(int64(app.HealthCheckRetries))
-	model.Firewall = attachedFirewallID(app.Firewall)
+	model.Firewall, model.FirewallID = attachedFirewall(app.Firewall, model.Firewall, model.FirewallID)
 	model.Status = types.StringValue(app.Status)
 	model.URL = types.StringValue(app.URL)
 	model.CreatedAt = types.StringValue(app.CreatedAt.String())

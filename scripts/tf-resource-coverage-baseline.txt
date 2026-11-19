@@ -88,12 +88,13 @@ GetFirewallRevision
 # what a firewall does with one address: an answer to a question the caller
 # supplies. It creates nothing, changes nothing and has no id.
 TestFirewall
-# one rule written or removed by its priority, for a caller that changes one
-# rule and leaves the rest. fpcloud_firewall declares the whole list of rules
-# and replaces it in full, which is what makes a rule missing from the
-# configuration a rule removed; a rule managed apart from that list would be
-# two owners of one firewall's rules.
-PutFirewallRule
+# one rule created, changed or removed by its priority, for a caller that
+# changes one rule and leaves the rest. fpcloud_firewall declares every rule,
+# keyed by priority, and replaces them in full, which is what makes a rule
+# missing from the configuration a rule removed; a rule managed apart from
+# that map would be two owners of one firewall's rules.
+CreateFirewallRule
+UpdateFirewallRule
 DeleteFirewallRule
 
 # data-plane object operations — deliberately imperative, matches the

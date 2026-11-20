@@ -53,17 +53,23 @@ resource "fpcloud_app" "test" {
 				},
 			},
 			{
-				// The app is made outside this configuration, as a console or
-				// another state would make it, and the create meets it.
+				// The app is made outside this configuration, as a lost state
+				// or another workspace would leave it, with what the
+				// configuration declares, the schema's health-check defaults
+				// included: adopting an app that differs from its
+				// configuration is a separate question.
 				PreConfig: func() {
 					uid, root := int64(1000), false
 					app, err := testAccClient().CreateApp(context.Background(), projectID, client.CreateAppRequest{
-						Name:            appName,
-						Image:           "busybox:1.37",
-						Type:            "worker",
-						Command:         []string{"sleep"},
-						Args:            []string{"infinity"},
-						SecurityContext: &client.SecurityContext{RunAsUser: &uid, RunAsNonRoot: root},
+						Name:                appName,
+						Image:               "busybox:1.37",
+						Type:                "worker",
+						Command:             []string{"sleep"},
+						Args:                []string{"infinity"},
+						SecurityContext:     &client.SecurityContext{RunAsUser: &uid, RunAsNonRoot: root},
+						HealthCheckTimeout:  5,
+						HealthCheckInterval: 10,
+						HealthCheckRetries:  3,
 					})
 					if err != nil {
 						t.Fatalf("create the app to adopt: %v", err)

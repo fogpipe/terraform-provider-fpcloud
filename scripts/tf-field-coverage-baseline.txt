@@ -94,6 +94,11 @@ Bucket.used_bytes
 # resource's argument it would replace that resource continuously. `fpcloud db
 # show` and the console are where a staleness reading belongs.
 Database.replication_lag_seconds
+# Why a database is not as it should be, in words, with the time it began. A
+# diagnostic that changes while nothing in the config does, as a runner's are
+# above. What a config can act on is `status`, which already says `degraded`;
+# `fpcloud db get` and the console carry the reason.
+Database.problems
 
 # `firewall` on an app and on a bucket is a reference, by name or id, and
 # `firewall_id` is the id it resolved to. The rest of what the API reports

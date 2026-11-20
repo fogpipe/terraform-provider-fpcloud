@@ -197,8 +197,11 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Computed:    true,
 			},
 			"status": schema.StringAttribute{
-				Description: "The current status of the database.",
-				Computed:    true,
+				Description: "Where the database stands: `provisioning` until it is ready for the first time, " +
+					"`running`, `degraded` when the platform has not been managing it for longer than a " +
+					"switchover or a restart takes (it may still be serving; `fpcloud db get` says why), " +
+					"`failed`, `deleting`.",
+				Computed: true,
 			},
 			"host": schema.StringAttribute{
 				Description: "Cluster-internal hostname of the database's primary. Not reachable from " +

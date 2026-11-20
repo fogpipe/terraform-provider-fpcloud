@@ -79,8 +79,9 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Computed:    true,
 			},
 			"status": schema.StringAttribute{
-				Description: "The current status of the database.",
-				Computed:    true,
+				Description: "Where the database stands: `provisioning`, `running`, `degraded` when the platform " +
+					"has not been managing it for longer than a switchover or a restart takes, `failed`, `deleting`.",
+				Computed: true,
 			},
 			// The size is read from the live cluster, so it reports what the
 			// database actually runs under, whoever last changed it.

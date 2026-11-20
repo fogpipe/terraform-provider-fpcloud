@@ -33,7 +33,6 @@ Use this data source to read one entry of the curated app catalog: the mirrored 
 - `database_storage` (String) The volume of each database instance.
 - `database_version` (String) The database major the entry needs.
 - `env` (Map of String) The app's plain environment: literal values and $(NAME) references to what the platform injects for the bound database, bucket and the app's own URL.
-- `health_check_path` (String) The path that answers 200 once the app is up.
 - `homepage` (String) The upstream project.
 - `image` (String) The mirrored image reference an app is created with.
 - `inputs` (Attributes List) What a person supplies: each lands in the app's environment (or secrets, for type secret) under key. (see [below for nested schema](#nestedatt--inputs))
@@ -41,11 +40,10 @@ Use this data source to read one entry of the curated app catalog: the mirrored 
 - `memory` (String) The recommended memory limit.
 - `notes` (String) What a person does after the deploy: the first sign-in, a setting the app only takes in its own UI.
 - `port` (Number) The HTTP port the container listens on.
+- `probes` (Attributes) The probes the app is created with: every one on the entry's health path, startup with the time a slow first boot needs. (see [below for nested schema](#nestedatt--probes))
 - `reserved` (Map of String) What a deployment of the entry holds while it runs, per hour, keyed by metered resource type (`compute.cpu`, `database.storage`) in that type's billing unit — cores or GiB. Multiplied by the org's rates (`fpcloud billing prices`) and 730 hours it is the monthly cost; bucket and backup storage are billed by use and absent.
 - `run_as_user` (Number) The uid the app is created to run as, pinned non-root, where the upstream image declares no user; null when the image's own user is what runs.
 - `secrets` (List of String) Keys the app needs as random secrets; generate one per key and pass them as the app's secrets.
-- `startup_failure_threshold` (Number) How many startup probe misses the first boot is allowed before liveness takes over; null when the entry declares no startup probe.
-- `startup_period_seconds` (Number) How often the startup probe checks the health path during the first boot; null when the entry leaves startup to the shared health check.
 - `summary` (String) One line on what the app is.
 - `upstream_digest` (String) The digest the source image was reviewed and mirrored at.
 - `upstream_image` (String) The source image the platform's mirror was copied from.
@@ -61,3 +59,51 @@ Read-Only:
 - `prompt` (String) What to ask for.
 - `required` (Boolean) Whether the deploy is refused without it.
 - `type` (String) string, email or secret.
+
+
+<a id="nestedatt--probes"></a>
+### Nested Schema for `probes`
+
+Read-Only:
+
+- `liveness` (Attributes) One probe; null when it is not declared. (see [below for nested schema](#nestedatt--probes--liveness))
+- `readiness` (Attributes) One probe; null when it is not declared. (see [below for nested schema](#nestedatt--probes--readiness))
+- `startup` (Attributes) One probe; null when it is not declared. (see [below for nested schema](#nestedatt--probes--startup))
+
+<a id="nestedatt--probes--liveness"></a>
+### Nested Schema for `probes.liveness`
+
+Read-Only:
+
+- `failure_threshold` (Number) As on fpcloud_app's probes; null takes the probe's default.
+- `initial_delay_seconds` (Number) As on fpcloud_app's probes; null takes the probe's default.
+- `path` (String) HTTP path the probe requests.
+- `period_seconds` (Number) As on fpcloud_app's probes; null takes the probe's default.
+- `success_threshold` (Number) As on fpcloud_app's probes; null takes the probe's default.
+- `timeout_seconds` (Number) As on fpcloud_app's probes; null takes the probe's default.
+
+
+<a id="nestedatt--probes--readiness"></a>
+### Nested Schema for `probes.readiness`
+
+Read-Only:
+
+- `failure_threshold` (Number) As on fpcloud_app's probes; null takes the probe's default.
+- `initial_delay_seconds` (Number) As on fpcloud_app's probes; null takes the probe's default.
+- `path` (String) HTTP path the probe requests.
+- `period_seconds` (Number) As on fpcloud_app's probes; null takes the probe's default.
+- `success_threshold` (Number) As on fpcloud_app's probes; null takes the probe's default.
+- `timeout_seconds` (Number) As on fpcloud_app's probes; null takes the probe's default.
+
+
+<a id="nestedatt--probes--startup"></a>
+### Nested Schema for `probes.startup`
+
+Read-Only:
+
+- `failure_threshold` (Number) As on fpcloud_app's probes; null takes the probe's default.
+- `initial_delay_seconds` (Number) As on fpcloud_app's probes; null takes the probe's default.
+- `path` (String) HTTP path the probe requests.
+- `period_seconds` (Number) As on fpcloud_app's probes; null takes the probe's default.
+- `success_threshold` (Number) As on fpcloud_app's probes; null takes the probe's default.
+- `timeout_seconds` (Number) As on fpcloud_app's probes; null takes the probe's default.

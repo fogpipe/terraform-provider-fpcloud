@@ -33,7 +33,6 @@ type TemplateDataSourceModel struct {
 	Version         types.String `tfsdk:"version"`
 	Image           types.String `tfsdk:"image"`
 	Port            types.Int64  `tfsdk:"port"`
-	HealthCheckPath types.String `tfsdk:"health_check_path"`
 	CPU             types.String `tfsdk:"cpu"`
 	Memory          types.String `tfsdk:"memory"`
 	Command         types.List   `tfsdk:"command"`
@@ -51,8 +50,7 @@ type TemplateDataSourceModel struct {
 	Bucket          types.Bool   `tfsdk:"bucket"`
 	BucketPublic    types.Bool   `tfsdk:"bucket_public_read"`
 	RunAsUser       types.Int64  `tfsdk:"run_as_user"`
-	StartupPeriod   types.Int64  `tfsdk:"startup_period_seconds"`
-	StartupFailures types.Int64  `tfsdk:"startup_failure_threshold"`
+	Probes          types.Object `tfsdk:"probes"`
 	Notes           types.String `tfsdk:"notes"`
 }
 
@@ -100,10 +98,9 @@ func (d *TemplateDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Description: "The mirrored image reference an app is created with.",
 				Computed:    true,
 			},
-			"port":              schema.Int64Attribute{Description: "The HTTP port the container listens on.", Computed: true},
-			"health_check_path": schema.StringAttribute{Description: "The path that answers 200 once the app is up.", Computed: true},
-			"cpu":               schema.StringAttribute{Description: "The recommended CPU limit.", Computed: true},
-			"memory":            schema.StringAttribute{Description: "The recommended memory limit.", Computed: true},
+			"port":   schema.Int64Attribute{Description: "The HTTP port the container listens on.", Computed: true},
+			"cpu":    schema.StringAttribute{Description: "The recommended CPU limit.", Computed: true},
+			"memory": schema.StringAttribute{Description: "The recommended memory limit.", Computed: true},
 			"command": schema.ListAttribute{
 				Description: "The entrypoint override the entry needs, if any.",
 				Computed:    true,
@@ -178,13 +175,14 @@ func (d *TemplateDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Description: "The uid the app is created to run as, pinned non-root, where the upstream image declares no user; null when the image's own user is what runs.",
 				Computed:    true,
 			},
-			"startup_period_seconds": schema.Int64Attribute{
-				Description: "How often the startup probe checks the health path during the first boot; null when the entry leaves startup to the shared health check.",
+			"probes": schema.SingleNestedAttribute{
+				Description: "The probes the app is created with: every one on the entry's health path, startup with the time a slow first boot needs.",
 				Computed:    true,
-			},
-			"startup_failure_threshold": schema.Int64Attribute{
-				Description: "How many startup probe misses the first boot is allowed before liveness takes over; null when the entry declares no startup probe.",
-				Computed:    true,
+				Attributes: map[string]schema.Attribute{
+					"liveness":  computedProbeSchema(),
+					"readiness": computedProbeSchema(),
+					"startup":   computedProbeSchema(),
+				},
 			},
 			"notes": schema.StringAttribute{
 				Description: "What a person does after the deploy: the first sign-in, a setting the app only takes in its own UI.",
@@ -233,7 +231,6 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 	data.Version = types.StringValue(t.Version)
 	data.Image = types.StringValue(t.Image)
 	data.Port = types.Int64Value(int64(t.Port))
-	data.HealthCheckPath = types.StringValue(t.HealthCheckPath)
 	data.CPU = types.StringValue(t.Resources.CPU)
 	data.Memory = types.StringValue(t.Resources.Memory)
 	data.Notes = types.StringValue(t.Notes)
@@ -288,11 +285,9 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 	if t.RunAsUser != nil {
 		data.RunAsUser = types.Int64Value(*t.RunAsUser)
 	}
-	data.StartupPeriod, data.StartupFailures = types.Int64Null(), types.Int64Null()
-	if s := t.Startup; s != nil {
-		data.StartupPeriod = types.Int64Value(int64(s.PeriodSeconds))
-		data.StartupFailures = types.Int64Value(int64(s.FailureThreshold))
-	}
+	var probes AppResourceModel
+	setProbesOnModel(&probes, t.Probes, &diags)
+	data.Probes = probes.Probes
 
 	resp.Diagnostics = diags
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -310,4 +305,14 @@ func orEmptyMap(m map[string]string) map[string]string {
 		return map[string]string{}
 	}
 	return m
+}
+
+// computedProbeSchema is one probe as a template reads it back, the shape of
+// an app's probe.
+func computedProbeSchema() schema.SingleNestedAttribute {
+	attrs := map[string]schema.Attribute{"path": schema.StringAttribute{Computed: true, Description: "HTTP path the probe requests."}}
+	for _, k := range []string{"initial_delay_seconds", "period_seconds", "timeout_seconds", "failure_threshold", "success_threshold"} {
+		attrs[k] = schema.Int64Attribute{Computed: true, Description: "As on fpcloud_app's probes; null takes the probe's default."}
+	}
+	return schema.SingleNestedAttribute{Computed: true, Description: "One probe; null when it is not declared.", Attributes: attrs}
 }

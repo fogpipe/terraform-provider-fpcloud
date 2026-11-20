@@ -126,7 +126,6 @@ func (f *fakeReferenceAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		app := &client.App{ID: next("app"), ProjectID: scopeID, Name: req.Name, DisplayName: req.Name,
 			Image: req.Image, Type: "web", Port: 8080, Ingress: "internal", Status: "running",
 			MinScale: 1, MaxScale: 1, CPULimit: "500m", MemoryLimit: "512Mi",
-			HealthCheckPath: "/", HealthCheckTimeout: 5, HealthCheckInterval: 10, HealthCheckRetries: 3,
 			CreatedAt: stamp, UpdatedAt: stamp}
 		f.apps[app.ID] = app
 		answer(http.StatusCreated, app)

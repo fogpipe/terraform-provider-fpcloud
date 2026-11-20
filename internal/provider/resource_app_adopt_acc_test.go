@@ -15,6 +15,8 @@ import (
 // adopt_existing, and it is the same app: the provider takes it over on the
 // API's ALREADY_EXISTS answer and on nothing else, so an adoption that reads
 // any other conflict as "exists" fails here instead of in someone's apply.
+// The existing app differs from the configuration, and the apply brings it
+// to the configuration.
 func TestAccAppResource_adoptExisting(t *testing.T) {
 	if os.Getenv("FPCLOUD_API_KEY") == "" {
 		t.Skip("FPCLOUD_API_KEY not set, skipping acceptance test")
@@ -54,22 +56,18 @@ resource "fpcloud_app" "test" {
 			},
 			{
 				// The app is made outside this configuration, as a lost state
-				// or another workspace would leave it, with what the
-				// configuration declares, the schema's health-check defaults
-				// included: adopting an app that differs from its
-				// configuration is a separate question.
+				// or another workspace would leave it, with arguments and env
+				// the configuration does not declare.
 				PreConfig: func() {
 					uid, root := int64(1000), false
 					app, err := testAccClient().CreateApp(context.Background(), projectID, client.CreateAppRequest{
-						Name:                appName,
-						Image:               "busybox:1.37",
-						Type:                "worker",
-						Command:             []string{"sleep"},
-						Args:                []string{"infinity"},
-						SecurityContext:     &client.SecurityContext{RunAsUser: &uid, RunAsNonRoot: root},
-						HealthCheckTimeout:  5,
-						HealthCheckInterval: 10,
-						HealthCheckRetries:  3,
+						Name:            appName,
+						Image:           "busybox:1.37",
+						Type:            "worker",
+						Command:         []string{"sleep"},
+						Args:            []string{"3600"},
+						SecurityContext: &client.SecurityContext{RunAsUser: &uid, RunAsNonRoot: root},
+						EnvVars:         map[string]string{"STALE": "1"},
 					})
 					if err != nil {
 						t.Fatalf("create the app to adopt: %v", err)
@@ -79,6 +77,7 @@ resource "fpcloud_app" "test" {
 				Config: adopting,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("fpcloud_app.test", "name", appName),
+					resource.TestCheckResourceAttr("fpcloud_app.test", "args.0", "infinity"),
 					func(s *terraform.State) error {
 						if got := s.RootModule().Resources["fpcloud_app.test"].Primary.ID; got != existingID {
 							return fmt.Errorf("state holds app %s, want the existing app %s adopted", got, existingID)

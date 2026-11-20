@@ -326,8 +326,7 @@ func (f *fakeFirewallAPI) firewall() client.Firewall {
 func (f *fakeFirewallAPI) app() client.App {
 	app := client.App{ID: "app-1", ProjectID: "proj-1", Name: "web", Image: "ghcr.io/acme/web:v1",
 		Type: "web", Port: 8080, Ingress: "internal", Status: "running", MinScale: 1, MaxScale: 1,
-		CPULimit: "500m", MemoryLimit: "512Mi",
-		HealthCheckPath: "/", HealthCheckTimeout: 5, HealthCheckInterval: 10, HealthCheckRetries: 3}
+		CPULimit: "500m", MemoryLimit: "512Mi"}
 	status := f.settle()
 	switch {
 	case f.attached:

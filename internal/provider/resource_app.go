@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -36,44 +37,40 @@ type AppResource struct {
 
 // AppResourceModel describes the resource data model.
 type AppResourceModel struct {
-	ID                  types.String `tfsdk:"id"`
-	Project             types.String `tfsdk:"project"`
-	ProjectID           types.String `tfsdk:"project_id"`
-	Name                types.String `tfsdk:"name"`
-	DisplayName         types.String `tfsdk:"display_name"`
-	URLSlug             types.String `tfsdk:"url_slug"`
-	Image               types.String `tfsdk:"image"`
-	Release             types.String `tfsdk:"release"`
-	Command             types.List   `tfsdk:"command"`
-	Args                types.List   `tfsdk:"args"`
-	ReleaseCommand      types.List   `tfsdk:"release_command"`
-	WaitForRollout      types.Bool   `tfsdk:"wait_for_rollout"`
-	VolumeMounts        types.List   `tfsdk:"volume_mounts"`
-	SecurityContext     types.Object `tfsdk:"security_context"`
-	Port                types.Int64  `tfsdk:"port"`
-	Ingress             types.String `tfsdk:"ingress"`
-	Type                types.String `tfsdk:"type"`
-	ServiceAccount      types.String `tfsdk:"service_account"`
-	IdentityTokenFile   types.String `tfsdk:"identity_token_file"`
-	Env                 types.Map    `tfsdk:"env"`
-	SecretEnv           types.Map    `tfsdk:"secret_env"`
-	MinScale            types.Int64  `tfsdk:"min_scale"`
-	MaxScale            types.Int64  `tfsdk:"max_scale"`
-	CPULimit            types.String `tfsdk:"cpu_limit"`
-	MemoryLimit         types.String `tfsdk:"memory_limit"`
-	HealthCheckPath     types.String `tfsdk:"health_check_path"`
-	HealthCheckTimeout  types.Int64  `tfsdk:"health_check_timeout"`
-	HealthCheckInterval types.Int64  `tfsdk:"health_check_interval"`
-	HealthCheckRetries  types.Int64  `tfsdk:"health_check_retries"`
-	Probes              types.Object `tfsdk:"probes"`
-	AdoptExisting       types.Bool   `tfsdk:"adopt_existing"`
-	Routes              types.List   `tfsdk:"routes"`
-	Firewall            types.String `tfsdk:"firewall"`
-	FirewallID          types.String `tfsdk:"firewall_id"`
-	Status              types.String `tfsdk:"status"`
-	URL                 types.String `tfsdk:"url"`
-	CreatedAt           types.String `tfsdk:"created_at"`
-	UpdatedAt           types.String `tfsdk:"updated_at"`
+	ID                types.String `tfsdk:"id"`
+	Project           types.String `tfsdk:"project"`
+	ProjectID         types.String `tfsdk:"project_id"`
+	Name              types.String `tfsdk:"name"`
+	DisplayName       types.String `tfsdk:"display_name"`
+	URLSlug           types.String `tfsdk:"url_slug"`
+	Image             types.String `tfsdk:"image"`
+	Release           types.String `tfsdk:"release"`
+	Command           types.List   `tfsdk:"command"`
+	Args              types.List   `tfsdk:"args"`
+	ReleaseCommand    types.List   `tfsdk:"release_command"`
+	WaitForRollout    types.Bool   `tfsdk:"wait_for_rollout"`
+	VolumeMounts      types.List   `tfsdk:"volume_mounts"`
+	SecurityContext   types.Object `tfsdk:"security_context"`
+	Port              types.Int64  `tfsdk:"port"`
+	Ingress           types.String `tfsdk:"ingress"`
+	Type              types.String `tfsdk:"type"`
+	ServiceAccount    types.String `tfsdk:"service_account"`
+	IdentityTokenFile types.String `tfsdk:"identity_token_file"`
+	Env               types.Map    `tfsdk:"env"`
+	SecretEnv         types.Map    `tfsdk:"secret_env"`
+	MinScale          types.Int64  `tfsdk:"min_scale"`
+	MaxScale          types.Int64  `tfsdk:"max_scale"`
+	CPULimit          types.String `tfsdk:"cpu_limit"`
+	MemoryLimit       types.String `tfsdk:"memory_limit"`
+	Probes            types.Object `tfsdk:"probes"`
+	AdoptExisting     types.Bool   `tfsdk:"adopt_existing"`
+	Routes            types.List   `tfsdk:"routes"`
+	Firewall          types.String `tfsdk:"firewall"`
+	FirewallID        types.String `tfsdk:"firewall_id"`
+	Status            types.String `tfsdk:"status"`
+	URL               types.String `tfsdk:"url"`
+	CreatedAt         types.String `tfsdk:"created_at"`
+	UpdatedAt         types.String `tfsdk:"updated_at"`
 }
 
 // RouteModel describes a per-path visibility carve-out in Terraform state.
@@ -90,9 +87,8 @@ type VolumeMountModel struct {
 	EmptyDir  types.Object `tfsdk:"empty_dir"`
 }
 
-// ProbeOverridesModel describes the per-probe overrides block in state. A null
-// probe here means that probe keeps using the app's shared health_check_*
-// settings, so overriding one never means restating the other two.
+// ProbeOverridesModel describes the probes block in state. A null probe here
+// takes its default, so declaring one never means restating the other two.
 type ProbeOverridesModel struct {
 	Liveness  types.Object `tfsdk:"liveness"`
 	Readiness types.Object `tfsdk:"readiness"`
@@ -100,8 +96,7 @@ type ProbeOverridesModel struct {
 }
 
 // ProbeSpecModel is one probe's path and timing in state. Every attribute is
-// independently optional — a null one falls back to the matching health_check_*
-// value rather than to a hardcoded default.
+// independently optional — a null one takes that probe's default.
 type ProbeSpecModel struct {
 	Path                types.String `tfsdk:"path"`
 	InitialDelaySeconds types.Int64  `tfsdk:"initial_delay_seconds"`
@@ -132,7 +127,7 @@ func (r *AppResource) Metadata(_ context.Context, req resource.MetadataRequest, 
 func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a Fogpipe application.",
-		Version:     3,
+		Version:     4,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "App ID.",
@@ -374,57 +369,34 @@ func (r *AppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Computed:    true,
 				Default:     stringdefault.StaticString("512Mi"),
 			},
-			"health_check_path": schema.StringAttribute{
-				// Defaulted by the API for the same reason as `port`: a worker
-				// has no port to probe and refuses a health path.
-				Description: "HTTP path for health checks. Defaults to '/' on a web app; not valid on a worker. Set a custom path (e.g. '/healthz') to enable startup probes.",
-				Optional:    true,
-				Computed:    true,
-			},
-			"health_check_timeout": schema.Int64Attribute{
-				Description: "Health check timeout in seconds. Defaults to 5.",
-				Optional:    true,
-				Computed:    true,
-				Default:     int64default.StaticInt64(5),
-			},
-			"health_check_interval": schema.Int64Attribute{
-				Description: "Health check interval in seconds. Defaults to 10.",
-				Optional:    true,
-				Computed:    true,
-				Default:     int64default.StaticInt64(10),
-			},
-			"health_check_retries": schema.Int64Attribute{
-				Description: "Health check failure threshold. Defaults to 3.",
-				Optional:    true,
-				Computed:    true,
-				Default:     int64default.StaticInt64(3),
-			},
 			"probes": schema.SingleNestedAttribute{
-				Description: "Per-probe overrides for liveness, readiness and startup. By default all " +
-					"three request health_check_path, so one request decides both whether traffic " +
-					"reaches the app and whether the pod is restarted. Startup and readiness run on the " +
-					"health_check_* timing; liveness runs on its own, a check every 60s with a 5s timeout " +
-					"and a restart after 5 failures in a row, so a stall shorter than about five minutes " +
-					"only takes the pod out of the load balancer. Point liveness at a cheap path that " +
-					"touches no downstream and readiness at the one that does, and a dependency outage " +
-					"never restarts the pod. Any attribute left unset keeps that probe's default, so " +
-					"overriding a path never means restating the timing. Always-on apps only.",
+				Description: "Liveness, readiness and startup, each declared on its own. Without one, " +
+					"traffic reaches a pod once its port accepts a connection and nothing restarts a pod " +
+					"that hangs. A probe requests its path; without a path readiness connects to the port " +
+					"and liveness and startup are off. Startup and readiness run on a check every 10s with " +
+					"a 5s timeout and 3 failures; liveness runs on its own, a check every 60s with a 5s " +
+					"timeout and a restart after 5 failures in a row, so a stall shorter than about five " +
+					"minutes only takes the pod out of the load balancer. Point liveness at a cheap path " +
+					"that touches no downstream and readiness at the one that does, and a dependency " +
+					"outage never restarts the pod. Any timing left unset keeps that probe's default, so " +
+					"setting a path never means restating the timing. Not valid on a worker.",
 				Optional: true,
 				Attributes: map[string]schema.Attribute{
 					"liveness": probeSchema("Restarts the pod when it fails. Kubernetes holds it off until the startup probe first succeeds.",
-						"Unset attributes fall back to health_check_path and to liveness's own timing: period_seconds 60, timeout_seconds 5, failure_threshold 5."),
+						"Without a path there is no liveness probe. Unset timing is liveness's own: period_seconds 60, timeout_seconds 5, failure_threshold 5."),
 					"readiness": probeSchema("Decides whether traffic reaches the pod. Failing it only pulls the pod out of the Service until it recovers.",
-						"Unset attributes fall back to the app's health_check_* values."),
+						"Without a path it connects to the port. Unset timing is period_seconds 10, timeout_seconds 5, failure_threshold 3."),
 					"startup": probeSchema("Gates the other two until the app has booted. Raise failure_threshold for a slow start rather than delaying liveness.",
-						"Unset attributes fall back to the app's health_check_* values."),
+						"Without a path there is no startup probe. Unset timing is period_seconds 10, timeout_seconds 5, failure_threshold 3."),
 				},
 			},
 			"adopt_existing": schema.BoolAttribute{
 				Description: "When true, if an app with this name already exists in the project, adopt it " +
 					"into Terraform state on create instead of failing with a 409 conflict. Defaults to " +
-					"false, so create never silently takes ownership of an app it did not create. Note: " +
-					"adoption records the existing app in state but does not push the configured image/env/" +
-					"secret — run a subsequent apply to reconcile them.",
+					"false, so create never silently takes ownership of an app it did not create. The " +
+					"adopted app is brought to the configuration as an update would; `type`, `port` and " +
+					"`ingress` are set only at create, so an existing app differing in one is refused " +
+					"naming it.",
 				Optional: true,
 			},
 			"routes": schema.ListNestedAttribute{
@@ -543,27 +515,23 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 
 	createReq := client.CreateAppRequest{
-		Name:                plan.Name.ValueString(),
-		DisplayName:         plan.DisplayName.ValueString(),
-		URLSlug:             plan.URLSlug.ValueString(),
-		Image:               plan.Image.ValueString(),
-		Release:             plan.Release.ValueString(),
-		Command:             command,
-		Args:                args,
-		ReleaseCommand:      releaseCommand,
-		VolumeMounts:        volumeMounts,
-		SecurityContext:     securityContext,
-		Port:                int(plan.Port.ValueInt64()),
-		Ingress:             plan.Ingress.ValueString(),
-		Routes:              routes,
-		Type:                plan.Type.ValueString(),
-		HealthCheckPath:     plan.HealthCheckPath.ValueString(),
-		HealthCheckTimeout:  int(plan.HealthCheckTimeout.ValueInt64()),
-		HealthCheckInterval: int(plan.HealthCheckInterval.ValueInt64()),
-		HealthCheckRetries:  int(plan.HealthCheckRetries.ValueInt64()),
-		Probes:              probes,
-		EnvVars:             envMap,
-		SecretEnv:           secretEnv,
+		Name:            plan.Name.ValueString(),
+		DisplayName:     plan.DisplayName.ValueString(),
+		URLSlug:         plan.URLSlug.ValueString(),
+		Image:           plan.Image.ValueString(),
+		Release:         plan.Release.ValueString(),
+		Command:         command,
+		Args:            args,
+		ReleaseCommand:  releaseCommand,
+		VolumeMounts:    volumeMounts,
+		SecurityContext: securityContext,
+		Port:            int(plan.Port.ValueInt64()),
+		Ingress:         plan.Ingress.ValueString(),
+		Routes:          routes,
+		Type:            plan.Type.ValueString(),
+		Probes:          probes,
+		EnvVars:         envMap,
+		SecretEnv:       secretEnv,
 		// Attached in the create itself: an attach sent after it leaves the
 		// app served without its firewall until the edge has taken it.
 		Firewall: plan.Firewall.ValueString(),
@@ -585,10 +553,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 				)
 				return
 			}
-			// Record the existing app in state as-is. Image/env/secret/scaling are
-			// not pushed here; a subsequent apply reconciles them against the config.
-			r.setModelFromApp(&plan, existing, &resp.Diagnostics)
-			resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+			r.adopt(ctx, &plan, existing, resp)
 			return
 		}
 		resp.Diagnostics.AddError("Error creating app", err.Error())
@@ -750,6 +715,18 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
+	app := r.converge(ctx, &plan, &state, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	r.setModelFromApp(&plan, app, &resp.Diagnostics)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// converge brings the app state describes to plan, one change at a time, and
+// answers the app as it then stands. Update runs it from the prior state, and
+// an adoption from the existing app read as state.
+func (r *AppResource) converge(ctx context.Context, plan, state *AppResourceModel, diags *diag.Diagnostics) *client.App {
 	appID := state.ID.ValueString()
 
 	// The firewall moves first: an apply that narrows who reaches the app does
@@ -759,21 +736,21 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		want := ""
 		if detach {
 			if err := r.client.DetachAppFirewall(ctx, appID); err != nil {
-				resp.Diagnostics.AddError("Error detaching firewall", err.Error())
-				return
+				diags.AddError("Error detaching firewall", err.Error())
+				return nil
 			}
 		} else {
 			ref, err := r.client.AttachAppFirewall(ctx, appID, client.AttachFirewallRequest{Firewall: plan.Firewall.ValueString()})
 			if err != nil {
-				resp.Diagnostics.AddError("Error attaching firewall", err.Error())
-				return
+				diags.AddError("Error attaching firewall", err.Error())
+				return nil
 			}
-			warnFindings(path.Root("firewall"), ref.Name, ref.Findings, &resp.Diagnostics)
+			warnFindings(path.Root("firewall"), ref.Name, ref.Findings, diags)
 			want = answeredFirewallID(ref, plan.Firewall.ValueString())
 		}
 		if err := r.awaitFirewall(ctx, appID, state.Name.ValueString(), want); err != nil {
-			resp.Diagnostics.AddError("Error applying firewall", err.Error())
-			return
+			diags.AddError("Error applying firewall", err.Error())
+			return nil
 		}
 	}
 
@@ -791,23 +768,23 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	// one deploy that does not run it, and reports success having rolled out
 	// new code past the migration that was added to gate it.
 	if !plan.Command.Equal(state.Command) || !plan.Args.Equal(state.Args) || (releaseCommandChanged && !deployingImage) {
-		command := stringListToSlice(ctx, plan.Command, &resp.Diagnostics)
-		args := stringListToSlice(ctx, plan.Args, &resp.Diagnostics)
-		if resp.Diagnostics.HasError() {
-			return
+		command := stringListToSlice(ctx, plan.Command, diags)
+		args := stringListToSlice(ctx, plan.Args, diags)
+		if diags.HasError() {
+			return nil
 		}
 		var releaseCommand *[]string
 		if releaseCommandChanged && !deployingImage {
-			v := stringListToSlice(ctx, plan.ReleaseCommand, &resp.Diagnostics)
-			if resp.Diagnostics.HasError() {
-				return
+			v := stringListToSlice(ctx, plan.ReleaseCommand, diags)
+			if diags.HasError() {
+				return nil
 			}
 			releaseCommand = &v
 		}
 		_, err := r.client.UpdateAppCommand(ctx, appID, &command, &args, releaseCommand)
 		if err != nil {
-			resp.Diagnostics.AddError("Error updating app command", err.Error())
-			return
+			diags.AddError("Error updating app command", err.Error())
+			return nil
 		}
 	}
 
@@ -818,20 +795,20 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			deployReq.Release = plan.Release.ValueString()
 		}
 		if releaseCommandChanged {
-			v := stringListToSlice(ctx, plan.ReleaseCommand, &resp.Diagnostics)
-			if resp.Diagnostics.HasError() {
-				return
+			v := stringListToSlice(ctx, plan.ReleaseCommand, diags)
+			if diags.HasError() {
+				return nil
 			}
 			deployReq.ReleaseCommand = &v
 		}
 		deployed, err := r.client.DeployApp(ctx, appID, deployReq)
 		if err != nil {
-			resp.Diagnostics.AddError("Error deploying app", err.Error())
-			return
+			diags.AddError("Error deploying app", err.Error())
+			return nil
 		}
 		if err := awaitDeployment(ctx, r.client, deployed, plan.WaitForRollout.ValueBool()); err != nil {
-			resp.Diagnostics.AddError("Error deploying app", err.Error())
-			return
+			diags.AddError("Error deploying app", err.Error())
+			return nil
 		}
 	}
 
@@ -839,8 +816,8 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	if plan.DisplayName.ValueString() != state.DisplayName.ValueString() {
 		_, err := r.client.UpdateAppDisplayName(ctx, appID, plan.DisplayName.ValueString())
 		if err != nil {
-			resp.Diagnostics.AddError("Error updating app display name", err.Error())
-			return
+			diags.AddError("Error updating app display name", err.Error())
+			return nil
 		}
 	}
 
@@ -849,8 +826,8 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	if plan.URLSlug.ValueString() != state.URLSlug.ValueString() {
 		_, err := r.client.UpdateAppURLSlug(ctx, appID, plan.URLSlug.ValueString())
 		if err != nil {
-			resp.Diagnostics.AddError("Error updating app URL slug", err.Error())
-			return
+			diags.AddError("Error updating app URL slug", err.Error())
+			return nil
 		}
 	}
 
@@ -860,14 +837,14 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	// safer setting the more disruptive one. Removing the block clears it, which
 	// the API expresses as a null security_context.
 	if !plan.SecurityContext.Equal(state.SecurityContext) {
-		sc := securityContextFromModel(ctx, plan.SecurityContext, &resp.Diagnostics)
-		if resp.Diagnostics.HasError() {
-			return
+		sc := securityContextFromModel(ctx, plan.SecurityContext, diags)
+		if diags.HasError() {
+			return nil
 		}
 		_, err := r.client.SetAppSecurityContext(ctx, appID, sc)
 		if err != nil {
-			resp.Diagnostics.AddError("Error updating app security context", err.Error())
-			return
+			diags.AddError("Error updating app security context", err.Error())
+			return nil
 		}
 	}
 
@@ -875,39 +852,39 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	// attribute removes them all. An unknown plan value is not a request to
 	// change anything.
 	if !plan.VolumeMounts.IsUnknown() && !plan.VolumeMounts.Equal(state.VolumeMounts) {
-		mounts := volumeMountsFromModel(ctx, plan.VolumeMounts, &resp.Diagnostics)
-		if resp.Diagnostics.HasError() {
-			return
+		mounts := volumeMountsFromModel(ctx, plan.VolumeMounts, diags)
+		if diags.HasError() {
+			return nil
 		}
 		if _, err := r.client.SetAppVolumeMounts(ctx, appID, mounts); err != nil {
-			resp.Diagnostics.AddError("Error updating app volume mounts", err.Error())
-			return
+			diags.AddError("Error updating app volume mounts", err.Error())
+			return nil
 		}
 	}
 
 	// An unknown plan value is not a request to change anything — sending it would
 	// serialize to no routes and silently clear the carve-outs the app already has.
 	if !plan.Routes.IsUnknown() && !plan.Routes.Equal(state.Routes) {
-		_, err := r.client.UpdateAppRoutes(ctx, appID, routesFromModel(ctx, plan.Routes, &resp.Diagnostics))
-		if resp.Diagnostics.HasError() {
-			return
+		_, err := r.client.UpdateAppRoutes(ctx, appID, routesFromModel(ctx, plan.Routes, diags))
+		if diags.HasError() {
+			return nil
 		}
 		if err != nil {
-			resp.Diagnostics.AddError("Error updating app routes", err.Error())
-			return
+			diags.AddError("Error updating app routes", err.Error())
+			return nil
 		}
 	}
 
-	// Like routes, an unknown plan value is not a request to change anything — sending it would clear the overrides the app
-	// already has back to the shared health check.
+	// Like routes, an unknown plan value is not a request to change anything — sending it would clear the probes the app
+	// already declares back to their defaults.
 	if !plan.Probes.IsUnknown() && !plan.Probes.Equal(state.Probes) {
-		_, err := r.client.UpdateAppProbes(ctx, appID, probesFromModel(ctx, plan.Probes, &resp.Diagnostics))
-		if resp.Diagnostics.HasError() {
-			return
+		_, err := r.client.UpdateAppProbes(ctx, appID, probesFromModel(ctx, plan.Probes, diags))
+		if diags.HasError() {
+			return nil
 		}
 		if err != nil {
-			resp.Diagnostics.AddError("Error updating app probes", err.Error())
-			return
+			diags.AddError("Error updating app probes", err.Error())
+			return nil
 		}
 	}
 
@@ -927,8 +904,8 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 		_, err := r.client.ScaleApp(ctx, appID, scaleReq)
 		if err != nil {
-			resp.Diagnostics.AddError("Error scaling app", err.Error())
-			return
+			diags.AddError("Error scaling app", err.Error())
+			return nil
 		}
 	}
 
@@ -939,15 +916,15 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	// drops the old one, so a key the other map now holds is not removed.
 	var planEnv, stateEnv map[string]string
 	if !plan.Env.IsNull() && !plan.Env.IsUnknown() {
-		resp.Diagnostics.Append(plan.Env.ElementsAs(ctx, &planEnv, false)...)
+		diags.Append(plan.Env.ElementsAs(ctx, &planEnv, false)...)
 	}
 	if !state.Env.IsNull() && !state.Env.IsUnknown() {
-		resp.Diagnostics.Append(state.Env.ElementsAs(ctx, &stateEnv, false)...)
+		diags.Append(state.Env.ElementsAs(ctx, &stateEnv, false)...)
 	}
-	planSecretEnv := secretEnvFromModel(ctx, plan.SecretEnv, &resp.Diagnostics)
-	stateSecretEnv := secretEnvFromModel(ctx, state.SecretEnv, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
-		return
+	planSecretEnv := secretEnvFromModel(ctx, plan.SecretEnv, diags)
+	stateSecretEnv := secretEnvFromModel(ctx, state.SecretEnv, diags)
+	if diags.HasError() {
+		return nil
 	}
 
 	var change client.UpdateConfigRequest
@@ -974,8 +951,8 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 	if len(change.Set) > 0 || len(change.Unset) > 0 {
 		if _, err := r.client.UpdateConfig(ctx, appID, change); err != nil {
-			resp.Diagnostics.AddError("Error updating env", err.Error())
-			return
+			diags.AddError("Error updating env", err.Error())
+			return nil
 		}
 	}
 
@@ -987,13 +964,103 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	// (fogpipe/cloud-workspace#226).
 	app, err := r.client.GetApp(ctx, appID)
 	if err != nil {
-		resp.Diagnostics.AddError("Error reading app", err.Error())
+		diags.AddError("Error reading app", err.Error())
+		return nil
+	}
+	return app
+}
+
+// adopt takes the existing app into state and converges it to plan. What
+// only a create sets is compared first, and a difference is refused naming
+// each attribute: converging could not change it, and recording it would fail
+// the apply on the planned value.
+func (r *AppResource) adopt(ctx context.Context, plan *AppResourceModel, existing *client.App, resp *resource.CreateResponse) {
+	var fixed []string
+	if v := plan.Type; !v.IsUnknown() && v.ValueString() != existing.Type {
+		fixed = append(fixed, fmt.Sprintf("type is %q, the configuration says %q", existing.Type, v.ValueString()))
+	}
+	if v := plan.Port; !v.IsUnknown() && !v.IsNull() && v.ValueInt64() != int64(existing.Port) {
+		fixed = append(fixed, fmt.Sprintf("port is %d, the configuration says %d", existing.Port, v.ValueInt64()))
+	}
+	if v := plan.Ingress; !v.IsUnknown() && v.ValueString() != existing.Ingress {
+		fixed = append(fixed, fmt.Sprintf("ingress is %q, the configuration says %q", existing.Ingress, v.ValueString()))
+	}
+	if len(fixed) > 0 {
+		resp.Diagnostics.AddError("Error adopting existing app",
+			fmt.Sprintf("App %q already exists and differs from the configuration in what only a create sets:\n  %s\nChange the configuration to match, or delete the app so it is created as configured.",
+				existing.Name, strings.Join(fixed, "\n  ")))
 		return
 	}
 
-	r.setModelFromApp(&plan, app, &resp.Diagnostics)
+	adopted := *plan
+	r.setModelFromApp(&adopted, existing, &resp.Diagnostics)
+	adopted.Env, adopted.SecretEnv = r.readEnv(ctx, existing.ID, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	// Recorded before it converges, so a step that fails leaves the app in
+	// state as it stands and the next apply carries on from there.
+	resp.Diagnostics.Append(resp.State.Set(ctx, &adopted)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	// A value the plan leaves unknown is the platform's to decide, and the
+	// existing app has decided it: the plan takes it rather than reading as a
+	// change to it.
+	knownOr(plan, &adopted)
+	app := r.converge(ctx, plan, &adopted, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	r.setModelFromApp(plan, app, &resp.Diagnostics)
+	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+// knownOr sets every attribute of plan that is unknown to the one in from.
+func knownOr(plan, from *AppResourceModel) {
+	p, f := reflect.ValueOf(plan).Elem(), reflect.ValueOf(from).Elem()
+	for i := range p.NumField() {
+		if v, ok := p.Field(i).Interface().(attr.Value); ok && v.IsUnknown() {
+			p.Field(i).Set(f.Field(i))
+		}
+	}
+}
+
+// readEnv reads an app's env as the model holds it: literals in env, secret
+// references in secret_env, each null when the app has none.
+func (r *AppResource) readEnv(ctx context.Context, appID string, diags *diag.Diagnostics) (types.Map, types.Map) {
+	refType := types.ObjectType{AttrTypes: map[string]attr.Type{"secret": types.StringType, "path": types.StringType}}
+	env, refs := types.MapNull(types.StringType), types.MapNull(refType)
+	entries, err := r.client.ListConfig(ctx, appID)
+	if err != nil {
+		diags.AddError("Error reading app env", err.Error())
+		return env, refs
+	}
+	literals, references := map[string]attr.Value{}, map[string]attr.Value{}
+	for _, e := range entries {
+		if e.SecretRef == nil {
+			literals[e.Key] = types.StringValue(e.Value)
+			continue
+		}
+		path := types.StringNull()
+		if e.SecretRef.Path != "" {
+			path = types.StringValue(e.SecretRef.Path)
+		}
+		obj, d := types.ObjectValue(refType.AttrTypes, map[string]attr.Value{"secret": types.StringValue(e.SecretRef.Secret), "path": path})
+		diags.Append(d...)
+		references[e.Key] = obj
+	}
+	if len(literals) > 0 {
+		m, d := types.MapValue(types.StringType, literals)
+		diags.Append(d...)
+		env = m
+	}
+	if len(references) > 0 {
+		m, d := types.MapValue(refType, references)
+		diags.Append(d...)
+		refs = m
+	}
+	return env, refs
 }
 
 // ModifyPlan resolves a changed `project` and a changed `firewall`, each once:
@@ -1127,7 +1194,7 @@ func probeSchema(description, fallback string) schema.SingleNestedAttribute {
 		Optional:    true,
 		Attributes: map[string]schema.Attribute{
 			"path": schema.StringAttribute{
-				Description: "HTTP path this probe requests, e.g. '/healthz'. Defaults to health_check_path.",
+				Description: "HTTP path this probe requests, e.g. '/healthz'. Without one, readiness connects to the port and liveness and startup are off.",
 				Optional:    true,
 			},
 			"initial_delay_seconds": schema.Int64Attribute{
@@ -1135,15 +1202,15 @@ func probeSchema(description, fallback string) schema.SingleNestedAttribute {
 				Optional:    true,
 			},
 			"period_seconds": schema.Int64Attribute{
-				Description: "Seconds between checks. Defaults to health_check_interval, or 60 on liveness.",
+				Description: "Seconds between checks. Defaults to 10, or 60 on liveness.",
 				Optional:    true,
 			},
 			"timeout_seconds": schema.Int64Attribute{
-				Description: "Seconds before a check counts as failed. Defaults to health_check_timeout, or 5 on liveness.",
+				Description: "Seconds before a check counts as failed. Defaults to 5.",
 				Optional:    true,
 			},
 			"failure_threshold": schema.Int64Attribute{
-				Description: "Consecutive failures before the probe acts. Defaults to health_check_retries, or 5 on liveness.",
+				Description: "Consecutive failures before the probe acts. Defaults to 3, or 5 on liveness.",
 				Optional:    true,
 			},
 			"success_threshold": schema.Int64Attribute{
@@ -1337,10 +1404,6 @@ func (r *AppResource) setModelFromApp(model *AppResourceModel, app *client.App, 
 	model.MaxScale = types.Int64Value(int64(app.MaxScale))
 	model.CPULimit = types.StringValue(app.CPULimit)
 	model.MemoryLimit = types.StringValue(app.MemoryLimit)
-	model.HealthCheckPath = types.StringValue(app.HealthCheckPath)
-	model.HealthCheckTimeout = types.Int64Value(int64(app.HealthCheckTimeout))
-	model.HealthCheckInterval = types.Int64Value(int64(app.HealthCheckInterval))
-	model.HealthCheckRetries = types.Int64Value(int64(app.HealthCheckRetries))
 	model.Firewall, model.FirewallID = attachedFirewall(app.Firewall, model.Firewall, model.FirewallID)
 	model.Status = types.StringValue(app.Status)
 	model.URL = types.StringValue(app.URL)
@@ -1557,14 +1620,26 @@ var _ resource.ResourceWithUpgradeState = &AppResource{}
 // upgrader applies every step since its version.
 //
 // Version 2 held the project in `project_id`, as the id the API answered; it
-// is now `project`, as written, beside the computed `project_id`.
+// is now `project`, as written, beside the computed `project_id`. Version 3
+// held the shared health check, which an app no longer has.
 func (r *AppResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
 	v2 := moveReference("project_id", projectReference)
 	return map[int64]resource.StateUpgrader{
-		0: rawStateUpgrader("app", upgradeAppStateV0, upgradeAppStateV1, v2),
-		1: rawStateUpgrader("app", upgradeAppStateV1, v2),
-		2: rawStateUpgrader("app", v2),
+		0: rawStateUpgrader("app", upgradeAppStateV0, upgradeAppStateV1, v2, upgradeAppStateV3),
+		1: rawStateUpgrader("app", upgradeAppStateV1, v2, upgradeAppStateV3),
+		2: rawStateUpgrader("app", v2, upgradeAppStateV3),
+		3: rawStateUpgrader("app", upgradeAppStateV3),
 	}
+}
+
+// upgradeAppStateV3 drops the shared health check, which left the schema: an
+// app's probes are its `probes` block alone, and the API reads back the
+// health check it had as probes.
+func upgradeAppStateV3(raw map[string]json.RawMessage) error {
+	for _, k := range []string{"health_check_path", "health_check_timeout", "health_check_interval", "health_check_retries"} {
+		delete(raw, k)
+	}
+	return nil
 }
 
 // upgradeAppStateV1 rewrites version 1's mounts, {source, name, mount_path,

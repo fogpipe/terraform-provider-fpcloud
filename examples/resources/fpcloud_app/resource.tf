@@ -26,17 +26,19 @@ resource "fpcloud_app" "web" {
     },
   ]
 
-  # All three probes default to health_check_path, which makes one request decide
-  # both whether traffic arrives and whether the pod is killed. Splitting them
-  # keeps a slow dependency from restarting a process that is running fine:
-  # readiness checks the downstream, liveness only checks that the app responds.
-  # Anything left unset here keeps the health_check_* value above.
-  health_check_path = "/ready" # readiness: checks the database
+  # Each probe is declared on its own. Splitting the paths keeps a slow
+  # dependency from restarting a process that is running fine: readiness checks
+  # the downstream, liveness only checks that the app responds. Timing left
+  # unset keeps that probe's default.
   probes = {
+    readiness = {
+      path = "/ready" # checks the database
+    }
     liveness = {
       path = "/healthz" # no downstream — a DB blip must not restart the pod
     }
     startup = {
+      path              = "/healthz"
       failure_threshold = 30 # allow 30 × period for a slow boot
     }
   }

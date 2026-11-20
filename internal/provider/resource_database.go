@@ -200,7 +200,7 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Description: "Where the database stands: `provisioning` until it is ready for the first time, " +
 					"`running`, `degraded` when the platform has not been managing it for longer than a " +
 					"switchover or a restart takes (it may still be serving; `fpcloud db get` says why), " +
-					"`failed`, `deleting`.",
+					"`deleting`.",
 				Computed: true,
 			},
 			"host": schema.StringAttribute{
@@ -601,8 +601,6 @@ func awaitDatabaseRunning(ctx context.Context, c *client.Client, id string) (*cl
 		}
 		switch db.Status {
 		case "provisioning", "":
-		case "failed":
-			return nil, fmt.Errorf("the database failed to provision; `fpcloud db get %s` has its state", id)
 		case "deleting":
 			return nil, fmt.Errorf("the database was deleted while it was being created; `fpcloud db get %s` has its state", id)
 		default:

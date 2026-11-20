@@ -23,7 +23,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
-	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 )
 
 var (
@@ -693,26 +692,8 @@ func firewallRulesToMap(prior types.Map, rules []client.FirewallRule, diags *dia
 // follows does that.
 func (r *FirewallResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
 	return map[int64]resource.StateUpgrader{
-		0: {StateUpgrader: upgradeFirewallStateV0},
+		0: rawStateUpgrader(r, "firewall", upgradeFirewallRulesV0),
 	}
-}
-
-func upgradeFirewallStateV0(_ context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(req.RawState.JSON, &raw); err != nil {
-		resp.Diagnostics.AddError("Error reading prior firewall state", err.Error())
-		return
-	}
-	if err := upgradeFirewallRulesV0(raw); err != nil {
-		resp.Diagnostics.AddError("Error upgrading prior firewall state", err.Error())
-		return
-	}
-	out, err := json.Marshal(raw)
-	if err != nil {
-		resp.Diagnostics.AddError("Error writing upgraded firewall state", err.Error())
-		return
-	}
-	resp.DynamicValue = &tfprotov6.DynamicValue{JSON: out}
 }
 
 // upgradeFirewallRulesV0 rewrites version 0's `rules`, a list of rules each

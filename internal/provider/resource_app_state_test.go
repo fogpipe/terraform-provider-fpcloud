@@ -55,6 +55,19 @@ func TestUpgradeAppState_MountsBecomeScratchDirectories(t *testing.T) {
 	assert.Nil(t, got["volume_mounts"])
 }
 
+func TestUpgradeAppState_EveryAttributeTheSchemaLostIsDropped(t *testing.T) {
+	prior := `{"id":"a","name":"grannsnack","image":"x","replicas":2,"mode":"always-on","traffic":[],` +
+		`"database":"db","secret":{"API_KEY":"k"},"env":{"A":"1"},"health_check_path":"/healthz"}`
+	for _, version := range []int64{0, 1, 2, 3} {
+		got := upgradeAppState(t, version, prior)
+		for _, gone := range []string{"database", "secret", "mode", "traffic", "replicas", "health_check_path"} {
+			_, kept := got[gone]
+			assert.False(t, kept, "%s leaves the state from version %d", gone, version)
+		}
+		assert.Equal(t, "grannsnack", got["name"])
+	}
+}
+
 func upgradeAppState(t *testing.T, version int64, prior string) map[string]any {
 	t.Helper()
 	upgrader, ok := (&AppResource{}).UpgradeState(context.Background())[version]
@@ -64,6 +77,8 @@ func upgradeAppState(t *testing.T, version int64, prior string) map[string]any {
 		RawState: &tfprotov6.RawState{JSON: []byte(prior)},
 	}, &resp)
 	require.False(t, resp.Diagnostics.HasError(), resp.Diagnostics)
+	_, err := resp.DynamicValue.Unmarshal(schemaType(context.Background(), &AppResource{}))
+	require.NoError(t, err, "the upgraded state decodes against the current schema")
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(resp.DynamicValue.JSON, &got))
 	return got

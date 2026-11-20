@@ -313,7 +313,7 @@ func (r *SecretResource) MoveState(_ context.Context) []resource.StateMover {
 // `project` or `org`, as written, beside the computed id.
 func (r *SecretResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
 	return map[int64]resource.StateUpgrader{
-		0: rawStateUpgrader("secret",
+		0: rawStateUpgrader(r, "secret",
 			moveReference("project_id", projectReference),
 			moveReference("organization_id", orgReference)),
 	}

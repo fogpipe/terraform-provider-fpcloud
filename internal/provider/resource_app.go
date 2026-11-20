@@ -1625,21 +1625,11 @@ var _ resource.ResourceWithUpgradeState = &AppResource{}
 func (r *AppResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
 	v2 := moveReference("project_id", projectReference)
 	return map[int64]resource.StateUpgrader{
-		0: rawStateUpgrader("app", upgradeAppStateV0, upgradeAppStateV1, v2, upgradeAppStateV3),
-		1: rawStateUpgrader("app", upgradeAppStateV1, v2, upgradeAppStateV3),
-		2: rawStateUpgrader("app", v2, upgradeAppStateV3),
-		3: rawStateUpgrader("app", upgradeAppStateV3),
+		0: rawStateUpgrader(r, "app", upgradeAppStateV0, upgradeAppStateV1, v2),
+		1: rawStateUpgrader(r, "app", upgradeAppStateV1, v2),
+		2: rawStateUpgrader(r, "app", v2),
+		3: rawStateUpgrader(r, "app"),
 	}
-}
-
-// upgradeAppStateV3 drops the shared health check, which left the schema: an
-// app's probes are its `probes` block alone, and the API reads back the
-// health check it had as probes.
-func upgradeAppStateV3(raw map[string]json.RawMessage) error {
-	for _, k := range []string{"health_check_path", "health_check_timeout", "health_check_interval", "health_check_retries"} {
-		delete(raw, k)
-	}
-	return nil
 }
 
 // upgradeAppStateV1 rewrites version 1's mounts, {source, name, mount_path,
@@ -1682,12 +1672,9 @@ func upgradeAppStateV1(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// upgradeAppStateV0 drops `mode` and `traffic`, which left the schema when the
-// serverless runtime was deleted; the framework refuses prior state carrying
-// an attribute the schema no longer has.
+// upgradeAppStateV0 translates `replicas`, the one attribute removed before the
+// schema was versioned that carries meaning.
 func upgradeAppStateV0(raw map[string]json.RawMessage) error {
-	delete(raw, "mode")
-	delete(raw, "traffic")
 	// `replicas` was a fixed size beside bounds nothing read; both bounds now
 	// equal the count it ran, so a config rewritten from `replicas = n` to
 	// `min_scale = max_scale = n` plans no change.

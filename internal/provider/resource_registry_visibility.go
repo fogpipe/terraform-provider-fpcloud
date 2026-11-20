@@ -239,7 +239,7 @@ func (r *RegistryVisibilityResource) ImportState(ctx context.Context, req resour
 // written, beside the computed `project_id`.
 func (r *RegistryVisibilityResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
 	return map[int64]resource.StateUpgrader{
-		0: rawStateUpgrader("registry visibility", moveReference("project_id", projectReference)),
+		0: rawStateUpgrader(r, "registry visibility", moveReference("project_id", projectReference)),
 	}
 }
 

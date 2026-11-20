@@ -326,7 +326,7 @@ func (r *ServiceAccountResource) ImportState(ctx context.Context, req resource.I
 // `project` or `org`, as written, beside the computed id.
 func (r *ServiceAccountResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
 	return map[int64]resource.StateUpgrader{
-		0: rawStateUpgrader("service account",
+		0: rawStateUpgrader(r, "service account",
 			moveReference("project_id", projectReference),
 			moveReference("organization_id", orgReference)),
 	}

@@ -257,6 +257,6 @@ func (r *BillingBudgetResource) ImportState(ctx context.Context, req resource.Im
 // beside the computed `organization_id`.
 func (r *BillingBudgetResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
 	return map[int64]resource.StateUpgrader{
-		0: rawStateUpgrader("billing budget", moveReference("org_id", orgReference)),
+		0: rawStateUpgrader(r, "billing budget", moveReference("org_id", orgReference)),
 	}
 }

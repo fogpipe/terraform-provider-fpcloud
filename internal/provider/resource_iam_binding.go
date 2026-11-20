@@ -368,8 +368,8 @@ func (r *IAMBindingResource) UpgradeState(context.Context) map[int64]resource.St
 		moveReference("org_id", orgReference),
 	}
 	return map[int64]resource.StateUpgrader{
-		0: rawStateUpgrader("IAM binding", append([]func(map[string]json.RawMessage) error{upgradeIAMBindingStateV0}, v1...)...),
-		1: rawStateUpgrader("IAM binding", v1...),
+		0: rawStateUpgrader(r, "IAM binding", append([]func(map[string]json.RawMessage) error{upgradeIAMBindingStateV0}, v1...)...),
+		1: rawStateUpgrader(r, "IAM binding", v1...),
 	}
 }
 
@@ -383,8 +383,6 @@ func upgradeIAMBindingStateV0(raw map[string]json.RawMessage) error {
 	}
 	member, _ := json.Marshal(joinMember(memberType, memberID))
 	raw["member"] = member
-	delete(raw, "member_type")
-	delete(raw, "member_id")
 	if _, ok := raw["org_id"]; !ok {
 		raw["org_id"] = json.RawMessage("null")
 	}

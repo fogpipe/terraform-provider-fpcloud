@@ -257,9 +257,9 @@ func resolveReference(ctx context.Context, c *client.Client, k referenceKind, re
 // state's raw attributes in order. The framework does not chain upgraders:
 // each is handed the state as its version wrote it and returns the current
 // version's, so an upgrader from an older version lists every step since.
-func rawStateUpgrader(what string, steps ...func(map[string]json.RawMessage) error) resource.StateUpgrader {
+func rawStateUpgrader(r resource.Resource, what string, steps ...func(map[string]json.RawMessage) error) resource.StateUpgrader {
 	return resource.StateUpgrader{
-		StateUpgrader: func(_ context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+		StateUpgrader: func(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
 			var raw map[string]json.RawMessage
 			if err := json.Unmarshal(req.RawState.JSON, &raw); err != nil {
 				resp.Diagnostics.AddError("Error reading prior "+what+" state", err.Error())
@@ -271,7 +271,12 @@ func rawStateUpgrader(what string, steps ...func(map[string]json.RawMessage) err
 					return
 				}
 			}
-			out, err := json.Marshal(raw)
+			stepped, err := json.Marshal(raw)
+			if err != nil {
+				resp.Diagnostics.AddError("Error writing upgraded "+what+" state", err.Error())
+				return
+			}
+			out, err := pruneToSchema(stepped, schemaType(ctx, r))
 			if err != nil {
 				resp.Diagnostics.AddError("Error writing upgraded "+what+" state", err.Error())
 				return

@@ -585,7 +585,7 @@ func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 // written, beside the computed `project_id`.
 func (r *DatabaseResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
 	return map[int64]resource.StateUpgrader{
-		0: rawStateUpgrader("database", moveReference("project_id", projectReference)),
+		0: rawStateUpgrader(r, "database", moveReference("project_id", projectReference)),
 	}
 }
 

@@ -90,8 +90,8 @@ func (r *DomainResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Description: "Attachment mode: \"verified\" (default — TXT ownership + DNS pointing + " +
 					"HTTP-01 cert), \"on_demand\" (DNS pointing only, HTTP-01 cert on attach — meant for an " +
 					"app's own backend attaching its end users' domains), or \"dns\" (TXT ownership and a " +
-					"DNS-01 cert through a one-time _acme-challenge CNAME, no pointing check — for a host " +
-					"behind a proxy that terminates TLS, or a leading \"*.\" label; requires a DNS-01 issuer " +
+					"DNS-01 cert through a one-time _acme-challenge CNAME, no pointing check — for a site " +
+					"moving here from another host, a host behind a proxy that terminates TLS, or a leading \"*.\" label; requires a DNS-01 issuer " +
 					"configured on the platform). A \"*.\" hostname requires the dns mode. The " +
 					"API has no update path for this field, so changing it replaces the domain.",
 				Optional: true,
@@ -134,7 +134,7 @@ func (r *DomainResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed:    true,
 			},
 			"tls_status": schema.StringAttribute{
-				Description: "The TLS certificate status for the domain.",
+				Description: "The TLS certificate status for the domain: `issued` once its certificate is live. A `dns`-mode domain moving from another host issues before its DNS points here, so `issued` is when switching DNS drops no visitor.",
 				Computed:    true,
 			},
 			"tls_reason": schema.StringAttribute{

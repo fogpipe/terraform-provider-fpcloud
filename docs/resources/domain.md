@@ -42,7 +42,7 @@ resource "fpcloud_domain" "shop" {
 
 ### Optional
 
-- `mode` (String) Attachment mode: "verified" (default — TXT ownership + DNS pointing + HTTP-01 cert), "on_demand" (DNS pointing only, HTTP-01 cert on attach — meant for an app's own backend attaching its end users' domains), or "dns" (TXT ownership and a DNS-01 cert through a one-time _acme-challenge CNAME, no pointing check — for a host behind a proxy that terminates TLS, or a leading "*." label; requires a DNS-01 issuer configured on the platform). A "*." hostname requires the dns mode. The API has no update path for this field, so changing it replaces the domain.
+- `mode` (String) Attachment mode: "verified" (default — TXT ownership + DNS pointing + HTTP-01 cert), "on_demand" (DNS pointing only, HTTP-01 cert on attach — meant for an app's own backend attaching its end users' domains), or "dns" (TXT ownership and a DNS-01 cert through a one-time _acme-challenge CNAME, no pointing check — for a site moving here from another host, a host behind a proxy that terminates TLS, or a leading "*." label; requires a DNS-01 issuer configured on the platform). A "*." hostname requires the dns mode. The API has no update path for this field, so changing it replaces the domain.
 - `routes` (Attributes List) Path prefixes of this hostname served by a DIFFERENT app, so one origin can be split across several apps (a frontend and an API deploy independently without CORS or cross-site cookies). The app named by app_id above stays the catch-all: it serves "/" and every path no route claims. The longest matching prefix wins, and the request path is NOT rewritten — an app at '/api/' receives '/api/orders'. One certificate covers the host however many apps sit behind it. Backends must be always-on apps in the same project as the domain. (see [below for nested schema](#nestedatt--routes))
 
 ### Read-Only
@@ -52,7 +52,7 @@ resource "fpcloud_domain" "shop" {
 - `status` (String) The current status of the domain.
 - `tls_next_attempt` (String) When the next issuance attempt is, RFC 3339, while one is pending after a failure.
 - `tls_reason` (String) What is in the certificate's way while an issuance or a renewal fails: dns (the name does not point here; the domain's verification says what to point it at), unreachable (something in front of the platform answers the check), rate_limited (the certificate authority, for now) or platform (ours, and alerted). Empty when nothing is.
-- `tls_status` (String) The TLS certificate status for the domain.
+- `tls_status` (String) The TLS certificate status for the domain: `issued` once its certificate is live. A `dns`-mode domain moving from another host issues before its DNS points here, so `issued` is when switching DNS drops no visitor.
 - `verification_token` (String) The value to publish as a TXT record at `_fpcloud-challenge.<domain>` to prove you own the name. Fogpipe issues it when the domain is created and checks for it before pointing anything at your app, so a plan that manages its own DNS feeds this straight into the record — there is nothing to copy by hand.
 - `verified_at` (String) The time ownership was last proved, or empty while it is still unproved.
 

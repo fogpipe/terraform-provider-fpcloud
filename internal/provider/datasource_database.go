@@ -80,7 +80,8 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 			},
 			"status": schema.StringAttribute{
 				Description: "Where the database stands: `provisioning`, `running`, `degraded` when the platform " +
-					"has not been managing it for longer than a switchover or a restart takes, `deleting`.",
+					"has not been managing it for longer than a switchover or a restart takes, `unknown` when " +
+					"its state could not be read just now, `deleting`.",
 				Computed: true,
 			},
 			// The size is read from the live cluster, so it reports what the

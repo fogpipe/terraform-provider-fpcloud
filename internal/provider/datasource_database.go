@@ -25,7 +25,6 @@ type DatabaseDataSourceModel struct {
 	DisplayName types.String `tfsdk:"display_name"`
 	Engine      types.String `tfsdk:"engine"`
 	Version     types.String `tfsdk:"version"`
-	Plan        types.String `tfsdk:"plan"`
 	Status      types.String `tfsdk:"status"`
 	CPU         types.String `tfsdk:"cpu"`
 	Memory      types.String `tfsdk:"memory"`
@@ -33,6 +32,7 @@ type DatabaseDataSourceModel struct {
 	Instances   types.Int64  `tfsdk:"instances"`
 	Host        types.String `tfsdk:"host"`
 	ReadHost    types.String `tfsdk:"read_host"`
+	PoolHost    types.String `tfsdk:"pool_host"`
 	Port        types.Int64  `tfsdk:"port"`
 	CreatedAt   types.String `tfsdk:"created_at"`
 }
@@ -74,10 +74,6 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Description: "The database engine version.",
 				Computed:    true,
 			},
-			"plan": schema.StringAttribute{
-				Description: "The database plan (e.g. starter, standard, premium).",
-				Computed:    true,
-			},
 			"status": schema.StringAttribute{
 				Description: "Where the database stands: `provisioning`, `running`, `degraded` when the platform " +
 					"has not been managing it for longer than a switchover or a restart takes, `unknown` when " +
@@ -109,6 +105,10 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 			},
 			"read_host": schema.StringAttribute{
 				Description: "Cluster-internal hostname of the database's REPLICA, an address of the database's own, on the same `port` and with the same credential — a replica is not a second identity. Every managed database has one, because every one is two instances. **Reads here can be stale**: replication is asynchronous, so a read-your-own-write can miss; send anything that must see everything committed so far to `host`. Empty when the platform cannot derive a replica endpoint for the database, which means there is none — never fall back to `host` under this name.",
+				Computed:    true,
+			},
+			"pool_host": schema.StringAttribute{
+				Description: "Cluster-internal hostname of the database's pooler, PgBouncer in front of the primary, an address of the database's own, on the same `port` and with the same credential. Empty while the pooler is off.",
 				Computed:    true,
 			},
 			"port": schema.Int64Attribute{
@@ -163,7 +163,6 @@ func (d *DatabaseDataSource) Read(ctx context.Context, req datasource.ReadReques
 	data.DisplayName = types.StringValue(db.DisplayName)
 	data.Engine = types.StringValue(db.Engine)
 	data.Version = types.StringValue(db.Version)
-	data.Plan = types.StringValue(db.Plan)
 	data.Status = types.StringValue(db.Status)
 	data.CPU = types.StringValue(db.CPU)
 	data.Memory = types.StringValue(db.Memory)
@@ -177,6 +176,7 @@ func (d *DatabaseDataSource) Read(ctx context.Context, req datasource.ReadReques
 	// an app would otherwise send stale-tolerant reads to the primary while the
 	// attribute claimed a replica served them (fogpipe/cloud-workspace#862).
 	data.ReadHost = types.StringValue(db.ReadHost)
+	data.PoolHost = types.StringValue(db.PoolHost)
 	data.Port = types.Int64Value(int64(db.Port))
 	data.CreatedAt = types.StringValue(db.CreatedAt.Format("2006-01-02T15:04:05Z"))
 

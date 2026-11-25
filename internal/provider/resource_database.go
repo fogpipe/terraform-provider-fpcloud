@@ -51,7 +51,6 @@ type DatabaseResourceModel struct {
 	DisplayName types.String `tfsdk:"display_name"`
 	Engine      types.String `tfsdk:"engine"`
 	Version     types.String `tfsdk:"version"`
-	Plan        types.String `tfsdk:"plan"`
 	CPU         types.String `tfsdk:"cpu"`
 	Memory      types.String `tfsdk:"memory"`
 	Storage     types.String `tfsdk:"storage"`
@@ -61,6 +60,7 @@ type DatabaseResourceModel struct {
 	Status      types.String `tfsdk:"status"`
 	Host        types.String `tfsdk:"host"`
 	ReadHost    types.String `tfsdk:"read_host"`
+	PoolHost    types.String `tfsdk:"pool_host"`
 	Secrets     types.Map    `tfsdk:"secrets"`
 	Port        types.Int64  `tfsdk:"port"`
 	// PasswordRotation is a value of the practitioner's choosing; changing it
@@ -140,14 +140,6 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"plan": schema.StringAttribute{
-				Description: "Legacy size tier, derived by the server from cpu/memory (e.g. \"starter\", \"custom\"). " +
-					"Read-only — size the database with cpu/memory/storage instead.",
-				Computed: true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
 			// cpu/memory/storage keep server-matching defaults so a database
 			// declared without a size still plans as a size. All four are
 			// echoed by the API, read from the live cluster, so a change made
@@ -211,6 +203,10 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			},
 			"read_host": schema.StringAttribute{
 				Description: "Cluster-internal hostname of the database's REPLICA, an address of the database's own, on the same `port` and with the same credential — a replica is not a second identity. Every managed database has one, because every one is two instances. **Reads here can be stale**: replication is asynchronous, so a read-your-own-write can miss; send anything that must see everything committed so far to `host`. Empty when the platform cannot derive a replica endpoint for the database, which means there is none — never fall back to `host` under this name.",
+				Computed:    true,
+			},
+			"pool_host": schema.StringAttribute{
+				Description: "Cluster-internal hostname of the database's pooler, PgBouncer in front of the primary, an address of the database's own, on the same `port` and with the same credential. Empty while `pooler` is false. It pools per transaction, so a session that needs prepared statements, LISTEN or an advisory lock connects to `host`.",
 				Computed:    true,
 			},
 			"port": schema.Int64Attribute{
@@ -287,7 +283,7 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	// cpu/memory/storage/pooler are accepted by CreateDatabase; the server applies
-	// its defaults for any left unset. The legacy `plan` attribute is ignored.
+	// its defaults for any left unset.
 	apiReq := client.CreateDatabaseRequest{
 		Name:        plan.Name.ValueString(),
 		DisplayName: plan.DisplayName.ValueString(),
@@ -545,7 +541,6 @@ func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 	state.DisplayName = types.StringValue(db.DisplayName)
 	state.Engine = types.StringValue(db.Engine)
 	state.Version = types.StringValue(db.Version)
-	state.Plan = types.StringValue(db.Plan)
 	state.Pooler = types.BoolValue(db.Pooler)
 	state.Extensions = extensionSet(db.Extensions)
 	state.Status = types.StringValue(db.Status)
@@ -576,6 +571,7 @@ func mapDatabaseToState(db *client.Database, state *DatabaseResourceModel) {
 	// an app would otherwise send stale-tolerant reads to the primary while the
 	// attribute claimed a replica served them (fogpipe/cloud-workspace#862).
 	state.ReadHost = types.StringValue(db.ReadHost)
+	state.PoolHost = types.StringValue(db.PoolHost)
 	state.Secrets, _ = types.MapValueFrom(context.Background(), types.StringType, orEmptyMap(db.Secrets))
 	state.Port = types.Int64Value(int64(db.Port))
 }

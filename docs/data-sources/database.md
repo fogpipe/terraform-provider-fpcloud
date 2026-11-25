@@ -29,7 +29,7 @@ Use this data source to read a Fogpipe managed database by ID.
 - `instances` (Number) Number of Postgres instances (1 = single, >1 = HA replicas).
 - `memory` (String) Memory request/limit the database runs under (e.g. "2Gi").
 - `name` (String) The database name.
-- `plan` (String) The database plan (e.g. starter, standard, premium).
+- `pool_host` (String) Cluster-internal hostname of the database's pooler, PgBouncer in front of the primary, an address of the database's own, on the same `port` and with the same credential. Empty while the pooler is off.
 - `port` (Number) The database port.
 - `project_id` (String) The ID of the project this database belongs to.
 - `read_host` (String) Cluster-internal hostname of the database's REPLICA, an address of the database's own, on the same `port` and with the same credential — a replica is not a second identity. Every managed database has one, because every one is two instances. **Reads here can be stale**: replication is asynchronous, so a read-your-own-write can miss; send anything that must see everything committed so far to `host`. Empty when the platform cannot derive a replica endpoint for the database, which means there is none — never fall back to `host` under this name.

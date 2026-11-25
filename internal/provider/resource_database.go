@@ -179,7 +179,7 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Computed: true,
 			},
 			"pooler": schema.BoolAttribute{
-				Description: "Whether a PgBouncer connection pooler is provisioned, reached at the owner URL's host with `-rw` replaced by `-pooler`. Mutable in place.",
+				Description: "Whether a PgBouncer connection pooler is provisioned. It is reached at an address of its own, which `fpcloud db get` shows as the pool address; never build it from `host`. Mutable in place.",
 				Optional:    true,
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
@@ -210,7 +210,7 @@ func (r *DatabaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Computed: true,
 			},
 			"read_host": schema.StringAttribute{
-				Description: "Cluster-internal hostname of the database's REPLICA (CNPG's `-ro` Service), on the same `port` and with the same credential — a replica is not a second identity. Every managed database has one, because every one is two instances. **Reads here can be stale**: replication is asynchronous, so a read-your-own-write can miss; send anything that must see everything committed so far to `host`. Empty when the platform cannot derive a replica endpoint for the database, which means there is none — never fall back to `host` under this name.",
+				Description: "Cluster-internal hostname of the database's REPLICA, an address of the database's own, on the same `port` and with the same credential — a replica is not a second identity. Every managed database has one, because every one is two instances. **Reads here can be stale**: replication is asynchronous, so a read-your-own-write can miss; send anything that must see everything committed so far to `host`. Empty when the platform cannot derive a replica endpoint for the database, which means there is none — never fall back to `host` under this name.",
 				Computed:    true,
 			},
 			"port": schema.Int64Attribute{
